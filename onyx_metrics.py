@@ -29,6 +29,7 @@ def read_state(path=None):
 
 
 def atomic_json(path, value):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_suffix('.tmp')
     with tmp.open('w', encoding='utf-8') as f:
@@ -181,8 +182,60 @@ def sample_metrics(traffic, force=False):
             if delta > 0: point['cpu'] = max(0,min(100,100*(1-(sum(values[3:5])-ticks[1])/delta)))
         history = [h for h in data.get('history', []) if now - 86400 <= h.get('time', 0) < now]
         history.append({k: point[k] for k in ('time', 'up_rate', 'down_rate', 'cpu')})
-        # Ten-second sampling keeps a full day plus one point.
-        atomic_json(STATE, {'latest': point, 'history': history[-8641:]})
+        rollup = _roll_hourly(data.get('rollup', []), history, now)
+        # Ten-second sampling keeps a full day plus one point; rollup keeps 30
+        # days of hourly aggregates for the week/month dashboard ranges.
+        atomic_json(STATE, {'latest': point, 'history': history[-8641:], 'rollup': rollup[-721:]})
+
+
+ROLLUP_KEYS = ('up_rate', 'down_rate', 'cpu')
+
+
+def _roll_hourly(rollup, history, now):
+    """Свернуть хвост истории в часовые точки (средние) — один раз в час."""
+    if not history:
+        return rollup
+    hour = int(history[-1]['time']) // 3600 * 3600
+    last = rollup[-1].get('time', 0) // 3600 * 3600 if rollup else 0
+    if hour <= last:
+        return rollup
+    fresh = [p for p in history if hour <= p.get('time', 0) < hour + 3600]
+    if len(fresh) < 3:
+        return rollup  # слишком мало измерений за час — не фабрикуем агрегат
+    point = {'time': hour + 3599, 'samples': len(fresh)}
+    for key in ROLLUP_KEYS:
+        values = [p[key] for p in fresh if p.get(key) is not None]
+        point[key] = round(sum(values) / len(values), 2) if values else None
+    values = [p['cpu'] for p in fresh if p.get('cpu') is not None]
+    if values:
+        point['cpu_max'] = round(max(values), 1)
+    return [r for r in rollup if hour - 30 * 86400 <= r.get('time', 0) < hour] + [point]
+
+
+def _range_series(data, hours, now):
+    """Точки для графика: 24 ч — сырая история, дольше — часовые агрегаты."""
+    cutoff = now - hours * 3600
+    if hours <= 24:
+        return [p for p in data.get('history', []) if p.get('time', 0) >= cutoff]
+    series = [p for p in data.get('rollup', []) if p.get('time', 0) >= cutoff]
+    # текущий (неполный) час добавляем из сырой истории, иначе график отстанет на час
+    current_hour = now // 3600 * 3600
+    tail = [p for p in data.get('history', []) if p.get('time', 0) >= max(cutoff, current_hour)]
+    if len(tail) >= 2:
+        point = {'time': now}
+        for key in ROLLUP_KEYS:
+            values = [p[key] for p in tail if p.get(key) is not None]
+            point[key] = round(sum(values) / len(values), 2) if values else None
+        series.append(point)
+    return series
+
+
+def dashboard_data(hours=1):
+    data = read_state()
+    now = int(time.time())
+    return {'latest': data.get('latest', {}), 'history': _range_series(data, hours, now),
+            'rollup': data.get('rollup', []),
+            'collector_error': read_state(ERROR)}
 
 
 def collect_once():
@@ -196,13 +249,6 @@ def collect_once():
         # No secrets or raw command output in the HTTP response.
         atomic_json(ERROR, {'time':int(time.time()),'kind':type(exc).__name__})
         raise
-
-
-def dashboard_data(hours=1):
-    data = read_state()
-    cutoff = int(time.time()) - hours * 3600
-    return {'latest': data.get('latest', {}), 'history': [p for p in data.get('history', []) if p.get('time', 0) >= cutoff],
-            'collector_error': read_state(ERROR)}
 
 
 if __name__ == '__main__':

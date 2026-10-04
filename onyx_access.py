@@ -23,26 +23,35 @@ def device_hash(user_agent):
     return hashlib.sha256(str(user_agent or "").encode("utf-8")).hexdigest()[:16]
 
 
-def record_login(state, user, role, ip, user_agent):
-    """Append one successful login; returns True when the device is new."""
+def record_login(state, user, role, ip, user_agent, ok=True):
+    """Append one login attempt; returns True when the device is new.
+
+    Failed attempts are kept in the same journal with ok=False, so the
+    settings page shows both successful sessions and brute-force noise."""
     state = state if isinstance(state, dict) else {}
-    devices = state.setdefault("seen_devices", [])
-    digest = device_hash(user_agent)
-    fresh = digest not in devices
-    if fresh:
-        devices.append(digest)
-        del devices[:-MAX_DEVICES]
+    fresh = False
+    if ok:
+        devices = state.setdefault("seen_devices", [])
+        digest = device_hash(user_agent)
+        fresh = digest not in devices
+        if fresh:
+            devices.append(digest)
+            del devices[:-MAX_DEVICES]
     logins = state.setdefault("logins", [])
     logins.append({"ts": int(time.time()), "user": str(user or "")[:64],
                    "role": role if role in ("admin", "observer") else "admin",
                    "ip": str(ip or "")[:64], "device": str(user_agent or "")[:120],
-                   "new_device": fresh})
+                   "ok": bool(ok), "new_device": fresh})
     del logins[:-MAX_LOGINS]
     return fresh
 
 
-def last_logins(state, count=10):
+def last_logins(state, count=10, only_ok=None):
     logins = state.get("logins") if isinstance(state.get("logins"), list) else []
+    if only_ok is True:
+        logins = [item for item in logins if item.get("ok", True)]
+    elif only_ok is False:
+        logins = [item for item in logins if not item.get("ok", True)]
     return list(reversed(logins))[:count]
 
 

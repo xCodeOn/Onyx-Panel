@@ -5,7 +5,7 @@ Linux-only modules stubbed, and the request handlers are exercised through
 fake requests (login, 2FA, observer role, external API, settings pages).
 Run from the repository root:  python tests/test_server.py
 """
-import io, json, os, re, sys, types, importlib.util, tempfile, urllib.parse
+import io, json, os, re, hashlib, sys, types, importlib.util, tempfile, urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -17,12 +17,23 @@ _end = _lines.index("PY", _start + 1)
 _code = "\n".join(_lines[_start + 1:_end])
 for _m in ('grp', 'pwd'): sys.modules.setdefault(_m, types.ModuleType(_m))
 _tmp = tempfile.mkdtemp()
+# Песочница путей: серверные константы /var/lib/onyx-panel и /etc/onyx-panel
+# переезжают во временный каталог, чтобы e2e работал без root и на macOS.
+for _sysdir in ('/var/lib/onyx-panel', '/etc/onyx-panel'):
+    _code = _code.replace(_sysdir, os.path.join(_tmp, _sysdir.strip('/').replace('/', '_')))
 _extract_path = os.path.join(_tmp, "onyx_server_extract.py")
 open(_extract_path, "w", encoding="utf-8").write(_code)
 import ast as _ast
 _ast.parse(_code, feature_version=(3, 10))  # Ubuntu 22.04 ships Python 3.10
 _spec = importlib.util.spec_from_file_location("onyx_server_extract", _extract_path)
 srv = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(srv)
+
+# macOS/старый Python без scrypt: в тестовом процессе подменяем на pbkdf2 —
+# важно только что hash_password/check_password согласованы между собой.
+if not hasattr(hashlib, "scrypt"):
+    def _scrypt_shim(password, *, salt, n, r, p, dklen):
+        return hashlib.pbkdf2_hmac("sha256", password, salt, max(10000, n // 16), dklen=dklen)
+    hashlib.scrypt = _scrypt_shim
 
 import onyx_webapi, onyx_totp
 import onyx_telegram as tg
