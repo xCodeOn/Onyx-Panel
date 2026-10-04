@@ -112,7 +112,7 @@ fi
 MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 [[ -s "$PRIMARY_SECRET" ]] || die "Primary install-time secret not found."
 [[ -s "$LOGO_SOURCE" ]] || die "Panel logo file is missing: onyx-logo.png"
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
 FLAG_ARCHIVE="$BASE/onyx-panel/flags.tar.gz"
@@ -457,9 +457,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 1.9.1..."
+    echo "Updating Onyx Panel 2.0.0..."
 else
-    echo "Configuring Onyx Panel 1.9.1..."
+    echo "Configuring Onyx Panel 2.0.0..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -492,7 +492,7 @@ fi
 
 echo "[1/6] Writing manager..."
 
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
     install -o root -g root -m 0644 "$BASE/$module" "$APP_DIR/$module"
 done
@@ -547,6 +547,8 @@ import onyx_awg
 import onyx_firewall
 import onyx_cascade
 import onyx_routing
+import onyx_warp
+import onyx_reality
 
 USERS="/etc/onyx-panel/users.json"
 PROFILES="/etc/tproxy-server/profiles.json"
@@ -572,6 +574,8 @@ TRAFFIC_FILE="/var/lib/onyx-panel/traffic.json"
 TRAFFIC_LOCK="/var/lib/onyx-panel/traffic.lock"
 CASCADES_FILE="/var/lib/onyx-panel/cascades.json"
 ROUTING_FILE="/var/lib/onyx-panel/routing.json"
+WARP_FILE="/var/lib/onyx-panel/warp.json"
+REALITY_FILE="/var/lib/onyx-panel/reality.json"
 UFW_HYSTERIA_MARKER="/etc/onyx-panel/hysteria-ufw-owned"
 UFW_MTPROTO_MARKER="/etc/onyx-panel/mtproto-ufw-owned"
 UFW_AWG_MARKER="/etc/onyx-panel/awg-ufw-owned"
@@ -773,8 +777,10 @@ def sync_firewall(d):
     route=run("ip","-4","route","show","default").stdout or ""
     match=re.search(r"\bdev\s+([A-Za-z0-9_.:-]+)",route)
     external_if=match.group(1) if match else ""
+    reality_state=onyx_reality.load(REALITY_FILE)
+    reality_tcp={int(reality_state["port"])} if reality_state.get("enabled") else set()
     onyx_firewall.reconcile(
-        tcp={80,443,*mtproto_ports},
+        tcp={80,443,*mtproto_ports,*reality_tcp},
         udp=({HYSTERIA_PORT} if hysteria_enabled else set()) | {int(u["backend_port"]) for u in awg_users},
         routes={(u["awg_interface"],external_if) for u in awg_users if external_if},
     )
@@ -818,6 +824,11 @@ def sync_xray(d):
         elif protocol=="hysteria":
             hysteria.append({"auth":u["secret"],"email":"panel:"+u["id"],"level":0})
     inbounds=[]
+    # Reality-вход: тот же набор vless-пользователей с flow vision; пока выключен
+    # или клиентов нет — конфиг не меняется.
+    reality_state=onyx_reality.load(REALITY_FILE)
+    reality_inbound=onyx_reality.inbound(reality_state,d.get("users",[]))
+    if reality_inbound: inbounds.append(reality_inbound)
     if vless:
         inbounds.append({
             "tag":"vless-xhttp",
@@ -871,10 +882,17 @@ def sync_xray(d):
     # extend the direct default; empty registries yield today's config.
     routing_outbounds,routing_rules=onyx_routing.xray_additions(
         onyx_routing.load(ROUTING_FILE))
+    # WARP-выход для отмеченных клиентов: после правил вкладки «Маршрутизация»
+    # (торренты и прямые списки сильнее WARP) и до каскадов (warp-клиенты
+    # каскад не видят). Пустой список клиентов = конфиг без warp вообще.
+    warp_enabled=[u["id"] for u in d.get("users",[])
+                  if u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria")
+                  and str(u.get("id","")) in set(onyx_warp.load(WARP_FILE).get("users",[]))]
+    warp_outbounds,warp_rules=onyx_warp.xray_additions(onyx_warp.load(WARP_FILE),warp_enabled)
     cascade_outbounds,cascade_rules=onyx_cascade.xray_additions(
         onyx_cascade.load_cascades(CASCADES_FILE),d.get("users",[]))
-    extra_outbounds=routing_outbounds+cascade_outbounds
-    extra_rules=routing_rules+cascade_rules
+    extra_outbounds=routing_outbounds+warp_outbounds+cascade_outbounds
+    extra_rules=routing_rules+warp_rules+cascade_rules
     if extra_outbounds:
         config["outbounds"]+=extra_outbounds
     if extra_rules:
@@ -941,7 +959,7 @@ def _xray_traffic():
     result={}
     if run("systemctl","is-active","--quiet",XRAY_SERVICE).returncode:
         return result
-    p=run(XRAY_BIN,"api","statsquery","--server="+XRAY_API,timeout=15)
+    p=run(XRAY_BIN,"api","statsquery","--server="+XRAY_API,timeout=8)
     if p.returncode: return result
     try:
         start=p.stdout.find("{")
@@ -1490,11 +1508,11 @@ EOF
 
 cat > /etc/systemd/system/onyx-panel-traffic.timer <<'EOF'
 [Unit]
-Description=Collect Onyx Panel traffic every 10 seconds
+Description=Collect Onyx Panel traffic every 5 seconds
 
 [Timer]
-OnActiveSec=5s
-OnUnitInactiveSec=10s
+OnActiveSec=2s
+OnUnitInactiveSec=5s
 AccuracySec=1s
 Unit=onyx-panel-traffic.service
 
@@ -1730,7 +1748,7 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from onyx_subscriptions import PREFIX as SUB_PREFIX
 from onyx_panel_extras import preview_document
-from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon
+from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
 import onyx_components as components
@@ -1739,6 +1757,8 @@ import onyx_openflux as openflux
 import onyx_awg as awg
 import onyx_cascade as cascade_api
 import onyx_routing as routing_api
+import onyx_warp as warp_api
+import onyx_reality as reality_api
 import onyx_telegram as telegram_api
 import onyx_totp
 import onyx_access
@@ -1775,9 +1795,13 @@ SITE_DRAFT="/var/lib/onyx-panel/site-draft.html"
 CUSTOM_PRESETS_FILE="/var/lib/onyx-panel/custom-presets.json"
 API_KEY_FILE="/var/lib/onyx-panel/api.key"
 NODES_FILE="/var/lib/onyx-panel/nodes.json"
+NODES_TRAFFIC_FILE="/var/lib/onyx-panel/nodes-traffic.json"
+NODES_TRAFFIC={"loaded":False,"points":[]}
 LOCATION_FILE="/var/lib/onyx-panel/location.json"
 CASCADES_FILE="/var/lib/onyx-panel/cascades.json"
 ROUTING_FILE="/var/lib/onyx-panel/routing.json"
+WARP_FILE="/var/lib/onyx-panel/warp.json"
+REALITY_FILE="/var/lib/onyx-panel/reality.json"
 RESTART_STATUS="/var/lib/onyx-panel/restart-status.json"
 API_KEY=node_api.ensure_api_key(API_KEY_FILE)
 # Live node snapshot for the dashboard: fetched in the background so a slow or
@@ -2262,61 +2286,119 @@ def purge_remote_profiles_async(subscription,device_id=None):
     threading.Thread(target=purge_remote_profiles,args=(subscription,device_id),
                      name="onyx-node-cleanup",daemon=True).start()
 
+def warp_profile_ids(client_id):
+    """Client id (subscription or direct user) -> Xray user ids for the WARP
+    rule; empty for clients WARP cannot route (web/mtproto/awg/openflux)."""
+    ids=[u["id"] for u in users()
+         if str(u.get("subscription_id",""))==str(client_id)
+         and u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria")]
+    if ids: return ids
+    user=next((u for u in users() if str(u.get("id",""))==str(client_id)),None)
+    if user and user.get("protocol","web") in ("vless","hysteria"):
+        return [user["id"]]
+    return []
+
+def sync_routing_to_nodes():
+    """Push the panel routing policy to every enabled node: traffic that
+    terminates on a node must follow the same direct and block rules as the
+    panel itself. Runs in a background thread — a node applies its Xray
+    synchronously, which can take tens of seconds. Nodes without the endpoint
+    (panel older than 1.9.22) are skipped with a log line."""
+    data=routing_api.load(ROUTING_FILE)
+    payload={"direct_ips":data.get("direct_ips",[]),"direct_domains":data.get("direct_domains",[]),
+             "ipv4_domains":data.get("ipv4_domains",[]),"block_torrents":bool(data.get("block_torrents"))}
+    try: nodes=node_api.load_nodes(NODES_FILE)
+    except Exception:
+        print("routing sync skipped: registry unreadable",file=sys.stderr,flush=True); return
+    for node in nodes:
+        if not node.get("enabled",True): continue
+        try: node_api.request(node,"POST",node_api.API_PREFIX+"/routing",payload,timeout=90)
+        except node_api.NodeError as exc:
+            print("routing sync to node failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("routing sync to node failed:",node.get("url"),type(exc).__name__,file=sys.stderr,flush=True)
+
 def federation_names():
-    """federation_id -> (subscription, device) labels, rebuilt from the registry."""
+    """federation_id -> subscription/device labels with the owning client id."""
     mapping={}
     for sub in subscription_registry():
         for device in sub.get("devices",[]) or []:
             if device.get("revoked"): continue
-            mapping[federation_id(sub.get("id",""),device.get("id",""))]=(sub.get("name","Подписка"),device.get("name","Устройство"))
+            mapping[federation_id(sub.get("id",""),device.get("id",""))]={
+                "sub":sub.get("name","Подписка"),"device":device.get("name","Устройство"),
+                "sub_id":sub.get("id","")}
     return mapping
 
-def fetch_node_live(node,names):
-    """One node snapshot: totals plus federated users mapped back by id."""
-    snapshot={"url":node.get("url",""),"country_code":node.get("country_code","UN"),
+def fetch_node_live(node,names,current=""):
+    """One node snapshot: version, totals and federated users mapped back by id."""
+    snapshot={"id":node.get("id",""),"url":node.get("url",""),"country_code":node.get("country_code","UN"),
               "country_name":node.get("country_name","Сервер"),"location":node.get("name",""),
-              "enabled":bool(node.get("enabled",True)),"online":False,"error":"",
-              "rates":{"up":None,"down":None},"totals":{"up":0,"down":0},"users":[]}
+              "registry_version":str(node.get("version","") or ""),
+              "enabled":bool(node.get("enabled",True)),"online":False,"outdated":False,"error":"",
+              "version":"","rates":{"up":None,"down":None},"totals":{"up":0,"down":0},"users":[]}
     if not snapshot["enabled"]:
-        snapshot["error"]="Нода отключена в этой панели."
-        return snapshot
+        # Nothing in the panel can switch a node off, so enabled=false is stale
+        # state. The node is probed like any other; a successful answer clears
+        # the flag in the snapshot here and in the registry via sync_registry().
+        snapshot["stale_disabled"]=True
     try:
         data=node_api.metrics(node)
     except node_api.NodeError as exc:
         text=str(exc)
+        stale=snapshot.pop("stale_disabled",False)
+        # The node is reachable but has no /metrics: it predates statistics.
+        # Probe /status for the real version so the UI can say what to do.
+        try:
+            status=node_api.node_status(node)
+            snapshot["version"]=str(status.get("version","") or "")
+            if stale: snapshot["enabled"]=True
+        except Exception:
+            pass
+        snapshot["version"]=snapshot["version"] or snapshot["registry_version"]
         if "not found" in text.lower():
-            snapshot["error"]="Нода не поддерживает статистику — обновите Onyx Panel на ноде."
+            snapshot["outdated"]=True
+            snapshot["error"]=("Нода на версии "+(snapshot["version"] or "?")+" без статистики — обновите Onyx Panel на ноде: SSH → onyx-panel-update.")
         else:
             snapshot["error"]="Нода не отвечает или отклонила API-токен."
         return snapshot
     except Exception as exc:
+        snapshot.pop("stale_disabled",None)
         snapshot["error"]="Неизвестная ошибка опроса ноды."
         print("node metrics failed:",node.get("url"),type(exc).__name__,file=sys.stderr,flush=True)
         return snapshot
     totals=data.get("totals") if isinstance(data.get("totals"),dict) else {}
     snapshot["online"]=True
+    snapshot["version"]=str(data.get("version","") or "") or snapshot["registry_version"]
+    if snapshot.pop("stale_disabled",False): snapshot["enabled"]=True
     snapshot["rates"]={"up":totals.get("up_rate"),"down":totals.get("down_rate")}
     snapshot["totals"]={"up":max(0,int(totals.get("up",0) or 0)),"down":max(0,int(totals.get("down",0) or 0))}
     for profile in data.get("profiles",[]) or []:
         if not isinstance(profile,dict): continue
         label=names.get(str(profile.get("federation_id","")))
         if label is None: continue
-        snapshot["users"].append({"name":label[0],"device":label[1],
+        snapshot["users"].append({"name":label["sub"],"device":label["device"],"sub_id":label["sub_id"],
             "protocol":str(profile.get("protocol","")),"active":bool(profile.get("active")),
             "up":max(0,int(profile.get("up",0) or 0)),"down":max(0,int(profile.get("down",0) or 0))})
     snapshot["users"].sort(key=lambda u:(not u["active"],-(u["up"]+u["down"])))
+    if current and snapshot["version"] and web_updates.version_tuple(snapshot["version"])<web_updates.version_tuple(current):
+        snapshot["outdated"]=True
     return snapshot
 
 def refresh_nodes_live():
     try:
         nodes=node_api.load_nodes(NODES_FILE)
         names=federation_names()
-        worker=lambda node: fetch_node_live(node,names)
+        current=web_updates.current_version()
+        worker=lambda node: fetch_node_live(node,names,current)
         if nodes:
             with ThreadPoolExecutor(max_workers=min(8,len(nodes))) as pool:
                 data=list(pool.map(worker,nodes))
         else:
             data=[]
+        record_nodes_history(data)
+        try: node_api.sync_registry(NODES_FILE,nodes,data)
+        except Exception as exc:
+            print("node registry sync failed:",type(exc).__name__,file=sys.stderr,flush=True)
         with NODES_LIVE_LOCK:
             NODES_LIVE["stamp"]=time.time()
             NODES_LIVE["data"]=data
@@ -2330,7 +2412,7 @@ def refresh_nodes_live():
         with NODES_LIVE_LOCK:
             NODES_LIVE["fetching"]=False
 
-def nodes_live(max_age=15):
+def nodes_live(max_age=10):
     """Cached node snapshots; a background refresh runs at most every max_age seconds."""
     with NODES_LIVE_LOCK:
         stamp=float(NODES_LIVE.get("stamp",0.0))
@@ -2341,6 +2423,68 @@ def nodes_live(max_age=15):
         data=NODES_LIVE.get("data",[])
         age=int(time.time()-stamp) if stamp else None
     return {"nodes":data,"age":age}
+
+def nodes_client_summary():
+    """client id -> node traffic and activity, from the cached node snapshots."""
+    with NODES_LIVE_LOCK:
+        nodes=list(NODES_LIVE.get("data",[]))
+    out={}
+    for s in nodes:
+        if not s.get("online"): continue
+        where=s.get("location") or s.get("country_name") or s.get("url","")
+        for u in s.get("users",[]):
+            cid=u.get("sub_id")
+            if not cid: continue
+            rec=out.setdefault(cid,{"active":False,"up":0,"down":0,"nodes":[]})
+            rec["up"]+=u.get("up",0); rec["down"]+=u.get("down",0)
+            if where not in rec["nodes"]: rec["nodes"].append(where)
+            if u.get("active"): rec["active"]=True
+    return out
+
+def _load_nodes_traffic(now):
+    """Lazily read the persisted node rate history once per panel run."""
+    if NODES_TRAFFIC["loaded"]: return
+    try:
+        with open(NODES_TRAFFIC_FILE,encoding="utf-8") as f: value=json.load(f)
+        NODES_TRAFFIC["points"]=[p for p in value.get("points",[]) if isinstance(p,dict) and now-p.get("time",0)<86400] if isinstance(value,dict) else []
+    except (OSError,ValueError): pass
+    NODES_TRAFFIC["loaded"]=True
+
+def record_nodes_history(data):
+    """Persist node rate samples for the dashboard chart (24 h window)."""
+    try:
+        now=int(time.time())
+        _load_nodes_traffic(now)
+        points=NODES_TRAFFIC["points"]
+        if points and now-points[-1]["time"]<10: return
+        points.append({"time":now,"nodes":[{"id":s.get("id",""),
+            "up":(s.get("rates") or {}).get("up"),"down":(s.get("rates") or {}).get("down")}
+            for s in data if s.get("online")]})
+        NODES_TRAFFIC["points"]=[p for p in points if now-p["time"]<86400][-2880:]
+        server_metrics.atomic_json(NODES_TRAFFIC_FILE,{"points":NODES_TRAFFIC["points"]})
+    except Exception as exc:
+        print("nodes history write failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+NODE_COLORS=("#41c78d","#f06f75","#a78bfa","#22d3ee","#f472b6","#fb923c","#34d399","#60a5fa","#e879f9","#fbbf24")
+def nodes_chart_series(hours):
+    """Per-node rate series for the dashboard chart, colored by registry order."""
+    try: registry=node_api.load_nodes(NODES_FILE)
+    except Exception: registry=[]
+    cutoff=int(time.time())-hours*3600
+    _load_nodes_traffic(cutoff)
+    by_id={}
+    for p in NODES_TRAFFIC.get("points",[]):
+        if p.get("time",0)<cutoff: continue
+        for item in p.get("nodes",[]):
+            by_id.setdefault(item.get("id",""),[]).append({"time":p["time"],"up":item.get("up"),"down":item.get("down")})
+    series=[]
+    for i,node in enumerate(registry):
+        pts=by_id.pop(node.get("id",""),None)
+        if not pts: continue
+        series.append({"id":node.get("id",""),
+            "name":node.get("name") or node.get("country_name") or node.get("url",""),
+            "color":NODE_COLORS[i%len(NODE_COLORS)],"points":pts})
+    return series
 def allow_subscription_request(client):
     now=time.monotonic()
     with SUB_RATE_LOCK:
@@ -2385,6 +2529,12 @@ def proxy_link(protocol,secret,port=443,name="Proxy",username=""):
         if user is None: raise RuntimeError("Профиль AWG не найден")
         return awg.client_config(user,DOMAIN,name)
     raise RuntimeError("Неизвестный протокол")
+def reality_link(secret,name="Proxy"):
+    """vless:// Reality-ссылка; пустая строка, пока Reality выключен."""
+    r=reality_api.load(REALITY_FILE)
+    if not r.get("enabled"): return ""
+    return reality_api.link(r,secret,name,host=DOMAIN)
+
 def qr_png_bytes(link):
     return subprocess.run([QR,"-o","-","-t","PNG","-s","6","-m","2",link],
                           stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True,timeout=10).stdout
@@ -2551,7 +2701,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"1.9.1","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.0.0","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -2574,7 +2724,7 @@ class Handler(BaseHTTPRequestHandler):
                         "protocol":user.get("protocol",""),"enabled":user.get("enabled",True),
                         "up":max(0,int(item.get("up",0) or 0)),"down":max(0,int(item.get("down",0) or 0)),
                         "active":bool(item.get("service_active")) and last>0 and time.time()-last<=90})
-                self.send_json({"ok":True,
+                self.send_json({"ok":True,"version":web_updates.current_version(),
                     "totals":{"up":max(0,int(latest.get("up",0) or 0)),"down":max(0,int(latest.get("down",0) or 0)),
                               "up_rate":latest.get("up_rate"),"down_rate":latest.get("down_rate"),
                               "fresh":bool(latest.get("traffic_fresh")),"time":latest.get("time",0)},
@@ -2690,7 +2840,8 @@ class Handler(BaseHTTPRequestHandler):
             if hours not in (1,6,24): hours=1
             profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
             body=dashboard_body(server_metrics.dashboard_data(hours),subscription_registry(),profiles,traffic(),
-                                PANEL_PATH,DOMAIN,self.csrf(),proxy_link,web_updates.current_version(),hours,nodes=nodes_live())
+                                PANEL_PATH,DOMAIN,self.csrf(),proxy_link,web_updates.current_version(),hours,nodes=nodes_live(),
+                                node_series=nodes_chart_series(hours),node_summary=nodes_client_summary())
             if path.endswith("/dashboard-data"):
                 self.send_json({"html":body,"update":web_updates.get_status()})
             else:
@@ -2699,10 +2850,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path==PANEL_PATH+'/clients-state':
             profiles=[{'id':'primary','name':'Основной WEB Proxy','secret':primary(),'protocol':'web','enabled':True,'backend_port':443}]+users()
-            records=client_records(subscription_registry(),profiles,traffic(),DOMAIN,proxy_link)
+            nodes_live()
+            records=client_records(subscription_registry(),profiles,traffic(),DOMAIN,proxy_link,node_summary=nodes_client_summary())
             records=[r for r in records if r['id']!='primary']
+            warp_ids=set(warp_api.load(WARP_FILE).get("users",[]))
+            for r in records:
+                source=r.get('source') or {}
+                ids=source.get('profile_ids') or [source.get('id',r['id'])]
+                r['warp']=bool(warp_ids.intersection([str(i) for i in ids]))
             clients=[{'id':r['id'],'name':r['name'],'kind':r['kind'],'enabled':r['enabled'],
-                'protocols':r['protocols'],'devices':r['devices'],'limit':r['limit'],**r['totals']} for r in records]
+                'protocols':r['protocols'],'devices':r['devices'],'limit':r['limit'],'warp':r.get('warp',False),**r['totals']} for r in records]
             clients.extend({'id':'openflux-'+p['id'],'name':p.get('name','OpenFlux'),'kind':'openflux',
                 'enabled':bool(p.get('enabled',True)),'protocols':['openflux'],'devices':0,'limit':0,
                 'up':0,'down':0,'active':bool(p.get('active',False))} for p in openflux.profile_states())
@@ -2711,7 +2868,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path==PANEL_PATH+"/users":
             profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
-            body=users_ui(subscription_registry(),profiles,traffic(),PANEL_PATH,DOMAIN,self.csrf(),proxy_link,openflux.profile_states(),load().get("expires",{}))
+            nodes_live()
+            warp_state=warp_api.load(WARP_FILE)
+            body=users_ui(subscription_registry(),profiles,traffic(),PANEL_PATH,DOMAIN,self.csrf(),proxy_link,openflux.profile_states(),load().get("expires",{}),node_summary=nodes_client_summary(),warp_ready=warp_api.configured(warp_state),warp_ids=set(warp_state.get("users",[])),reality_link=reality_link)
             self.send_html(layout("Клиенты",body,"users",self.csrf())); return
         if path==PANEL_PATH+"/nodes":
             body=nodes_ui([node_api.public_node(n) for n in node_api.load_nodes(NODES_FILE)],
@@ -2731,7 +2890,7 @@ class Handler(BaseHTTPRequestHandler):
             _,_,cascade_carriers=cascade_api.route_assignment(cascade_records,users())
             self.send_json({"ok":True,"cascades":[cascade_state_view(c,cascade_carriers) for c in cascade_records]}); return
         if path==PANEL_PATH+"/routing":
-            body=routing_ui(routing_api.load(ROUTING_FILE),PANEL_PATH,self.csrf(),DOMAIN)
+            body=routing_ui(routing_api.load(ROUTING_FILE),PANEL_PATH,self.csrf(),DOMAIN,warp=warp_api.load(WARP_FILE),reality=reality_api.load(REALITY_FILE))
             self.send_html(layout("Маршрутизация",body,"routing",self.csrf())); return
         if path==PANEL_PATH+"/restart-status":
             try:
@@ -2750,6 +2909,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok":True,**web_updates.notes_public()}); return
         if path==PANEL_PATH+"/component-status":
             self.send_json(components.status()); return
+        if path==PANEL_PATH+"/nodes-state":
+            # Живой срез состояния нод для страницы «Ноды»: версии, трафик и
+            # пользователи. Фрагменты собираются на сервере, чтобы JS просто
+            # подставлял готовый безопасный HTML.
+            live=nodes_live()
+            self.send_json({"ok":True,"age":live.get("age"),
+                            "nodes":[{"id":s.get("id",""),"enabled":bool(s.get("enabled",True)),
+                                      "online":bool(s.get("online")),"outdated":bool(s.get("outdated")),
+                                      "version":str(s.get("version","") or ""),
+                                      "html":nodes_live_block(s,PANEL_PATH)}
+                                     for s in live.get("nodes",[])]}); return
+        if path==PANEL_PATH+"/openflux-mailru-status":
+            self.send_json(openflux.mailru_status()); return
         if path==PANEL_PATH+"/openflux-qr":
             profile_id=parse_qs(urlparse(self.path).query).get("id",[""])[0]
             profile=next((item for item in openflux.profile_states() if item.get("id")==profile_id),None)
@@ -2822,7 +2994,7 @@ class Handler(BaseHTTPRequestHandler):
             api_keys=onyx_webapi.public_keys(d.get("api_keys"))
             logins=onyx_access.last_logins(d,10)
             hour_options=''.join(f'<option value="{h}" {"selected" if int(backups_cfg.get("hour",4))==h else ""}>{h:02d}:00</option>' for h in range(24))
-            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"))
+            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"))
             event_checks=''.join(f'<label class="check"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}>{label}</label>' for key,label in event_labels)
             last_backup=backups_cfg.get("last") if isinstance(backups_cfg.get("last"),dict) else {}
             backup_status=("Последний: %s — %s."%(time.strftime("%d.%m.%Y %H:%M",time.localtime(last_backup.get("ts",0))),last_backup.get("message",""))) if last_backup.get("ts") else "Копий пока не было."
@@ -2918,7 +3090,7 @@ if(compGrid){
   function compShow(state,title,text){compCard.classList.remove("spin","upd-done","upd-err");compActions.hidden=true;compClose.hidden=true;compTitle.textContent=title;compText.textContent=text||"";if(state==="confirm"){compRingText.textContent="↑";compCard.classList.add("spin")}else if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}else if(state==="done"){compCard.classList.add("upd-done");compRingText.textContent="✓";compClose.hidden=false}else{compCard.classList.add("upd-err");compRingText.textContent="!";compClose.hidden=false}compOverlay.hidden=false;requestAnimationFrame(()=>compOverlay.classList.add("show"))}
   function compHide(){compOverlay.classList.remove("show");setTimeout(()=>{compOverlay.hidden=true},260);resolveCompActions=null}function compConfirm(label,target){compShow("confirm",label,"Версия "+target+" установится поверх текущей. При ошибке — автоматический откат.");compActions.hidden=false;return new Promise(res=>{resolveCompActions=res})}compGo.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(true)}});compCancel.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(false);compHide()}});
   compClose.addEventListener("click",compHide);
-  async function compRefresh(){const d=await compApi(checkUrl,{csrf:compCsrf});Object.keys(compRows).forEach(n=>{const item=compRows[n];item.ver.textContent=(d.current&&d.current[n])||"—";if(item.sel){const tags=(d.catalog&&d.catalog[n])||[];const cur=(d.current&&d.current[n])||"";const wanted="v"+cur;const bad=(n==='openflux'&&(d.unsuitable&&d.unsuitable[n]||[]))||[];const list=tags.slice(0,6);bad.forEach(t=>{if(list.indexOf(t)<0)list.push(t)});if(wanted&&list.indexOf(wanted)<0&&tags.indexOf(wanted)>=0)list.push(wanted);list.sort((a,b)=>{const p=s=>s.replace(/^v/,"").split(".").map(Number),x=p(a),y=p(b);for(let i=0;i<4;i++){if((x[i]||0)!==(y[i]||0))return (y[i]||0)>(x[i]||0)?1:-1}return 0});item.sel.innerHTML="";list.forEach(t=>{const o=document.createElement("option");o.value=t;o.textContent=t===wanted?t+" — установлена":(bad.indexOf(t)>=0?t+" · нет сборки для Linux":t);item.sel.appendChild(o)});if(wanted&&list.indexOf(wanted)>=0)item.sel.value=wanted}});return d}
+  async function compRefresh(){const d=await compApi(checkUrl,{csrf:compCsrf});Object.keys(compRows).forEach(n=>{const item=compRows[n];item.ver.textContent=(d.current&&d.current[n])||"—";if(item.sel){const tags=(d.catalog&&d.catalog[n])||[];const cur=(d.current&&d.current[n])||"";const wanted="v"+cur;const bad=(n==='openflux'&&(d.unsuitable&&d.unsuitable[n]||[]))||[];const pre=(n==='openflux'&&d.prerelease&&d.prerelease[n]||[]).map(e=>typeof e==="string"?e:e.tag).slice(0,4);const list=tags.slice(0,6);bad.forEach(t=>{if(list.indexOf(t)<0)list.push(t)});if(wanted&&list.indexOf(wanted)<0&&tags.indexOf(wanted)>=0)list.push(wanted);list.sort((a,b)=>{const p=s=>s.replace(/^v/,"").split(".").map(Number),x=p(a),y=p(b);for(let i=0;i<4;i++){if((x[i]||0)!==(y[i]||0))return (y[i]||0)>(x[i]||0)?1:-1}return 0});const full=[];pre.concat(list).forEach(t=>{if(full.indexOf(t)<0)full.push(t)});item.sel.innerHTML="";full.forEach(t=>{const o=document.createElement("option");o.value=t;o.textContent=t===wanted?t+" — установлена":(pre.indexOf(t)>=0?t+" · пререлиз":(bad.indexOf(t)>=0?t+" · нет сборки для Linux":t));item.sel.appendChild(o)});if(wanted&&full.indexOf(wanted)>=0)item.sel.value=wanted}});return d}
   async function compVerify(n,target,hint){if(n!=="openflux"||!target)return;hint.hidden=false;hint.className="component-hint";hint.textContent="Проверяю версию "+target.replace(/^v/,"")+"…";try{const r=await compApi(verifyUrl,{csrf:compCsrf,component:n,target});hint.className="component-hint "+(r.ok?"ok":"err");hint.textContent=r.ok?target.replace(/^v/,"")+" подходит для установки.":(r.message||"Версия не подходит для установки.")}catch(e){hint.hidden=true}}
   Object.keys(compRows).forEach(n=>{if(n==="openflux"&&compRows[n].sel)compRows[n].sel.addEventListener("change",()=>compVerify(n,compRows[n].sel.value,compRows[n].status))});
   compRefresh().catch(()=>{Object.values(compRows).forEach(item=>{item.ver.textContent="—"})});
@@ -3059,6 +3231,15 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 if path==node_api.API_PREFIX+"/federation/purge":
                     result=ctl_manager_json("federation-purge",{})
                     self.send_json({"ok":True,"deleted":int(result.get("deleted",0))}); return
+                if path==node_api.API_PREFIX+"/routing":
+                    # The controller pushes its routing policy: traffic that
+                    # terminates on this node must follow the same direct and
+                    # block rules as the panel itself.
+                    routing_api.save(ROUTING_FILE,routing_api.normalize(request))
+                    try: ctl("cascade-apply")
+                    except Exception as exc:
+                        self.send_json({"ok":False,"message":"Rules saved, apply failed: "+cascade_detail(exc)[:140]},503); return
+                    self.send_json({"ok":True}); return
                 if path==node_api.API_PREFIX+"/profiles/create":
                     protocol=str(request.get("protocol","")); name=str(request.get("name","")).strip()
                     if protocol not in ("web","mtproto","vless","hysteria","awg20","awg31") or not name or len(name)>80:
@@ -3198,6 +3379,9 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     if urlparse(candidate).hostname==DOMAIN:
                         raise node_api.NodeError("Нельзя добавить эту же панель как удалённую ноду.")
                     node_api.add_node(NODES_FILE,form)
+                    # A freshly added node must serve traffic under the same
+                    # routing policy; the push runs after the redirect returns.
+                    threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
                 elif operation=="delete":
                     nodes=node_api.load_nodes(NODES_FILE); uid=form.get("id","")
                     selected=next((n for n in nodes if n.get("id")==uid),None)
@@ -3277,17 +3461,62 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             operation=form.get("operation","")
             try:
                 if operation=="create":
-                    openflux.create_profile(form.get("name",""),form.get("url",""),form.get("platform",""),form.get("transport","yandex"))
+                    openflux.create_profile(form.get("name",""),form.get("url",""),form.get("platform",""),form.get("transport","yandex"),expires=form.get("expires",""))
                 elif operation=="enable": openflux.profile_set_enabled(form.get("id",""),True)
                 elif operation=="disable": openflux.profile_set_enabled(form.get("id",""),False)
                 elif operation=="rotate": openflux.profile_rotate(form.get("id",""))
                 elif operation=="delete": openflux.delete_profile(form.get("id",""))
+                elif operation=="set-fallback": openflux.set_fallback(form.get("id",""),form.get("fallback_url",""),form.get("fallback_transport","yandex"))
+                elif operation=="clear-fallback": openflux.clear_fallback(form.get("id",""))
                 else: raise openflux.OpenFluxError("Неизвестная операция OpenFlux.")
                 if async_action: self.send_json({"ok":True})
                 else: self.redirect("/users")
             except openflux.OpenFluxError as exc:
                 if async_action: self.send_json({"ok":False,"message":str(exc)},400)
                 else: self.send_html("Ошибка OpenFlux: "+esc(str(exc)),400)
+            return
+
+        if path==PANEL_PATH+"/openflux-mailru-disconnect":
+            openflux.disconnect_mailru()
+            self.send_json({"ok":True,"connected":False,"email":None}); return
+
+        if path==PANEL_PATH+"/openflux-document":
+            # Автосоздание документа на Яндекс Диске от имени OAuth-токена
+            # пользователя; токен хранится в панели с правами 0600.
+            if self.headers.get("X-Onyx-Async","")!="1":
+                self.redirect("/users"); return
+            try:
+                provider=form.get("provider","yandex")
+                if provider=="mailru":
+                    email=form.get("mailru_email","").strip()
+                    password=form.get("mailru_password","")
+                    code=form.get("mailru_code","").strip()
+                    if form.get("action","")=="connect":
+                        # кнопка «Войти и подключить аккаунт»: только вход
+                        try:
+                            connected_email=openflux.save_mailru_credentials(email,password,code or None,
+                                captcha=form.get("mailru_captcha",""),captcha_token=form.get("mailru_captcha_token",""))
+                        except openflux.MailruCaptchaNeeded as cap:
+                            self.send_json({"ok":False,"need_captcha":True,"captcha_token":cap.token,
+                                "captcha_image":"data:image/jpeg;base64,"+base64.b64encode(cap.image).decode(),
+                                "message":str(cap)},400)
+                            return
+                        self.send_json({"ok":True,"connected":True,"email":connected_email})
+                        return
+                    if password:
+                        openflux.save_mailru_credentials(email,password,code or None)
+                    url=openflux.create_mailru_document(form.get("name","") or "OpenFlux")
+                else:
+                    token=form.get("token","").strip()
+                    if token: openflux.save_yandex_token(token)
+                    url=openflux.create_yandex_document(form.get("name","") or "OpenFlux")
+                self.send_json({"ok":True,"url":url})
+            except openflux.OpenFluxError as exc:
+                print("openflux document:",type(exc).__name__,str(exc)[:120],file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":str(exc)},400)
+            except Exception as exc:
+                print("openflux document:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Не удалось создать документ."},500)
             return
 
         if path==PANEL_PATH+"/client-action":
@@ -3530,7 +3759,8 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 routing_api.save(ROUTING_FILE,data)
                 try:
                     ctl("cascade-apply")
-                    message="Правила сохранены — применяются в фоне…"
+                    threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
+                    message="Правила сохранены — применяются на панели и нодах…"
                 except Exception as exc:
                     raise routing_api.RoutingError("Правила сохранены, но применить не удалось: "+str(exc)[-160:])
                 self.send_json({"ok":True,"message":message}); return
@@ -3558,6 +3788,104 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 self.send_json({"ok":False,"message":"Не удалось применить правила: "+str(exc)[-160:]},503); return
             except (OSError,subprocess.TimeoutExpired) as exc:
                 print("routing torrent failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/reality-setup":
+            operation=form.get("operation","")
+            try:
+                if operation=="enable":
+                    port=int(form.get("port","2053") or 2053)
+                    dest=str(form.get("dest","") or "").strip()
+                    busy={80,443,8443}
+                    for u in users():
+                        try: busy.add(int(u.get("backend_port",0) or 0))
+                        except (TypeError,ValueError): pass
+                    if port in busy:
+                        raise reality_api.RealityError("Порт %d уже занят панелью или её службами — выберите другой."%port)
+                    reality_api.setup(REALITY_FILE,port=port,dest=dest)
+                    ctl("cascade-apply"); ctl("firewall")
+                    self.send_json({"ok":True,"message":"Reality включён — ссылки появятся в подписках и профилях vless-клиентов."}); return
+                if operation=="test-mask":
+                    result=reality_api.check_dest(str(form.get("dest","") or "").strip())
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Маска не проверена.")},502); return
+                    self.send_json({"ok":True,"message":result.get("message","")}); return
+                if operation=="selftest":
+                    r=reality_api.load(REALITY_FILE)
+                    user=next((u for u in users() if u.get("enabled",True) and u.get("protocol")=="vless" and u.get("secret")),None)
+                    if user is None:
+                        self.send_json({"ok":False,"message":"Нет включённых vless-клиентов для проверки."},400); return
+                    result=reality_api.selftest(r,user["secret"])
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Проверка не удалась.")},502); return
+                    self.send_json({"ok":True,"message":"Подключение через Reality работает: IP "+result.get("exit_ip","?")}); return
+                if operation=="disable":
+                    reality_api.reset(REALITY_FILE)
+                    ctl("cascade-apply"); ctl("firewall")
+                    self.send_json({"ok":True,"message":"Reality отключён — Reality-ссылки убраны из подписок."}); return
+                self.send_json({"ok":False,"message":"Неизвестная операция."},400); return
+            except reality_api.RealityError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("reality setup failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/routing-warp":
+            operation=form.get("operation","")
+            try:
+                if operation=="register":
+                    warp_api.register(WARP_FILE)
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"WARP зарегистрирован. Теперь включите выход нужным клиентам — кнопкой-облаком в списке «Клиенты»."}); return
+                if operation=="config":
+                    warp_api.import_config(WARP_FILE,form.get("config",""))
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"Конфиг WARP применён."}); return
+                if operation=="test":
+                    state=warp_api.load(WARP_FILE)
+                    result=warp_api.check(state)
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Проверка не удалась.")},502); return
+                    warp_api.record_check(WARP_FILE,result)
+                    self.send_json({"ok":True,"message":"Выход через WARP работает: IP "+result.get("exit_ip","?"),"exit_ip":result.get("exit_ip","")}); return
+                if operation=="disable":
+                    warp_api.reset(WARP_FILE)
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"WARP отключён — конфигурация удалена из Xray."}); return
+                self.send_json({"ok":False,"message":"Неизвестная операция."},400); return
+            except warp_api.WarpError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("routing warp failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/warp-user":
+            uid=form.get("id",""); enabled=form.get("enabled")=="1"
+            if not re.fullmatch(r"[a-f0-9]{16}",uid or ""):
+                self.send_json({"ok":False,"message":"Некорректный идентификатор клиента."},400); return
+            try:
+                state=warp_api.load(WARP_FILE)
+                if not warp_api.configured(state):
+                    self.send_json({"ok":False,"message":"Сначала настройте WARP на вкладке «Маршрутизация»."},400); return
+                ids=warp_profile_ids(uid)
+                if not ids:
+                    self.send_json({"ok":False,"message":"Выход через WARP доступен только клиентам VLESS и Hysteria2."},400); return
+                if enabled and not state.get("exit_ip"):
+                    # Первый включение без пройденной проверки — проверяем туннель сразу.
+                    result=warp_api.check(state)
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":"Туннель WARP не прошёл проверку: "+result.get("message","")},502); return
+                    warp_api.record_check(WARP_FILE,result)
+                warp_api.set_users(WARP_FILE,ids,enabled)
+                ctl("cascade-apply")
+                self.send_json({"ok":True,"message":"Выход через WARP включён." if enabled else "Выход через WARP выключен.","warp":enabled}); return
+            except warp_api.WarpError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("warp user failed:",type(exc).__name__,file=sys.stderr,flush=True)
                 self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
         if path==PANEL_PATH+"/cascade-speed":
             uid=form.get("id","")
@@ -4015,6 +4343,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             labels={"vless":"VLESS","hysteria":"Hysteria2"}
             local_name=node_api.location_prefix(node_api.load_location(LOCATION_FILE))
             lines=[proxy_link(u["protocol"],u["secret"],u["backend_port"],local_name+" · "+labels[u["protocol"]],u.get("username","")) for u in result["users"]]
+            lines+=[link for link in (reality_link(u["secret"],local_name+" · Reality") for u in result["users"] if u["protocol"]=="vless") if link]
             if result["users"]:
                 first=result["users"][0]
                 remote_id=federation_id(first.get("subscription_id",""),first.get("device_id",""))
@@ -4049,6 +4378,8 @@ BACKUP_FILES=(
     ("panel/custom-presets.json","/var/lib/onyx-panel/custom-presets.json",False),
     ("panel/cascades.json","/var/lib/onyx-panel/cascades.json",False),
     ("panel/routing.json","/var/lib/onyx-panel/routing.json",False),
+    ("panel/warp.json","/var/lib/onyx-panel/warp.json",False),
+    ("panel/reality.json","/var/lib/onyx-panel/reality.json",False),
     ("panel/location.json","/var/lib/onyx-panel/location.json",False),
     ("panel/api.key","/var/lib/onyx-panel/api.key",False),
     ("onyx-panel/users.json","/etc/onyx-panel/users.json",True),
@@ -4083,6 +4414,31 @@ def build_backup_tar():
                 info.mtime=int(time.time()); info.mode=0o600
                 tar.addfile(info,io.BytesIO(data))
     return buf.getvalue()
+
+def openflux_watchdog():
+    # OpenFlux живёт, пока жив публичный документ: раз в 5 минут проверяем
+    # доступность, отзываем просроченные профили, звоним в колокольчик и
+    # Telegram, при настроенном резерве переключаем профиль на него.
+    time.sleep(75)
+    while True:
+        try:
+            for event in openflux.watchdog_tick():
+                message=event.get("message","")
+                try:
+                    web_updates.add_note("openflux",event.get("name","OpenFlux"),
+                        changes=[message]+([event["url"]] if event.get("url") else []))
+                except Exception as exc:
+                    print("openflux bell:",type(exc).__name__,file=sys.stderr,flush=True)
+                try:
+                    with STATE_LOCK:
+                        state=load()
+                    telegram_api.notify(state.get("telegram",{}) if isinstance(state.get("telegram"),dict) else {},"openflux",message)
+                except Exception as exc:
+                    print("openflux telegram:",type(exc).__name__,file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("openflux watchdog:",type(exc).__name__,exc,file=sys.stderr,flush=True)
+        time.sleep(300)
+
 
 def expiry_sweep():
     # Auto-disable clients whose access date has passed; runs every minute.
@@ -4279,6 +4635,7 @@ def main():
     threading.Thread(target=notifications_worker,daemon=True).start()
     threading.Thread(target=backup_worker,daemon=True).start()
     threading.Thread(target=failover_worker,daemon=True).start()
+    threading.Thread(target=openflux_watchdog,daemon=True).start()
     ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
 
 if __name__=="__main__":
@@ -4315,7 +4672,7 @@ PY
 fi
 
 python3 -m py_compile "$APP_FILE"
-python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
+python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_warp.py" "$APP_DIR/onyx_reality.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
 
 
 # ---- Finish installation: service, Caddy route, permissions, start ----
@@ -4355,7 +4712,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 1.9.1
+Description=Onyx Panel 2.0.0
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -4911,9 +5268,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 1.9.1 UPDATED"
+echo "          Onyx Panel 2.0.0 UPDATED"
 else
-echo "         Onyx Panel 1.9.1 IS READY"
+echo "         Onyx Panel 2.0.0 IS READY"
 fi
 echo "============================================================"
 echo

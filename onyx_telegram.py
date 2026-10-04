@@ -14,7 +14,7 @@ import urllib.request
 
 API = "https://api.telegram.org/bot%s/%s"
 TIMEOUT = 15
-EVENT_KEYS = ("expiry", "logins", "cascades", "backups")
+EVENT_KEYS = ("expiry", "logins", "cascades", "backups", "openflux")
 
 
 def normalize_config(data):
