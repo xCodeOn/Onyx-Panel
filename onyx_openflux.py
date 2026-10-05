@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import http.cookiejar
 import urllib.error
 import urllib.request
 import zipfile
