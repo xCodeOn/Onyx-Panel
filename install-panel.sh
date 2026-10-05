@@ -1765,7 +1765,7 @@ from concurrent.futures import ThreadPoolExecutor
 from onyx_subscriptions import PREFIX as SUB_PREFIX
 from onyx_panel_extras import preview_document
 import onyx_i18n as i18n
-from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand
+from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand, duration, limit_bar
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
 import onyx_components as components
@@ -2851,9 +2851,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     with open(cand,"rb") as f: fav=f.read(); break
                 except OSError: pass
-            if not fav and globals().get("FAVICON_EMBEDDED"):
-                try: fav=base64.b64decode(FAVICON_EMBEDDED)
-                except Exception: fav=None
+            if not fav:
+                fav_b64=globals().get("FAVICON_EMBEDDED")
+                if fav_b64:
+                    try: fav=base64.b64decode(fav_b64)
+                    except Exception: fav=None
             if fav: self.send_logo(fav)
             else: self.send_html("Favicon not found",404)
             return
@@ -2863,9 +2865,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     with open(cand,"rb") as f: logo=f.read(); break
                 except OSError: pass
-            if not logo and globals().get("LOGO_EMBEDDED"):
-                try: logo=base64.b64decode(LOGO_EMBEDDED)
-                except Exception: logo=None
+            if not logo:
+                logo_b64=globals().get("LOGO_EMBEDDED")
+                if logo_b64:
+                    try: logo=base64.b64decode(logo_b64)
+                    except Exception: logo=None
             if logo: self.send_logo(logo)
             else: self.send_html("Logo not found",404)
             return
@@ -2883,9 +2887,11 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         with open(cand,"rb") as f: icon_data=f.read(); break
                     except OSError: pass
-            if not icon_data and globals().get("LOGO_EMBEDDED"):
-                try: icon_data=base64.b64decode(LOGO_EMBEDDED)
-                except Exception: icon_data=None
+            if not icon_data:
+                icon_b64=globals().get("LOGO_EMBEDDED")
+                if icon_b64:
+                    try: icon_data=base64.b64decode(icon_b64)
+                    except Exception: icon_data=None
             if icon_data: self.send_logo(icon_data)
             else: self.send_html("Icon not found",404)
             return
@@ -2915,9 +2921,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     with open(cand,"rb") as f: logo=f.read(); break
                 except OSError: pass
-            if not logo and globals().get("LOGO_EMBEDDED"):
-                try: logo=base64.b64decode(LOGO_EMBEDDED)
-                except Exception: logo=None
+            if not logo:
+                logo_b64=globals().get("LOGO_EMBEDDED")
+                if logo_b64:
+                    try: logo=base64.b64decode(logo_b64)
+                    except Exception: logo=None
             if logo:
                 self.send_response(200)
                 self.send_header("Content-Type","image/png")
@@ -3586,7 +3594,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                         onyx_audit.record(state,"login",client_id(self),"вход "+role)
                         tg_cfg=telegram_api.normalize_config(state.get("telegram",{}))
                         save(state)
-                    if fresh and onyx_telegram.configured(tg_cfg) and tg_cfg.get("events",{}).get("logins",True):
+                    if fresh and telegram_api.configured(tg_cfg) and tg_cfg.get("events",{}).get("logins",True):
                         threading.Thread(target=telegram_api.notify,args=(tg_cfg,"logins",
                             "🔐 Вход в панель с нового устройства\nЛогин: %s (%s)\nIP: %s"%(username,role,client_id(self))),daemon=True).start()
                 except Exception:

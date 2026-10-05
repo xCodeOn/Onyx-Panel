@@ -22,5 +22,7 @@ jobs:
         run: python3 tests/test_features_21.py
       - name: Server smoke tests
         run: python3 tests/test_server.py
+      - name: Static name checks (loaded-but-undefined)
+        run: python3 tests/test_static.py
       - name: i18n gate (English renders without Cyrillic)
         run: python3 tests/test_i18n.py
