@@ -1240,7 +1240,7 @@ PAIRS.update({
     'Связь с панелью потеряна, ждём восстановления': 'The connection to the panel was lost, waiting for recovery',
     'Связь с панелью': 'The connection to the panel',
     'кратко прерывается на время перезапуска': 'briefly drops during the restart',
-    'канал': 'channel',
+    'канал': 'channel', 'попробуйте снова': 'try again',
 })
 
 # --- static audit pass 2 (К–П) --------------------------------------------

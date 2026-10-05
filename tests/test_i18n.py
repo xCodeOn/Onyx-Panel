@@ -90,8 +90,8 @@ class FakeHandler(srv.Handler):
         return ("Cookie", m.group(1)) if m else None
 
 
-def login_post():
-    form = "user=admin&password=secret1"
+def login_post(user="admin", pw="secret1"):
+    form = f"user={user}&password={pw}"
     body = form.encode()
     h = FakeHandler("POST", srv.PANEL_PATH + "/login", {"Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(body))}, body)
     h.do_POST()
@@ -130,7 +130,7 @@ def visible_cyrillic(page):
     return found
 
 
-PAGES = ["/login", "/users", "/nodes", "/cascade", "/routing", "/updates", "/settings", "/logs", "/diagnostics", "/subscriptions"]
+PAGES = ["/login", "/dashboard", "/users", "/nodes", "/cascade", "/routing", "/updates", "/settings", "/logs", "/diagnostics", "/subscriptions"]
 JSON_ROUTES = ["/update-status", "/notifications", "/nodes-state", "/cascade-state", "/restart-status", "/component-status", "/diagnostics-status"]
 
 EN_HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
@@ -142,6 +142,7 @@ failures = []
 h = login_post()
 assert "303" in h.status(), h.status()
 cookie = h.resp_cookie()
+sid_cookie = cookie[1] if cookie else ""
 
 for route in PAGES:
     headers = dict([cookie]) if route != "/login" else {}
@@ -212,8 +213,56 @@ for label, doc in extra_pages.items():
     if runs:
         leftovers[label] = sorted(set(leftovers.get(label, [])) | set(runs))
 
+# Observer session: same pages, observer-specific chrome
+store["observer"] = {"user": "helper", "hash": srv.hash_password("view123")}
+h_obs = login_post("helper", "view123")
+obs_cookie = h_obs.resp_cookie()
+if obs_cookie:
+    page = FakeHandler("GET", srv.PANEL_PATH + "/users", {"Cookie": obs_cookie[1], **EN_HEADERS})
+    page.do_GET()
+    if "200" in page.status():
+        runs = visible_cyrillic(page.body())
+        if runs:
+            leftovers["/users-observer"] = sorted(set(runs))
+
+# Login page with the 2FA code field enabled
+page = _onyx_ui.i18n.document(_onyx_ui.login_ui("", totp=True))
+runs = visible_cyrillic(page)
+if runs:
+    leftovers["/login-2fa"] = sorted(set(runs))
+
+# POST JSON responses in EN mode (representative endpoints)
+def _post_json(path, fields):
+    hh = FakeHandler("POST", srv.PANEL_PATH + path, {"Cookie": sid_cookie, **EN_HEADERS})
+    data = dict(fields)
+    data["csrf"] = hh.csrf()
+    body = urllib.parse.urlencode(data).encode()
+    hh.headers["Content-Type"] = "application/x-www-form-urlencoded"
+    hh.headers["Content-Length"] = str(len(body))
+    hh.rfile = io.BytesIO(body)
+    hh.do_POST()
+    return hh
+
+for label, path, fields in (
+    ("/POST-backups-save", "/backups-save", {"mode": "telegram", "hour": "9", "keep": "10"}),
+    ("/POST-totp-setup", "/totp-setup", {}),
+    ("/POST-totp-wrong-code", "/totp-enable", {"code": "000000"}),
+    ("/POST-telegram-empty", "/telegram-save", {"action": "save", "token": "", "chat": ""}),
+):
+    try:
+        hh = _post_json(path, fields)
+        payload = hh.body()
+        try:
+            texts = json.dumps(json.loads(payload), ensure_ascii=False)
+        except Exception:
+            texts = payload  # HTML error page
+        runs = visible_cyrillic(texts)
+        if runs:
+            leftovers[label] = sorted(set(runs))
+    except Exception as exc:
+        failures.append(f"{label}: {type(exc).__name__}: {exc}")
+
 # Russian must remain Russian: sanity check the dictionary did not leak
-sid_cookie = cookie[1] if cookie else ""
 page = FakeHandler("GET", srv.PANEL_PATH + "/users", {"Cookie": sid_cookie + "; onyx_lang=ru"})
 page.do_GET()
 if '<html lang="ru">' not in page.body() or "Клиенты" not in page.body():
