@@ -11,6 +11,8 @@ FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
+FAVICON_SOURCE="${BASE}/onyx-favicon.png"
+FAVICON_FILE="${APP_DIR}/onyx-favicon.png"
 PORT=8090
 DOMAIN="${ONYX_PANEL_DOMAIN:-$(sed -n 's/^Environment=TPROXY_HOSTNAME=//p' /etc/systemd/system/caddy.service.d/tproxy.conf 2>/dev/null | head -n1 || true)}"
 ACME_EMAIL="${ONYX_PANEL_ACME_EMAIL:-$(sed -n 's/^Environment=ACME_EMAIL=//p' /etc/systemd/system/caddy.service.d/tproxy.conf 2>/dev/null | head -n1 || true)}"
@@ -112,10 +114,11 @@ fi
 MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 [[ -s "$PRIMARY_SECRET" ]] || die "Primary install-time secret not found."
 [[ -s "$LOGO_SOURCE" ]] || die "Panel logo file is missing: onyx-logo.png"
+[[ -s "$FAVICON_SOURCE" ]] || die "Panel favicon file is missing: onyx-favicon.png"
 for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
     [[ -s "$BASE/assets/${PWA_ICON}.png" ]] || die "PWA icon is missing: assets/${PWA_ICON}.png"
 done
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
 FLAG_ARCHIVE="$BASE/onyx-panel/flags.tar.gz"
@@ -317,6 +320,7 @@ install -d -m 0700 "$DATA_DIR"
 install -d -m 0755 "$APP_DIR/icons"
 install -o root -g root -m 0644 "$LOGO_SOURCE" "$LOGO_FILE"
 install -o root -g root -m 0644 "$LOGO_SOURCE" "$APP_DIR/panel-logo.png"
+install -o root -g root -m 0644 "$FAVICON_SOURCE" "$FAVICON_FILE"
 for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
     install -o root -g root -m 0644 "${BASE}/assets/${PWA_ICON}.png" "$APP_DIR/icons/${PWA_ICON}.png"
 done
@@ -499,7 +503,7 @@ fi
 
 echo "[1/6] Writing manager..."
 
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
     install -o root -g root -m 0644 "$BASE/$module" "$APP_DIR/$module"
 done
@@ -1760,6 +1764,7 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from onyx_subscriptions import PREFIX as SUB_PREFIX
 from onyx_panel_extras import preview_document
+import onyx_i18n as i18n
 from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
@@ -1798,6 +1803,7 @@ HYSTERIA_PORT=8443
 MANAGER="/usr/local/sbin/onyx-panelctl"
 QR="/usr/bin/qrencode"
 LOGO="/opt/onyx-panel/onyx-logo.png"
+FAVICON="/opt/onyx-panel/onyx-favicon.png"
 FLAGS="/opt/onyx-panel/flags"
 SITE_INDEX="/srv/tproxy-site/index.html"
 SITE_BACKUP="/var/lib/onyx-panel/index.html.bak"
@@ -2660,6 +2666,7 @@ class Handler(BaseHTTPRequestHandler):
     timeout=20
     def log_message(self,*a): pass
     def send_html(self,s,code=200):
+        s=i18n.document(s)
         b=s.encode(); self.send_response(code); self.send_header("Content-Type","text/html; charset=utf-8"); self.send_header("Content-Length",str(len(b))); self.send_header("Cache-Control","no-store"); self.send_header("X-Frame-Options","DENY"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer")
         # srcdoc is inline content. Deny network frame navigations as well as
         # requests from within the sandbox, including location/meta refresh.
@@ -2677,6 +2684,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
     def send_json(self,value,code=200):
+        if i18n.lang()=="en":
+            value=i18n.walk(value)
         self.send_data(json.dumps(value,ensure_ascii=True),code,"application/json")
     def send_png(self,b):
         self.send_response(200); self.send_header("Content-Type","image/png"); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(b))); self.end_headers(); self.wfile.write(b)
@@ -2788,6 +2797,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok":True}); return
         self.send_json({"ok":False,"message":"Not found"},404)
     def do_GET(self):
+        i18n.set_request(self.headers.get("Cookie",""), self.headers.get("Accept-Language",""))
         path=urlparse(self.path).path
         if path.startswith(node_api.API_PREFIX+"/"):
             if not self.api_auth(): return
@@ -2835,6 +2845,18 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if path==PANEL_PATH+"/__favicon":
+            fav=None
+            for cand in (FAVICON,"/opt/onyx-panel/onyx-favicon.png"):
+                try:
+                    with open(cand,"rb") as f: fav=f.read(); break
+                except OSError: pass
+            if not fav and globals().get("FAVICON_EMBEDDED"):
+                try: fav=base64.b64decode(FAVICON_EMBEDDED)
+                except Exception: fav=None
+            if fav: self.send_logo(fav)
+            else: self.send_html("Favicon not found",404)
+            return
         if path==PANEL_PATH+"/__logo":
             logo=None
             for cand in (LOGO,"/opt/onyx-panel/panel-logo.png"):
@@ -2870,7 +2892,7 @@ class Handler(BaseHTTPRequestHandler):
         if path==PANEL_PATH+"/__/manifest.webmanifest":
             manifest={"name":"Onyx Panel","short_name":"Onyx","start_url":PANEL_PATH+"/dashboard",
                       "display":"standalone","background_color":"#071116","theme_color":"#0f2028",
-                      "id":PANEL_PATH+"/","lang":"ru",
+                      "id":PANEL_PATH+"/","lang":i18n.lang(),
                       "icons":[{"src":PANEL_PATH+"/__icon/192","sizes":"192x192","type":"image/png","purpose":"any"},
                                {"src":PANEL_PATH+"/__icon/512","sizes":"512x512","type":"image/png","purpose":"any"},
                                {"src":PANEL_PATH+"/__icon/1024","sizes":"1024x1024","type":"image/png","purpose":"any"},
@@ -3471,6 +3493,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
         self.redirect("/")
 
     def do_POST(self):
+        i18n.set_request(self.headers.get("Cookie",""), self.headers.get("Accept-Language",""))
         path=urlparse(self.path).path
 
         if path.startswith(node_api.API_PREFIX+"/"):
@@ -5886,7 +5909,7 @@ PY
 
 # Embed the panel logo so /__logo always serves even if the file is missing
 # (an in-place update from an installation that shipped panel-logo.png).
-{ printf 'LOGO_EMBEDDED="%s"\n' "$(base64 -w 0 "$LOGO_SOURCE" 2>/dev/null || openssl base64 -A -in "$LOGO_SOURCE")"; cat "$APP_FILE"; } > "$APP_FILE.newpath" && mv "$APP_FILE.newpath" "$APP_FILE"
+{ printf 'LOGO_EMBEDDED="%s"\n' "$(base64 -w 0 "$LOGO_SOURCE" 2>/dev/null || openssl base64 -A -in "$LOGO_SOURCE")"; printf 'FAVICON_EMBEDDED="%s"\n' "$(base64 -w 0 "$FAVICON_SOURCE" 2>/dev/null || openssl base64 -A -in "$FAVICON_SOURCE")"; cat "$APP_FILE"; } > "$APP_FILE.newpath" && mv "$APP_FILE.newpath" "$APP_FILE"
 
 if [[ "$UPDATING" != "1" ]]; then
 python3 - "${DATA_FILE}" "${ADMIN}" "${PASS}" <<'PY'
