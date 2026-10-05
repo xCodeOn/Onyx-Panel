@@ -1,12 +1,13 @@
 """Резервные копии в облачные хранилища: Яндекс Диск, Облако Mail.ru, Google Drive.
 
-Яндекс и Mail.ru переиспользуют механизмы OpenFlux (тот же OAuth-токен
-Диска и та же сессия Облака), поэтому отдельно подключать их не нужно —
-достаточно связанного аккаунта в разделе OpenFlux. Google Drive требует
-свой OAuth-клиент: администратор один раз заводит Client ID/Secret в
-Google Cloud и даёт панели доступ через стандартный OAuth-код (scope
-drive.file — видны только файлы, созданные панелью). Все запросы —
-чистый urllib, панель остаётся без зависимостей.
+Каждое хранилище подключается независимо — свои ключи лежат в
+cloud-backup.json (права 0600) и не зависят от раздела OpenFlux:
+Яндекс Диск живёт на своём OAuth-токене, Mail.ru — на своей паре
+«почта + пароль для внешних приложений» (официальный OAuth Облака),
+Google Drive — на своём OAuth-клиенте (scope drive.file — видны только
+файлы, созданные панелью). Подключение всегда проверяется живым
+запросом, протухший токен обновляется сам. Все запросы — чистый
+urllib, панель остаётся без зависимостей.
 """
 import json
 import os
@@ -47,6 +48,7 @@ def load_config():
 
 def save_config(value):
     value = value if isinstance(value, dict) else {}
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
     tmp = CONFIG_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(value, f, ensure_ascii=True, indent=2)
@@ -54,31 +56,68 @@ def save_config(value):
     os.replace(tmp, CONFIG_FILE)
 
 
+def _drop_config(key):
+    config = load_config()
+    config.pop(key, None)
+    save_config(config)
+
+
+def _human_gb(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    return ("%.1f" % (value / (1024 ** 3))).rstrip("0").rstrip(".").replace(".", ",") + " ГБ"
+
+
 # ----------------------------- Яндекс Диск -----------------------------
 
-def _yandex_token():
-    try:
-        token = oa.load_yandex_token()
-    except Exception:
-        return ""
-    return token if re.fullmatch(r"[A-Za-z0-9_.\-]{20,}", token or "") else ""
+def yandex_config():
+    value = load_config().get("yandex")
+    return value if isinstance(value, dict) else {}
+
+
+def _yandex_own_token():
+    token = str(yandex_config().get("token", "")).strip()
+    return token if re.fullmatch(r"[A-Za-z0-9_.\-]{20,}", token) else ""
+
+
+def yandex_save_token(token):
+    """Проверить токен живым запросом к Диску и сохранить как свой (0600)."""
+    token = oa.validate_yandex_token(token)
+    config = load_config()
+    config["yandex"] = {"token": token, "connected_at": int(time.time())}
+    save_config(config)
+    return config["yandex"]
+
+
+def yandex_disconnect():
+    _drop_config("yandex")
 
 
 def yandex_status():
-    token = _yandex_token()
+    token = _yandex_own_token()
     if not token:
-        return {"connected": False, "detail": "OAuth-токен Яндекс Диска не найден. Подключите аккаунт в разделе OpenFlux."}
+        return {"connected": False,
+                "detail": "Свой токен не подключён — вставьте OAuth-токен Яндекс Диска ниже."}
     try:
-        oa._yandex_request(token, "/", timeout=15)
+        info = oa._yandex_request(token, "/", timeout=15)
     except Exception as exc:
         return {"connected": False, "detail": "Токен не принят Диском: " + str(exc)[:120]}
-    return {"connected": True, "detail": "Аккаунт OpenFlux используется для бэкапов"}
+    login = str(((info or {}).get("user") or {}).get("login", "") or "")
+    detail = "Подключено" + (": " + login if login else "")
+    total = (info or {}).get("total_space")
+    used = (info or {}).get("used_space")
+    if total:
+        free = "свободно " + _human_gb(int(total) - int(used or 0)) if used is not None else "всего " + _human_gb(total)
+        detail += " · " + free
+    return {"connected": True, "email": login, "detail": detail}
 
 
 def yandex_upload(filename, blob, keep=7):
-    token = _yandex_token()
+    token = _yandex_own_token()
     if not token:
-        raise CloudError("Нет OAuth-токена Яндекс Диска (подключите аккаунт в OpenFlux).")
+        raise CloudError("Яндекс Диск не подключён — добавьте свой OAuth-токен в «Облачных копиях».")
     home = YANDEX_DIR_BARE + "/" + filename
     try:
         oa._yandex_request(token, "/resources", method="PUT", params={"path": YANDEX_DIR})
@@ -111,20 +150,95 @@ def yandex_prune(token, keep):
 
 # --------------------------- Облако Mail.ru ---------------------------
 
+def mailru_config():
+    value = load_config().get("mailru")
+    return value if isinstance(value, dict) else {}
+
+
+def mailru_connect(email, password):
+    """Живой OAuth-вход в Облако Mail.ru и сохранение своей пары ключей (0600)."""
+    email = str(email or "").strip()
+    password = str(password or "")
+    if not email or "@" not in email or not password:
+        raise CloudError("Укажите почту Mail.ru и «пароль для внешних приложений» — обычный пароль почты сторонним приложениям не подходит.")
+    envelope = oa._mailru_grant({"grant_type": "password", "username": email,
+                                 "password": password, "client_id": oa.MAILRU_CLIENT_ID})
+    expires = int(envelope.get("expires_in") or 0)
+    config = load_config()
+    config["mailru"] = {
+        "email": email, "password": password,
+        "access_token": envelope.get("access_token", ""),
+        "refresh_token": envelope.get("refresh_token", ""),
+        "expires_at": int(time.time()) + expires - 300 if expires else 0,
+        "connected_at": int(time.time()),
+    }
+    save_config(config)
+    return email
+
+
+def mailru_disconnect():
+    _drop_config("mailru")
+
+
+def _mailru_own_token(force_refresh=False):
+    """Живой OAuth-токен своих облачных копий; протухший обновляет сам."""
+    cfg = mailru_config()
+    if not cfg.get("email") or not cfg.get("password"):
+        raise CloudError("Аккаунт Mail.ru не подключён — войдите в «Облачных копиях».")
+    if not force_refresh:
+        expires_at = int(cfg.get("expires_at") or 0)
+        if cfg.get("access_token") and (not expires_at or expires_at - 60 > time.time()):
+            return cfg["access_token"]
+        if cfg.get("refresh_token"):
+            try:
+                envelope = oa._mailru_grant({"grant_type": "refresh_token",
+                                             "refresh_token": cfg["refresh_token"],
+                                             "client_id": oa.MAILRU_CLIENT_ID})
+            except oa.OpenFluxError:
+                envelope = None  # refresh не принят — пробуем заново по паролю
+            if envelope and envelope.get("access_token"):
+                _mailru_store_envelope(cfg["email"], cfg["password"], envelope)
+                return envelope["access_token"]
+    envelope = oa._mailru_grant({"grant_type": "password", "username": cfg["email"],
+                                 "password": cfg["password"], "client_id": oa.MAILRU_CLIENT_ID})
+    _mailru_store_envelope(cfg["email"], cfg["password"], envelope)
+    return envelope["access_token"]
+
+
+def _mailru_store_envelope(email, password, envelope):
+    expires = int(envelope.get("expires_in") or 0)
+    config = load_config()
+    cfg = config.get("mailru") if isinstance(config.get("mailru"), dict) else {}
+    cfg.update({"email": email, "password": password,
+                "access_token": envelope.get("access_token", ""),
+                "refresh_token": envelope.get("refresh_token", "") or cfg.get("refresh_token", ""),
+                "expires_at": int(time.time()) + expires - 300 if expires else 0})
+    config["mailru"] = cfg
+    save_config(config)
+
+
 def mailru_status():
+    cfg = mailru_config()
+    if not cfg.get("email"):
+        return {"connected": False,
+                "detail": "Свой аккаунт не подключён — войдите почтой и «паролем для внешних приложений»."}
     try:
-        return oa.mailru_status()
+        _mailru_own_token()
     except Exception as exc:
-        return {"connected": False, "detail": str(exc)[:120]}
+        return {"connected": False, "email": cfg.get("email"),
+                "detail": "Mail.ru не принял вход: " + str(exc)[:120]}
+    return {"connected": True, "email": cfg.get("email"),
+            "detail": "Подключено: " + str(cfg.get("email", ""))}
 
 
 def mailru_upload(filename, blob, keep=7):
-    if not oa.mailru_status().get("connected"):
-        raise CloudError("Аккаунт Mail.ru не подключён (раздел OpenFlux).")
+    if not mailru_config().get("email"):
+        raise CloudError("Аккаунт Mail.ru не подключён — войдите в «Облачных копиях».")
     home = MAILRU_DIR + "/" + filename
 
     def call(command, data=None):
-        return oa._mailru_call(command, params={"api": "2"}, data=data)
+        return oa._mailru_call(command, params={"api": "2"}, data=data,
+                               token_provider=_mailru_own_token)
 
     try:
         call("folder/add", {"home": MAILRU_DIR})
@@ -139,20 +253,21 @@ def mailru_upload(filename, blob, keep=7):
         raise CloudError("Mail.ru не выдал адрес загрузчика: " + str(exc)) from exc
     if not upload_url:
         raise CloudError("Mail.ru не выдал адрес загрузчика.")
-    token = oa._mailru_access_token()
+    token = _mailru_own_token()
     try:
         digest = oa._mailru_upload(upload_url, token, blob)
     except oa.OpenFluxError as exc:
         if "403" not in str(exc):
             raise
-        digest = oa._mailru_upload(upload_url, oa._mailru_access_token(force_refresh=True), blob)
+        digest = oa._mailru_upload(upload_url, _mailru_own_token(force_refresh=True), blob)
     call("file/add", {"home": home, "hash": digest, "size": str(len(blob)), "conflict": "rename"})
-    mailru_prune(keep)
+    mailru_prune()
 
 
-def mailru_prune(keep):
+def mailru_prune(keep=7):
     try:
-        body = oa._mailru_call("folder/files", params={"api": "2", "home": MAILRU_DIR})
+        body = oa._mailru_call("folder/files", params={"api": "2", "home": MAILRU_DIR},
+                               token_provider=_mailru_own_token)
         items = [item for item in (body.get("list") or []) if isinstance(item, dict)]
     except Exception:
         return
@@ -160,7 +275,8 @@ def mailru_prune(keep):
     for item in sorted(files, key=lambda x: int(x.get("mtime", 0) or 0), reverse=True)[max(0, int(keep)):]:
         try:
             oa._mailru_call("file/remove", params={"api": "2"},
-                            data={"home": MAILRU_DIR + "/" + str(item.get("name", ""))})
+                            data={"home": MAILRU_DIR + "/" + str(item.get("name", ""))},
+                            token_provider=_mailru_own_token)
         except Exception:
             pass
 
@@ -170,6 +286,10 @@ def mailru_prune(keep):
 def gdrive_config():
     value = load_config().get("gdrive")
     return value if isinstance(value, dict) else {}
+
+
+def gdrive_disconnect():
+    _drop_config("gdrive")
 
 
 def gdrive_status():
@@ -182,7 +302,7 @@ def gdrive_status():
     except Exception as exc:
         return {"connected": False, "detail": "Google отклонил доступ: " + str(exc)[:120]}
     user = ((info or {}).get("user") or {}).get("emailAddress", "")
-    return {"connected": True, "detail": "Подключено: " + (user or "аккаунт Google")}
+    return {"connected": True, "email": user, "detail": "Подключено: " + (user or "аккаунт Google")}
 
 
 def _gdrive_token(cfg):

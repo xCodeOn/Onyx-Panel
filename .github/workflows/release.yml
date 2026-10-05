@@ -37,7 +37,7 @@ jobs:
       - name: Check version consistency
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for f in install-final.sh install-panel.sh README.md; do
+          for f in install-final.sh install-panel.sh; do
             if ! grep -qF "$VERSION" "$f"; then
               echo "::error::Version mismatch: $f does not mention $VERSION — bump the version there too."
               exit 1

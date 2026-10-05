@@ -112,6 +112,9 @@ fi
 MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 [[ -s "$PRIMARY_SECRET" ]] || die "Primary install-time secret not found."
 [[ -s "$LOGO_SOURCE" ]] || die "Panel logo file is missing: onyx-logo.png"
+for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
+    [[ -s "$BASE/assets/${PWA_ICON}.png" ]] || die "PWA icon is missing: assets/${PWA_ICON}.png"
+done
 for module in onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
@@ -311,8 +314,12 @@ fi
 
 install -d -m 0755 "$APP_DIR" /etc/onyx-panel
 install -d -m 0700 "$DATA_DIR"
+install -d -m 0755 "$APP_DIR/icons"
 install -o root -g root -m 0644 "$LOGO_SOURCE" "$LOGO_FILE"
 install -o root -g root -m 0644 "$LOGO_SOURCE" "$APP_DIR/panel-logo.png"
+for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
+    install -o root -g root -m 0644 "${BASE}/assets/${PWA_ICON}.png" "$APP_DIR/icons/${PWA_ICON}.png"
+done
 chmod 0600 "$PRIMARY_SECRET"
 
 echo "      Preparing Xray ${XRAY_VERSION}..."
@@ -457,9 +464,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.0..."
+    echo "Updating Onyx Panel 2.1.14..."
 else
-    echo "Configuring Onyx Panel 2.1.0..."
+    echo "Configuring Onyx Panel 2.1.14..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -1753,7 +1760,7 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from onyx_subscriptions import PREFIX as SUB_PREFIX
 from onyx_panel_extras import preview_document
-from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras
+from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
 import onyx_components as components
@@ -1832,6 +1839,10 @@ if not os.path.exists(KEY):
 with open(KEY,"rb") as f: SESSION_KEY=f.read()
 os.chmod(KEY,0o600)
 STATE_LOCK=threading.RLock()
+# In-progress manual backups for the staged "Копия сейчас" flow: job id ->
+# {"blob","name","ts","saved","cloud"}. Живут в памяти, чистятся по TTL 30 минут.
+BACKUP_JOBS={}
+BACKUP_JOBS_LOCK=threading.Lock()
 # Role of the request's session ("admin"/"observer"), resolved by auth() and
 # read by layout() from the same request thread.
 ROLE_LOCAL=threading.local()
@@ -2782,7 +2793,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.0","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.14","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -2836,11 +2847,34 @@ class Handler(BaseHTTPRequestHandler):
             if logo: self.send_logo(logo)
             else: self.send_html("Logo not found",404)
             return
+        if path.startswith(PANEL_PATH+"/__icon/"):
+            # PWA-иконки из манифеста: честные размеры и отдельный maskable-вариант.
+            iname=path[len(PANEL_PATH+"/__icon/"):]
+            if not re.fullmatch(r"(192|512|1024|maskable)",iname):
+                self.send_response(404); self.end_headers(); return
+            icon_data=None
+            try:
+                with open("/opt/onyx-panel/icons/onyx-logo-%s.png"%iname,"rb") as f: icon_data=f.read()
+            except OSError: pass
+            if not icon_data:
+                for cand in (LOGO,"/opt/onyx-panel/panel-logo.png"):
+                    try:
+                        with open(cand,"rb") as f: icon_data=f.read(); break
+                    except OSError: pass
+            if not icon_data and globals().get("LOGO_EMBEDDED"):
+                try: icon_data=base64.b64decode(LOGO_EMBEDDED)
+                except Exception: icon_data=None
+            if icon_data: self.send_logo(icon_data)
+            else: self.send_html("Icon not found",404)
+            return
         if path==PANEL_PATH+"/__/manifest.webmanifest":
             manifest={"name":"Onyx Panel","short_name":"Onyx","start_url":PANEL_PATH+"/dashboard",
                       "display":"standalone","background_color":"#071116","theme_color":"#0f2028",
-                      "lang":"ru","icons":[{"src":PANEL_PATH+"/__logo","sizes":"512x512","type":"image/png","purpose":"any"},
-                                           {"src":PANEL_PATH+"/__logo","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
+                      "id":PANEL_PATH+"/","lang":"ru",
+                      "icons":[{"src":PANEL_PATH+"/__icon/192","sizes":"192x192","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/512","sizes":"512x512","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/1024","sizes":"1024x1024","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/maskable","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
             self.send_data(json.dumps(manifest,ensure_ascii=True),mime="application/manifest+json",
                 headers={"Cache-Control":"no-store"}); return
         if path==PANEL_PATH+"/__/sw.js":
@@ -3199,7 +3233,12 @@ class Handler(BaseHTTPRequestHandler):
                     with open(SITE_DRAFT,encoding="utf-8") as f: site_html=f.read()
                 else: site_html=read_site_html()
             except Exception: site_html="<!-- Не удалось прочитать исходник -->"
-            editor=editor_ui(site_html,PANEL_PATH,self.csrf(),all_presets(),has_draft)
+            editor_all=editor_ui(site_html,PANEL_PATH,self.csrf(),all_presets(),has_draft)
+            # карточка заглушки живёт в общей сетке настроек, диалоги и скрипты — за ней
+            if '\n<dialog ' in editor_all:
+                editor_card,editor_rest=editor_all.split('\n<dialog ',1); editor_rest='\n<dialog '+editor_rest
+            else:
+                editor_card,editor_rest=editor_all,''
             d=load()
             admin_login=esc(d.get("admin",{}).get("user","admin"))
             panel_url=("https://"+DOMAIN if DOMAIN else "")+PANEL_PATH
@@ -3211,7 +3250,7 @@ class Handler(BaseHTTPRequestHandler):
             logins=onyx_access.last_logins(d,60)
             hour_options=''.join(f'<option value="{h}" {"selected" if int(backups_cfg.get("hour",4))==h else ""}>{h:02d}:00</option>' for h in range(24))
             event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"))
-            event_checks=''.join(f'<label class="check"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}>{label}</label>' for key,label in event_labels)
+            event_checks=''.join(f'<label class="choice-card"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}><span><strong>{label}</strong></span></label>' for key,label in event_labels)
             last_backup=backups_cfg.get("last") if isinstance(backups_cfg.get("last"),dict) else {}
             backup_status=("Последний: %s — %s."%(time.strftime("%d.%m.%Y %H:%M",time.localtime(last_backup.get("ts",0))),last_backup.get("message",""))) if last_backup.get("ts") else "Копий пока не было."
             totp_status="включена" if totp_cfg.get("enabled") else "выключена"
@@ -3226,17 +3265,21 @@ class Handler(BaseHTTPRequestHandler):
                 "fw_owned":onyx_firewall._load()["rules"],"fw_extra":firewall_extra(),
                 "fw_sockets":listening_sockets()}
             extra_cards2=settings_extras(PANEL_PATH,token,extra_data)
-            extra_cards=f'''<div class="settings-grid"><div class="card"><div class="card-title"><div><h2>Уведомления Telegram</h2><p>Истечение доступов, входы, каскады и автобэкапы — в ваш чат</p></div></div>
-<section class="panel-setting"><form id="tgForm" action="{PANEL_PATH}/telegram-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="tgToken">Токен бота</label><input id="tgToken" name="token" value="{esc(tg_cfg.get("token"))}" placeholder="123456:ABC-DEF…" spellcheck="false" autocomplete="off"></div><div><label for="tgChat">Chat ID</label><input id="tgChat" name="chat" value="{esc(tg_cfg.get("chat"))}" placeholder="123456789 или @channel" spellcheck="false" autocomplete="off"></div></div><div class="checks">{event_checks}</div><div class="actions"><button type="submit" class="btn primary" name="action" value="save">Сохранить</button><button type="submit" class="btn" name="action" value="test">Проверить</button></div><p class="panel-setting-status" id="tgStatus" role="status"></p></form></section>
+            tg_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Уведомления Telegram</h2><p>Истечение доступов, входы, каскады и автобэкапы — в ваш чат</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><form id="tgForm" action="{PANEL_PATH}/telegram-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="tgToken">Токен бота</label><input id="tgToken" name="token" value="{esc(tg_cfg.get("token"))}" placeholder="123456:ABC-DEF…" spellcheck="false" autocomplete="off"></div><div><label for="tgChat">Chat ID</label><input id="tgChat" name="chat" value="{esc(tg_cfg.get("chat"))}" placeholder="123456789 или @channel" spellcheck="false" autocomplete="off"></div></div><div class="checks choice-grid">{event_checks}</div><div class="actions"><button type="submit" class="btn primary" name="action" value="save">Сохранить</button><button type="submit" class="btn" name="action" value="test">Проверить</button></div><p class="panel-setting-status" id="tgStatus" role="status"></p></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Автобэкап по расписанию</b><small>Раз в сутки архив с настройками и клиентами уходит в Telegram (если настроен) и хранится локально в /var/lib/onyx-panel/backups. {esc(backup_status)}</small></div><form id="backupForm" action="{PANEL_PATH}/backups-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="backupMode">Режим</label><select id="backupMode" name="mode"><option value="off" {"selected" if backups_cfg.get("mode","off")=="off" else ""}>Выключен</option><option value="telegram" {"selected" if backups_cfg.get("mode")=="telegram" else ""}>Ежедневно</option></select></div><div><label for="backupHour">Время</label><select id="backupHour" name="hour">{hour_options}</select></div><div><label for="backupKeep">Хранить копий</label><input id="backupKeep" name="keep" type="number" min="3" max="30" value="{int(backups_cfg.get("keep",7))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить расписание</button></div><p class="panel-setting-status" id="backupStatus" role="status"></p></form></section>
 </div>
-<div class="card"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div></div>
+</div>'''
+            security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
+<div class="card-body">
 <section class="panel-setting"><div class="panel-setting-info"><b>Двухфакторная аутентификация (TOTP)</b><small>Статус: {totp_status}. При входе панель запросит код из приложения-аутентификатора (Google Authenticator, 1Password и любые совместимые).</small></div><div class="actions"><button type="button" class="btn primary" id="totpSetupBtn">{"Настроить заново" if totp_cfg.get("enabled") else "Включить 2FA"}</button>{f'<button type="button" class="btn danger" id="totpDisableBtn">Выключить 2FA</button>' if totp_cfg.get("enabled") else ''}</div><p class="panel-setting-status" id="totpStatus" role="status"></p></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Наблюдатель</b><small>Второй аккаунт только для чтения: дашборд, клиенты, ноды, каскады. Изменения запрещены на уровне сервера. Очистите оба поля, чтобы удалить доступ.</small></div><form id="observerForm" action="{PANEL_PATH}/observer-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="observerUser">Логин наблюдателя</label><input id="observerUser" name="user" value="{esc(observer.get("user",""))}" autocomplete="off" placeholder="Например, assistant"></div><div><label for="observerPass">Пароль</label><input id="observerPass" type="password" name="a" autocomplete="new-password" placeholder="{"Оставить текущий" if observer.get("hash") else "Минимум 3 символа"}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить наблюдателя</button></div><p class="panel-setting-status" id="observerStatus" role="status"></p></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Ключи внешнего API</b><small>REST API для ботов и биллингов: Bearer-токен в заголовке Authorization, адрес <code>{panel_url}/api/v1/clients</code>.</small></div><div>{api_rows or '<p class="muted" style="font-size:12px;margin:6px 0">Ключей пока нет.</p>'}</div><form id="apiKeyForm" action="{PANEL_PATH}/api-keys-create"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="apiKeyName">Название нового ключа</label><input id="apiKeyName" name="name" maxlength="60" placeholder="Например, Бот продаж" autocomplete="off"></div></div><div class="actions"><button type="submit" class="btn primary">Создать ключ</button></div><p class="panel-setting-status" id="apiKeyStatus" role="status"></p></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Журнал входов</b><small>Последние входы в панель. «Новое устройство» — первый вход с такого браузера.</small></div><table class="login-log"><thead><tr><th>Время</th><th>Кто</th><th>IP</th><th>Устройство</th></tr></thead><tbody id="loginLogRows">{login_rows}</tbody></table><nav class="login-pager" id="loginPager" hidden><button type="button" id="loginPrev" aria-label="Предыдущая страница">‹</button><span id="loginPageLabel">1 / 1</span><button type="button" id="loginNext" aria-label="Следующая страница">›</button></nav></section>
-</div></div>
-<dialog id="totpDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Включение 2FA</h2><p class="totp-hint">Отсканируйте QR в приложении-аутентификаторе</p><img id="totpQr" alt="QR-код TOTP" hidden><p class="totp-secret-line">Секрет: <code id="totpSecret"></code></p><p class="totp-otp-label">Введите код из приложения</p><div class="totp-cells" id="totpCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpCode"><p class="totp-status" id="totpDialogStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="primary" id="totpConfirm">Включить</button></div></dialog>
+</div>
+</div>'''
+            security_dialogs=f'''<dialog id="totpDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Включение 2FA</h2><p class="totp-hint">Отсканируйте QR в приложении-аутентификаторе</p><img id="totpQr" alt="QR-код TOTP" hidden><p class="totp-secret-line">Секрет: <code id="totpSecret"></code></p><p class="totp-otp-label">Введите код из приложения</p><div class="totp-cells" id="totpCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpCode"><p class="totp-status" id="totpDialogStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="primary" id="totpConfirm">Включить</button></div></dialog>
 <dialog id="apiKeyDialog" class="create-dialog"><div class="dialog-head"><div><h2>Ключ создан</h2><small>Токен показывается только один раз — сохраните его</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><textarea class="code-editor" id="apiKeyToken" readonly style="min-height:74px"></textarea><div class="actions create-actions"><button type="button" class="btn" id="apiKeyCopy">Скопировать</button><button type="button" class="btn primary" data-close-dialog>Готово</button></div></div></dialog>'''
             panel_js='''<script>
 (()=>{async function submit(form,status,done){
@@ -3325,51 +3368,6 @@ const restoreBtn=document.getElementById("importConfirm");
 if(restoreBtn)restoreBtn.addEventListener("click",async()=>{if(!(await onyxConfirm("Заменить текущие настройки, клиентов и заглушки содержимым копии?",{title:"Восстановление из копии",ok:"Восстановить",danger:true})))return;preview.hidden=true;file.value="";submit(importForm,status)});
 const cancelBtn=document.getElementById("importCancel");
 if(cancelBtn)cancelBtn.addEventListener("click",()=>{preview.hidden=true;data.value="";file.value=""})};
-const compGrid=document.getElementById("componentGrid");
-if(compGrid){
-  const compCsrf=compGrid.dataset.csrf,checkUrl=compGrid.dataset.check,installUrl=compGrid.dataset.install,statusUrl=compGrid.dataset.status,verifyUrl=compGrid.dataset.verify;
-  const compRows={};
-  compGrid.querySelectorAll("[data-component]").forEach(row=>{compRows[row.dataset.component]={row,ver:row.querySelector("[data-ver]"),sel:row.querySelector("select"),btn:row.querySelector("button"),status:row.querySelector(".component-item-status")}});
-  async function compApi(url,body){let lastErr=null;for(let a=0;a<3;a++){if(a)await new Promise(r=>setTimeout(r,1500));try{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(body),signal:window.AbortSignal?AbortSignal.timeout(15000):undefined});let j;try{j=await r.json()}catch(e){lastErr=new Error("Панель не отвечает. Проверьте связь и попробуйте снова.");continue}if(!r.ok)throw new Error(j.message||"Не выполнено.");return j}catch(e){if(!String(e.message||e).startsWith("Панель не отвечает"))throw e;lastErr=e}}throw lastErr||new Error("Панель не отвечает.")}
-  const compOverlay=document.createElement("div");compOverlay.className="move-overlay";compOverlay.hidden=true;
-  compOverlay.innerHTML='<div class="move-card" id="compCard"><div class="move-ring" id="compRing"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" cx="50" cy="50" r="44"/></svg><b id="compRingText">↑</b></div><h3 id="compTitle">Обновление</h3><p id="compText"></p><div class="actions upd-actions" id="compActions" hidden><button type="button" id="compCancel">Отмена</button><button type="button" class="primary" id="compGo">Установить</button></div><div class="actions upd-actions"><button type="button" id="compClose" hidden>Закрыть</button></div></div>';
-  document.body.append(compOverlay);
-  const compCard=compOverlay.querySelector("#compCard"),compRing=compOverlay.querySelector("#compRing"),compRingText=compOverlay.querySelector("#compRingText"),compTitle=compOverlay.querySelector("#compTitle"),compText=compOverlay.querySelector("#compText"),compClose=compOverlay.querySelector("#compClose"),compActions=compOverlay.querySelector("#compActions"),compCancel=compOverlay.querySelector("#compCancel"),compGo=compOverlay.querySelector("#compGo");let resolveCompActions=null;
-  function compShow(state,title,text){compCard.classList.remove("spin","upd-done","upd-err");compActions.hidden=true;compClose.hidden=true;compTitle.textContent=title;compText.textContent=text||"";if(state==="confirm"){compRingText.textContent="↑";compCard.classList.add("spin")}else if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}else if(state==="done"){compCard.classList.add("upd-done");compRingText.textContent="✓";compClose.hidden=false}else{compCard.classList.add("upd-err");compRingText.textContent="!";compClose.hidden=false}compOverlay.hidden=false;requestAnimationFrame(()=>compOverlay.classList.add("show"))}
-  function compHide(){compOverlay.classList.remove("show");setTimeout(()=>{compOverlay.hidden=true},260);resolveCompActions=null}function compConfirm(label,target){compShow("confirm",label,"Версия "+target+" установится поверх текущей. При ошибке — автоматический откат.");compActions.hidden=false;return new Promise(res=>{resolveCompActions=res})}compGo.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(true)}});compCancel.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(false);compHide()}});
-  compClose.addEventListener("click",compHide);
-  async function compRefresh(){const d=await compApi(checkUrl,{csrf:compCsrf});Object.keys(compRows).forEach(n=>{const item=compRows[n];item.ver.textContent=(d.current&&d.current[n])||"—";if(item.sel){const tags=(d.catalog&&d.catalog[n])||[];const cur=(d.current&&d.current[n])||"";const wanted="v"+cur;const bad=(n==='openflux'&&(d.unsuitable&&d.unsuitable[n]||[]))||[];const pre=(n==='openflux'&&d.prerelease&&d.prerelease[n]||[]).map(e=>typeof e==="string"?e:e.tag).slice(0,4);const list=tags.slice(0,6);bad.forEach(t=>{if(list.indexOf(t)<0)list.push(t)});if(wanted&&list.indexOf(wanted)<0&&tags.indexOf(wanted)>=0)list.push(wanted);list.sort((a,b)=>{const p=s=>s.replace(/^v/,"").split(".").map(Number),x=p(a),y=p(b);for(let i=0;i<4;i++){if((x[i]||0)!==(y[i]||0))return (y[i]||0)>(x[i]||0)?1:-1}return 0});const full=[];pre.concat(list).forEach(t=>{if(full.indexOf(t)<0)full.push(t)});item.sel.innerHTML="";full.forEach(t=>{const o=document.createElement("option");o.value=t;o.textContent=t===wanted?t+" — установлена":(pre.indexOf(t)>=0?t+" · пререлиз":(bad.indexOf(t)>=0?t+" · нет сборки для Linux":t));item.sel.appendChild(o)});if(wanted&&full.indexOf(wanted)>=0)item.sel.value=wanted}});return d}
-  async function compVerify(n,target,hint){if(n!=="openflux"||!target)return;hint.hidden=false;hint.className="component-hint";hint.textContent="Проверяю версию "+target.replace(/^v/,"")+"…";try{const r=await compApi(verifyUrl,{csrf:compCsrf,component:n,target});hint.className="component-hint "+(r.ok?"ok":"err");hint.textContent=r.ok?target.replace(/^v/,"")+" подходит для установки.":(r.message||"Версия не подходит для установки.")}catch(e){hint.hidden=true}}
-  Object.keys(compRows).forEach(n=>{if(n==="openflux"&&compRows[n].sel)compRows[n].sel.addEventListener("change",()=>compVerify(n,compRows[n].sel.value,compRows[n].status))});
-  compRefresh().catch(()=>{Object.values(compRows).forEach(item=>{item.ver.textContent="—"})});
-  Object.keys(compRows).forEach(n=>{const item=compRows[n];
-    item.btn.addEventListener("click",async()=>{
-      const target=n==="mtproto"?"refresh":(item.sel?item.sel.value:"");
-      if(!target){item.status.className="component-item-status err";item.status.textContent="Нет доступной версии.";return}
-      if(!(await compConfirm(item.row.dataset.label,target)))return;
-      item.btn.disabled=true;
-      compShow("running",item.row.dataset.label,"Скачиваем релиз и перезапускаем службу…");
-      const started=Date.now();
-      try{
-        try{await compApi(installUrl,{csrf:compCsrf,component:n,target})}
-        catch(e){if(!String(e.message).includes("уже выполняется"))throw e}
-        let misses=0;
-        while(Date.now()-started<30*60*1000){
-          await new Promise(r=>setTimeout(r,3000));
-          compRingText.textContent=Math.floor((Date.now()-started)/1000)+" с";
-          let st;
-          try{st=await compApi(statusUrl,{csrf:compCsrf});misses=0}
-          catch(e){misses++;compText.textContent=misses<5?"Связь прервалась — повторяем опрос…":"Связь с панелью кратко прерывается на время перезапуска Xray — ждём восстановления… ("+misses+")";continue}
-          if(st.phase==="done"){compShow("done",item.row.dataset.label+" обновлён",st.message||"Готово.");item.status.className="component-item-status ok";item.status.textContent=st.message||"Готово.";compRefresh().catch(()=>{});setTimeout(compHide,2600);return}
-          if(st.phase==="failed"){compShow("err",item.row.dataset.label,st.message||"Не удалось.");item.status.className="component-item-status err";item.status.textContent=st.message||"Не удалось.";return}
-          compText.textContent=st.message||"Устанавливаю… "+Math.floor((Date.now()-started)/1000)+" с";
-        }
-        throw new Error("Обновление идёт дольше 30 минут. Проверьте статус позже — установка продолжается в фоне.");
-      }catch(e){item.status.className="component-item-status err";item.status.textContent=e.message;compShow("err",item.row.dataset.label+" — не обновлён",e.message)}
-      finally{item.btn.disabled=false}
-    })
-  })
-}
 })();
 </script>
 <script>
@@ -3438,25 +3436,35 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 })();
 </script>'''
             body=f'''<div class="page-head"><div><span class="eyebrow">ONYX PANEL / STUDIO</span><h1>Настройки</h1><p>Оформление сайта и доступ к панели</p></div></div>
-<div class="settings-grid"><div class="card settings-card"><div class="card-title"><div><h2>Панель</h2><p>Адрес входа и учётные данные администратора</p></div></div>
+<style>{extra_cards2["style"]}</style>
+<div class="settings-flow">
+<div class="settings-col">
+<div class="card settings-card collapsible"><div class="card-title"><div><h2>Панель</h2><p>Адрес входа и учётные данные администратора</p></div>{card_expand()}</div>
+<div class="card-body">
 <section class="panel-setting"><div class="panel-setting-info"><b>Адрес панели</b><small>Секретный путь входа — любой, от 4 символов: /xray, /my-vpn, /ab12. Меняйте его, если ссылка стала известна посторонним. После смены панель перезапустится — входите заново по новому адресу.</small></div><form id="panelPathForm" action="{PANEL_PATH}/panel-path"><p class="panel-current"><span>Текущий адрес</span><code>{panel_url}</code></p><input type=hidden name=csrf value="{token}"><label for="panelPathInput">Новый путь</label><input id="panelPathInput" name="path" value="{esc(PANEL_PATH)}" spellcheck="false" autocomplete="off" required><div class="actions"><button type="submit" class="btn primary">Сменить адрес</button></div><p class="panel-setting-status" id="panelPathStatus" role="status"></p></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Логин и пароль</b><small>Данные для входа в панель. Смена пароля завершает все сессии — вход по новому паролю.</small></div><form id="panelAccessForm" data-login="{PANEL_PATH}/panel-login" data-password="{PANEL_PATH}/panel-password" data-goto="{PANEL_PATH}/login"><input type=hidden name=csrf value="{token}"><div class="admin-access-grid"><div><label for="panelLoginInput">Логин</label><input id="panelLoginInput" name="user" value="{admin_login}" maxlength="64" autocomplete="username" required><small>От 1 до 64 символов</small></div><div><label for="panelPasswordInput">Новый пароль</label><input id="panelPasswordInput" type=password name="a" minlength="3" autocomplete="new-password" placeholder="Оставить текущий"><small>Минимум 3 символа</small></div></div><div class="actions"><button type="submit" class="btn primary">Изменить доступ</button></div><p class="panel-setting-status" id="panelAccessStatus" role="status"></p></form></section>
+</div>
 <div class="move-overlay" id="moveOverlay" hidden><div class="move-card"><div class="move-ring"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" id="moveRing" cx="50" cy="50" r="44"/></svg><b id="moveSecs">8</b></div><h3>Панель переезжает</h3><p id="moveText">Адрес изменён. Caddy и панель перезапускаются — сейчас откроется новый адрес входа. Войдите на нём заново.</p><code id="moveUrl"></code><a class="btn primary" id="moveLink" href="#">Перейти сейчас</a></div></div>
 </div>
-<div class="settings-col"><div class="card"><div class="card-title"><div><h2>Компоненты</h2><p>Обновление Xray, OpenFlux, AmneziaWG и MTProto с их репозиториев</p></div></div>
-<div class="component-stack" id="componentGrid" data-csrf="{token}" data-check="{PANEL_PATH}/component-check" data-install="{PANEL_PATH}/component-install" data-status="{PANEL_PATH}/component-status" data-verify="{PANEL_PATH}/component-verify">
-<div class="component-item" data-component="xray" data-label="Xray"><div class="component-item-head"><strong>Xray</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия Xray"></select><button class="primary comp-icon" title="Обновить Xray" aria-label="Обновить Xray">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div>
-<div class="component-item" data-component="openflux" data-label="OpenFlux"><div class="component-item-head"><strong>OpenFlux</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия OpenFlux"></select><button class="primary comp-icon" title="Обновить OpenFlux" aria-label="Обновить OpenFlux">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div>
-<div class="component-item" data-component="awg" data-label="AmneziaWG"><div class="component-item-head"><strong>AmneziaWG</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия AmneziaWG"></select><button class="primary comp-icon" title="Обновить AmneziaWG" aria-label="Обновить AmneziaWG">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div>
-<div class="component-item" data-component="mtproto" data-label="MTProto"><div class="component-item-head"><strong>MTProto</strong><small data-ver>…</small></div><div class="update-control"><button class="primary comp-icon" title="Пересобрать из исходников" aria-label="Пересобрать MTProto из исходников">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div>
+{tg_card}
+{extra_cards2['observe']}
+{extra_cards2['cloud']}
 </div>
-<p class="muted" style="font-size:11px;margin:10px 0 0">Перед заменой бинарника создаётся его копия; если новая версия не запустится, предыдущая вернётся автоматически. MTProto собирается из исходников, закреплённых за версией панели.</p></div>
-<div class="card"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div></div>
-<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form></div></div></div>
+<div class="settings-col">
+<div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
+<div class="card-body">
+<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
+</div>
+</div>
+{security_card}
+{extra_cards2['ports']}
+</div>
+</div>
+{editor_card}
+{editor_rest}
+{extra_cards2['script']}
+{security_dialogs}
 <dialog id="importPreview" class="create-dialog" hidden><div class="dialog-head"><div><h2>Что заменит эта копия</h2><small id="prevVersion">—</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><p class="muted" style="font-size:11px;margin:0 0 10px">Копия создана: <span id="prevExported">—</span>. Восстановление заменяет настройки, клиентов и заглушки целиком; прежнее состояние сохраняется в /var/lib/onyx-panel/import-backup.</p><table class="login-log"><thead><tr><th>Что</th><th>В копии</th><th>Сейчас</th></tr></thead><tbody id="prevCounts"></tbody></table><p class="note" id="prevClients" style="margin:12px 0 0"></p><div class="actions create-actions"><button type="button" class="btn" id="importCancel">Отмена</button><button type="button" class="btn primary" id="importConfirm">Восстановить</button></div></div></dialog>
-{extra_cards}
-{extra_cards2}
-{editor}
 {panel_js}{security_js.replace("@@PATH@@",json.dumps(PANEL_PATH)).replace("@@CSRF@@",json.dumps(token))}'''
             self.send_html(layout("Настройки",body,"settings",self.csrf())); return
 
@@ -4529,6 +4537,97 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             self.send_json({"ok":True}); return
 
         if path==PANEL_PATH+"/backup-now":
+            # «Копия сейчас» идёт этапами, чтобы модалка показывала живой статус:
+            # build -> local -> cloud (по каждому включённому хранилищу) -> finish.
+            # Пустой stage сохраняет прежнее поведение одним запросом (совместимость).
+            stage=form.get('stage','all')
+            cloud_names={"yandex":"Яндекс Диск","mailru":"Облако Mail.ru","gdrive":"Google Drive"}
+            def backup_enabled_targets():
+                with STATE_LOCK:
+                    d=load(); b=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+                    cloud_targets=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+                return [t for t in onyx_cloud.TARGETS
+                        if (cloud_targets.get(t) if isinstance(cloud_targets.get(t),dict) else {}).get("enabled")]
+            def backup_job(job_id):
+                rec=BACKUP_JOBS.get(str(job_id or ""))
+                if not rec or time.time()-rec["ts"]>1800:
+                    BACKUP_JOBS.pop(str(job_id or ""),None)
+                    raise ValueError("Сессия копии истекла — начните заново.")
+                return rec
+            def backup_merge_cloud(b,cloud_state):
+                # Обновляем только статус (ts/ok/message): флаг enabled каждого
+                # хранилища обязан пережить выгрузку, иначе следующая копия
+                # молча пропустит облако.
+                merged=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+                for target,st in cloud_state.items():
+                    entry=merged.get(target) if isinstance(merged.get(target),dict) else {}
+                    entry.update(st); merged[target]=entry
+                b["cloud"]=merged
+            if stage=="build":
+                try:
+                    blob=build_backup_tar()
+                except (ValueError,OSError) as exc:
+                    self.send_json({"message":"Не удалось собрать копию: "+str(exc)[-160:]},503); return
+                job=secrets.token_hex(8)
+                with BACKUP_JOBS_LOCK:
+                    for k in [k for k,v in BACKUP_JOBS.items() if time.time()-v["ts"]>1800]: BACKUP_JOBS.pop(k,None)
+                    BACKUP_JOBS[job]={"blob":blob,"name":"onyx-backup-%s.tar.gz"%time.strftime("%Y%m%d-%H%M%S"),
+                                      "ts":time.time(),"saved":False,"cloud":{}}
+                targets=[{"key":t,"label":cloud_names.get(t,t)} for t in backup_enabled_targets()]
+                self.send_json({"ok":True,"job":job,"name":BACKUP_JOBS[job]["name"],"size":len(blob),"targets":targets}); return
+            if stage=="local":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                directory="/var/lib/onyx-panel/backups"
+                os.makedirs(directory,exist_ok=True)
+                with open(os.path.join(directory,rec["name"]),"wb") as f: f.write(rec["blob"])
+                with STATE_LOCK:
+                    d=load(); bc=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+                    keep=max(3,int(bc.get("keep",7) or 7))
+                for old in sorted(os.listdir(directory))[:-keep]:
+                    if old.endswith(".tar.gz"):
+                        try: os.unlink(os.path.join(directory,old))
+                        except OSError: pass
+                rec["saved"]=True
+                self.send_json({"ok":True,"name":rec["name"],"size":len(rec["blob"])}); return
+            if stage=="cloud":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                target=form.get('target','')
+                if target not in onyx_cloud.TARGETS:
+                    self.send_json({"message":"Неизвестное хранилище."},400); return
+                try:
+                    onyx_cloud.upload(target,rec["name"],rec["blob"],7)
+                    rec["cloud"][target]={"ok":True,"message":"выгружено"}
+                    self.send_json({"ok":True,"message":cloud_names.get(target,target)+": копия выгружена"}); return
+                except Exception as exc:
+                    rec["cloud"][target]={"ok":False,"message":str(exc)[-200:]}
+                    self.send_json({"ok":False,"message":cloud_names.get(target,target)+": "+str(exc)[-160:]}); return
+            if stage=="finish":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                if not rec.get("saved"):
+                    self.send_json({"message":"Локальная копия не сохранена — начните заново."},409); return
+                cloud_state={t:{"ts":int(time.time()),"ok":st["ok"],"message":st["message"]} for t,st in rec["cloud"].items()}
+                cloud_ok=all(st["ok"] for st in rec["cloud"].values()) if rec["cloud"] else True
+                cloud_notes=[cloud_names.get(t,t)+": "+st["message"] for t,st in sorted(rec["cloud"].items())]
+                note="ручная копия сохранена локально"
+                if cloud_notes: note+=", облака: "+", ".join(cloud_notes)
+                with STATE_LOCK:
+                    d=load(); b=d.setdefault("backups",{})
+                    b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":cloud_ok,"message":note,"size":len(rec["blob"])}
+                    if cloud_state: backup_merge_cloud(b,cloud_state)
+                    save(d)
+                audit('backup-run',rec["name"],human_bytes(len(rec["blob"]))+(" · "+note if cloud_notes else ""))
+                for t in sorted(rec["cloud"]): audit('backup-run',cloud_names.get(t,t),t+": "+rec["cloud"][t]["message"])
+                with BACKUP_JOBS_LOCK: BACKUP_JOBS.pop(str(form.get('job')),None)
+                message="Копия сохранена локально ("+human_bytes(len(rec["blob"]))+")."
+                if cloud_notes: message="Копия сохранена ("+human_bytes(len(rec["blob"]))+"). Облака: "+", ".join(cloud_notes)+"."
+                self.send_json({"ok":True,"message":message}); return
+            # stage=all — прежний однозапросный сценарий (внешние вызовы, старые клиенты)
             try:
                 blob=build_backup_tar()
             except (ValueError,OSError) as exc:
@@ -4537,12 +4636,28 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             os.makedirs(directory,exist_ok=True)
             name="onyx-backup-%s.tar.gz"%time.strftime("%Y%m%d-%H%M%S")
             with open(os.path.join(directory,name),"wb") as f: f.write(blob)
+            audit('backup-run',name,human_bytes(len(blob)))
+            cloud_notes=[];cloud_state={};cloud_ok=True
+            for target in backup_enabled_targets():
+                try:
+                    onyx_cloud.upload(target,name,blob,7)
+                    cloud_notes.append(cloud_names.get(target,target)+": выгружено")
+                    cloud_state[target]={"ts":int(time.time()),"ok":True,"message":"загружено"}
+                except Exception as exc:
+                    cloud_ok=False
+                    cloud_notes.append(cloud_names.get(target,target)+": "+str(exc)[-110:])
+                    cloud_state[target]={"ts":int(time.time()),"ok":False,"message":str(exc)[-200:]}
+                audit('backup-run',cloud_names.get(target,target),cloud_names.get(target,target)+": "+cloud_state[target]["message"])
+            note="ручная копия сохранена локально"
+            if cloud_notes: note+=", облака: "+", ".join(cloud_notes)
             with STATE_LOCK:
                 d=load(); b=d.setdefault("backups",{})
-                b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":True,"message":"ручная копия сохранена локально","size":len(blob)}
+                b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":cloud_ok,"message":note,"size":len(blob)}
+                if cloud_state: backup_merge_cloud(b,cloud_state)
                 save(d)
-            audit('backup-run',name,human_bytes(len(blob)))
-            self.send_json({"ok":True,"message":"Копия сохранена локально ("+human_bytes(len(blob))+")."}); return
+            message="Копия сохранена локально ("+human_bytes(len(blob))+")."
+            if cloud_notes: message="Копия сохранена ("+human_bytes(len(blob))+"). Облака: "+", ".join(cloud_notes)+"."
+            self.send_json({"ok":True,"message":message}); return
 
         if path==PANEL_PATH+"/backup-cloud-save":
             targets=form.get('targets','')
@@ -4568,6 +4683,41 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 self.send_json({"message":str(exc)[-200:]},400); return
             audit('backup-cloud-save','gdrive',"настроен OAuth-клиент")
             self.send_json({"ok":True,"redirect":url}); return
+
+        if path==PANEL_PATH+"/yandex-connect":
+            yandex_token=form.get('token','').strip()
+            if not yandex_token:
+                self.send_json({"message":"Вставьте OAuth-токен Яндекс Диска (y0_…)."},400); return
+            try:
+                onyx_cloud.yandex_save_token(yandex_token)
+            except Exception as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            audit('backup-cloud-save','yandex',"подключён свой OAuth-токен")
+            self.send_json({"ok":True,"message":"Яндекс Диск подключён: токен проверен живым запросом."}); return
+
+        if path==PANEL_PATH+"/yandex-disconnect":
+            onyx_cloud.yandex_disconnect()
+            audit('backup-cloud-save','yandex',"отключён")
+            self.send_json({"ok":True,"message":"Яндекс Диск отключён."}); return
+
+        if path==PANEL_PATH+"/mailru-connect":
+            mailru_email=form.get('email','').strip(); mailru_password=form.get('password','')
+            try:
+                onyx_cloud.mailru_connect(mailru_email,mailru_password)
+            except Exception as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            audit('backup-cloud-save','mailru',"подключён свой аккаунт")
+            self.send_json({"ok":True,"message":"Облако Mail.ru подключено: вход проверен живым запросом."}); return
+
+        if path==PANEL_PATH+"/mailru-disconnect":
+            onyx_cloud.mailru_disconnect()
+            audit('backup-cloud-save','mailru',"отключён")
+            self.send_json({"ok":True,"message":"Облако Mail.ru отключено."}); return
+
+        if path==PANEL_PATH+"/gdrive-disconnect":
+            onyx_cloud.gdrive_disconnect()
+            audit('backup-cloud-save','gdrive',"отключён")
+            self.send_json({"ok":True,"message":"Google Drive отключён."}); return
 
         if path==PANEL_PATH+"/firewall-port":
             spec=str(form.get('port','')).strip()+"/"+("udp" if form.get('proto')=='udp' else "tcp")
@@ -4881,7 +5031,15 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 try: png=base64.b64encode(qr_png_bytes(link)).decode("ascii")
                 except Exception: pass
                 qrs.append({"label":labels[proto],"hint":profile.get("name",""),"link":link,"png":png})
-            extra=""
+            if not qrs:
+                # Свежая подписка ещё не выдавала ключи устройствам: профили
+                # создаются при первом импорте клиентом. Пока — QR самой ссылки:
+                # приложение импортирует подписку, панель выдаст профили сама.
+                sub_url="https://"+DOMAIN+"/onyx-sub/"+token
+                png=""
+                try: png=base64.b64encode(qr_png_bytes(sub_url)).decode("ascii")
+                except Exception: pass
+                qrs.append({"label":"Ссылка подписки","hint":"Добавьте в приложение — все профили появятся автоматически","link":sub_url,"png":png})
             if any(u.get("protocol")=="vless" for u in profiles):
                 reality=reality_link(next((u for u in profiles if u.get("protocol")=="vless"),{}).get("secret",""),sub.get("name","")+" · Reality")
                 if reality:
@@ -5113,7 +5271,12 @@ def run_scheduled_backup():
         d=load(); b=d.get("backups") if isinstance(d.get("backups"),dict) else {}
         b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":ok,
                    "message":note,"size":len(blob)}
-        if cloud_state: b["cloud"]=cloud_state
+        if cloud_state:
+            merged=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+            for target,st in cloud_state.items():
+                entry=merged.get(target) if isinstance(merged.get(target),dict) else {}
+                entry.update(st); merged[target]=entry
+            b["cloud"]=merged
         d["backups"]=b; save(d)
     telegram_notify("backups",("✅ Автобэкап %s (%s)."%(note,human_bytes(len(blob)))) if ok else ("⚠️ Автобэкап: %s"%note))
 
@@ -5784,7 +5947,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.0
+Description=Onyx Panel 2.1.14
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6092,7 +6255,6 @@ s = s.replace("{$TPROXY_HOSTNAME}", domain)
 s = s.replace("{$ACME_EMAIL}", email)
 s = re.sub(
     r'\n\s*handle /onyx-sub/\*\s*\{\s*reverse_proxy 127\.0\.0\.1:8090\s*\}\s*',
-    r'\n\s*handle /onyx-invite/\*\s*\{\s*reverse_proxy 127\.0\.0\.1:8090\s*\}\s*',
     '\n', s, flags=re.S,
 )
 s = re.sub(
@@ -6344,9 +6506,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.0 UPDATED"
+echo "          Onyx Panel 2.1.14 UPDATED"
 else
-echo "         Onyx Panel 2.1.0 IS READY"
+echo "         Onyx Panel 2.1.14 IS READY"
 fi
 echo "============================================================"
 echo

@@ -5,154 +5,144 @@
   </picture>
 </p>
 
-<p align="center"><b>Панель управления VPN на своём VPS.</b><br>
-VLESS XHTTP · Hysteria2 · AmneziaWG 2.0/3.1 · MTProto · Telegram Web Proxy · OpenFlux · Каскады панелей · Маршрутизация</p>
+<p align="center"><b>Self-hosted VPN control panel for your VPS.</b><br>
+VLESS XHTTP · Hysteria2 · AmneziaWG 2.0/3.1 · MTProto · Telegram Web Proxy · OpenFlux · Panel cascades · Smart routing</p>
 
 <p align="center">
-  <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Поддержать проект" src="https://img.shields.io/badge/%F0%9F%92%9C_%D0%9F%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B0%D1%82%D1%8C_%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82-CloudTips-8b5cf6?style=for-the-badge"></a>
+  <b>English</b> · <a href="README.ru.md">Русский</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/xCodeOn/Onyx-Panel/releases"><img alt="Версия" src="https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-2.1.0-65a8dc"></a>
-  <a href="LICENSE"><img alt="Лицензия" src="https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-58c392"></a>
-  <img alt="Платформа" src="https://img.shields.io/badge/Ubuntu%2022.04%2B%20%7C%20Debian%2012%2B-x86__64-8a97ab">
+  <a href="https://github.com/xCodeOn/Onyx-Panel/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/xCodeOn/Onyx-Panel?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/xCodeOn/Onyx-Panel?style=flat-square"></a>
+  <a href="https://github.com/xCodeOn/Onyx-Panel/actions/workflows/tests.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/xCodeOn/Onyx-Panel/tests.yml?branch=main&style=flat-square&label=tests"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/Ubuntu%2022.04%2B%20%7C%20Debian%2012%2B-x86__64-8a97ab?style=flat-square">
+  <a href="https://github.com/xCodeOn/Onyx-Panel/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/xCodeOn/Onyx-Panel?style=flat-square&color=ff760b"></a>
 </p>
 
----
+<p align="center">
+  <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Support the project" src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F_Support_the_project-CloudTips-8b5cf6?style=for-the-badge"></a>
+</p>
 
-## Скриншот
+<p align="center">
+  <img src="docs/screenshots/backup-cloud.gif" width="640" alt="One-click cloud backup with live step-by-step status">
+</p>
+<p align="center"><i>One-click backup to Yandex Disk — live status for every step, local and in the cloud.</i></p>
 
-<img src="docs/screenshots/dashboard.png" alt="Дашборд — ресурсы VPS, график трафика, состояние служб" width="100%">
+## Screenshots
 
-## Возможности
+<p align="center">
+  <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="49%" alt="Dashboard — VPS resources, live traffic graph, service status"></a>
+  <a href="docs/screenshots/clients.png"><img src="docs/screenshots/clients.png" width="49%" alt="Clients — traffic, quotas, protocols, bulk actions"></a>
+  <a href="docs/screenshots/create-client.png"><img src="docs/screenshots/create-client.png" width="49%" alt="Create a client in two steps"></a>
+  <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="49%" alt="Settings — Telegram notifications, cloud backups"></a>
+  <a href="docs/screenshots/subscription.png"><img src="docs/screenshots/subscription.png" width="66%" alt="Personal client subscription page with QR codes"></a>
+  <a href="docs/screenshots/mobile-pwa.png"><img src="docs/screenshots/mobile-pwa.png" width="31%" alt="PWA install on a phone"></a>
+</p>
 
-- **Каскад панелей** — вставьте `vless://` ключ клиента верхней панели, и трафик этой панели уйдёт в интернет через неё. Режимы «Все» и «Только выбранные», проверка с показом задержки и **выходного IP**, включение/отключение одним тумблером, несколько каскадов одновременно. Поддерживаются ключи сторонних Xray-панелей (TCP, WebSocket, gRPC, XHTTP, HTTPUpgrade, HTTP/2; TLS и Reality).
-- **Маршрутизация** — прямые IP-адреса и домены с пресетами стран, правила «только IPv4» и переключатель **блокировки торрентов**. Правила проверяются до каскада: совпавший трафик всегда уходит напрямую. Пресеты — это готовые geoip/geosite-списки Xray.
-- **Подписки и отдельные подключения** — одна ссылка на все протоколы или отдельный ключ на устройство, QR-коды, лимит устройств по HWID, автоотключение по дате.
-- **VLESS XHTTP и Hysteria2** — TLS через ваш домен (Caddy) и быстрый QUIC.
-- **AmneziaWG 2.0 / 3.1** — отдельный профиль на клиента: свои ключи, порт, подсеть и параметры маскировки.
-- **MTProto и Telegram Web Proxy** — прямое подключение и ссылка через HTTPS.
-- **OpenFlux** — туннель через публичные документы Яндекса и Mail.ru (iOS/Android): панель следит за доступностью документа (watchdog), при пропаже уведомляет в колокольчик и Telegram и умеет переключать профиль на резервный документ другого транспорта; документ на Яндекс Диске или в Облаке Mail.ru создаётся прямо из панели (для Яндекса — OAuth-токен, для Mail.ru — логин/пароль почты и переносимая сессия 0600; Mail.ru официального API не имеет, используется протокол веб-клиента, поэтому при капче сессию проще пересадить с домашней машины); у профилей есть дата автоотключения, а панель проверяет публичность ссылки при сохранении.
-- **Ноды** — объединение нескольких VPS в одну подписку через Node API token.
-- **Дизайн Flow** — интерфейс в стиле Channel Analytics: плавающий округлый workspace с тёплыми градиентами, стеклянные карточки, узкая иконочная навигация с подсказками (на телефоне — нижняя панель), фирменный шрифт Dashboard (URW Gothic) с полной кириллицей и новый логотип-«поток»; тёмная тема без переключения.
-- **Живой интерфейс** — статистика, статусы каскадов и правила обновляются без перезагрузки страницы; сохранения и ошибки всплывают анимированными тостами.
-- **Обслуживание из панели** — перезапуск панели и модулей (Xray, релей, MTProxy) с анимированной модалкой прогресса, иконки в навигационной панели.
-- **HTML-заглушки** — редактор главной страницы с живым предпросмотром при наборе, изолированным полным предпросмотром и пресетами; карточки пресетов показывают миниатюру реальной страницы, а по наведению (или тапу) открывают описание и действия.
-- **Обновления и резервные копии** — установка и откат версий панели и компонентов одним нажатием, архив всех настроек.
-- **Колокольчик уведомлений** — в шапке рядом с перезапуском модулей: сообщает о вышедшей версии с кнопкой «Обновить», после обновления показывает список изменений новой версии; есть очистка всех уведомлений.
-- **Уведомления Telegram** — истечение доступов, входы в панель (в том числе с новых устройств), сбои и переключения каскадов, результаты автобэкапа. Настраивается в «Настройках» с кнопкой проверки канала.
-- **Автобэкап по расписанию** — ежедневный архив настроек и клиентов: локальная ротация копий в `/var/lib/onyx-panel/backups` и отправка в Telegram.
-- **Двухфакторная аутентификация** — стандартный TOTP (Google Authenticator и совместимые), привязка по QR-коду, код запрашивается при входе.
-- **Наблюдатель** — второй аккаунт только для чтения: дашборд, клиенты, ноды, каскады; изменения запрещены на уровне сервера.
-- **Внешний API** — REST-эндпоинты с Bearer-ключами для ботов и биллингов: создание, продление, включение/отключение и удаление клиентов, получение ссылок.
-- **Failover каскадов** — автоматическое переключение на резервный каскад после двух неудачных проверок активного, с уведомлением в Telegram.
-- **Замер скорости каскада** — реальная скорость загрузки через туннель прямо в карточке каскада.
-- **Квоты трафика** — месячный лимит гигабайтов на клиента: прогресс-бар в списке, предупреждение на 80 %, автоотключение при исчерпании и автоматический возврат доступа в новом месяце; лимит виден клиенту в подписке (subscription-userinfo) и на личной странице.
-- **Личная страница клиента** — по ссылке подписки открывается страница с QR-кодами всех протоколов, инструкцией по подключению, месячным потреблением и сроком доступа.
-- **Приглашения** — одноразовые ссылки с TTL и лимитом активаций: гость сам открывает страницу, получает подписку и сразу видит инструкцию.
-- **Журнал действий** — что происходило в панели: клиенты, подписки, настройки, ноды, каскады, входы (в том числе неудачные). В настройках, с фильтром.
-- **Алерты по ресурсам** — пороги CPU/RAM/диска/load с уведомлениями в колокольчик и Telegram, с напоминаниями не чаще раза в час и сообщением о возврате в норму.
-- **Долгие графики** — дашборд показывает сутки, неделю и 30 дней (часовые средние), у клиентов — спарклайн потребления за сутки.
-- **Живые журналы** — поток journalctl по Xray, AmneziaWG, OpenFlux, Caddy и панели прямо в браузере, с фильтром и паузой; дашборд обновляется через SSE.
-- **Диагностика** — чеклист самопроверки без SSH: DNS, сертификат, службы, конфиг Xray, nft-таблица, порты, свежесть сборщиков, диск и возраст копии.
-- **Облачные копии** — ежедневный архив дополнительно уходит на Яндекс Диск, в Облако Mail.ru (аккаунты из OpenFlux) и Google Drive (свой OAuth-клиент, scope drive.file); восстановление показывает предпросмотр замены.
-- **Порты и firewall** — слушающие порты и правила UFW панели в настройках, открытие/закрытие порта вручную.
-- **Проверка доступа** — панель сама подключается через vless-конфиг клиента и показывает выходной IP, задержку и скорость.
-- **Приложение и уведомления** — панель ставится на домашний экран (PWA-манифест + service worker), события приходят как браузерные уведомления.
-- **Командная палитра** — `Ctrl+K` на любой странице: переход по разделам, действия и поиск клиентов.
+## What you get
 
-## Установка
+| | |
+|---|---|
+| **Protocols** | VLESS XHTTP (TLS via your domain) · Hysteria2 (QUIC) · AmneziaWG 2.0/3.1 with a full per-client profile · MTProto · Telegram Web Proxy · OpenFlux tunnels over public Yandex/Mail.ru documents |
+| **Subscriptions** | One link for all protocols or a separate key per device · QR codes · HWID device limits · expiry dates · monthly traffic quotas visible to the client (`subscription-userinfo`) |
+| **Panel cascades** | Route traffic through another panel via its `vless://` key · several cascades with priority · “everyone” or “selected clients” mode · live latency & exit-IP check · speed test · automatic failover |
+| **Routing** | Direct IP/domain rules with country presets (geoip/geosite) · IPv4-only domains · torrent blocking · rules evaluated before the cascade |
+| **Nodes** | Unite multiple VPS into one subscription via Node API token · live status, versions and speeds every 5 seconds |
+| **Backups** | Daily archive kept locally and sent to Telegram · cloud targets — Yandex Disk, Mail.ru Cloud, Google Drive, each with its own keys (0600) · one-click “Backup now” with a live progress modal · restore with preview |
+| **Monitoring** | CPU/RAM/disk/load alerts to the bell and Telegram · traffic graphs for 24 h / 7 d / 30 days · per-client sparklines · live `journalctl` streams in the browser · SSH-free diagnostics checklist |
+| **Security** | TOTP two-factor auth · read-only observer account · login journal with new-device detection · UFW rules and listening ports in the panel · secret panel URL |
+| **Automation** | REST API with Bearer keys for bots and billing systems · one-time invite links · panel & component updates with automatic rollback · Telegram notifications for every event |
+| **Interface** | Dark glass “Flow” design · installable PWA with browser notifications · command palette (`Ctrl+K`) · landing-page editor with live preview · action journal |
 
-Подключитесь к чистому VPS по SSH и выполните одну команду:
+## Quick start
+
+Connect to a clean VPS over SSH and run a single command:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/xCodeOn/Onyx-Panel/main/install.sh)
 ```
 
-Установщик скачает последний стабильный релиз, поставит и настроит всё сам — Caddy с сертификатом, Xray, AmneziaWG, MTProxy, релей и панель, — запросит домен, почту для сертификата и логин с паролем, а в конце покажет **секретный адрес входа** вида `https://домен/panel-…`. Сохраните его: без этого адреса панель не открывается.
+The installer downloads the latest stable release and sets everything up by itself — Caddy with a certificate, Xray, AmneziaWG, MTProxy, the relay and the panel. It asks for your domain, an email for the certificate and an admin login, then prints the **secret panel URL** like `https://your-domain/panel-…`. Save it: without that URL the panel does not open.
 
-### Требования
+### Requirements
 
-- Чистый VPS: **Ubuntu 22.04/24.04 или Debian 12**, x86_64, root.
-- Домен с A-записью на сервер, свободные порты **80/tcp и 443/tcp**.
-- Дополнительные порты протоколов панель покажет при создании клиентов — откройте их в firewall хостинга.
+- A clean VPS: **Ubuntu 22.04/24.04 or Debian 12**, x86_64, root access.
+- A domain with an A-record pointing to the server, ports **80/tcp and 443/tcp** free.
+- Protocol ports are shown when you create clients — open them in your hosting firewall.
 
-| Назначение | Порт |
+| Purpose | Port |
 |---|---:|
-| HTTP и выпуск сертификата | `80/tcp` |
-| HTTPS, панель, VLESS, Web Proxy | `443/tcp` |
+| HTTP & certificate issuance | `80/tcp` |
+| HTTPS, panel, VLESS, Web Proxy | `443/tcp` |
 | Hysteria2 | `8443/udp` |
-| MTProto | `2399–2430/tcp` (назначается при создании) |
-| AmneziaWG | `52000–52999/udp` (назначается панелью) |
+| MTProto | `2399–2430/tcp` (assigned on creation) |
+| AmneziaWG | `52000–52999/udp` (assigned by the panel) |
 
-Компоненты — Xray, Caddy, Go, утилиты AmneziaWG и исходники релея — скачиваются из официальных репозиториев при установке с проверкой контрольных сумм. Собранные бинарники AmneziaWG и OpenFlux, а также geo-базы Xray идут в комплекте.
+Xray, Caddy, Go, AmneziaWG tools and the relay source are downloaded from official repositories during installation with checksum verification. AmneziaWG and OpenFlux binaries and Xray geo-bases ship with the package.
 
-## Каскад панелей
+## Panel cascades
 
-Панель может выпускать трафик через другую панель: клиенты подключаются к вашему серверу как обычно, а в интернет выходят с адреса верхней панели.
+The panel can route traffic through another panel: clients connect to your server as usual, but reach the internet from the upstream panel's address.
 
-1. На верхней панели скопируйте `vless://` ключ любого клиента (раздел «Пользователи»).
-2. В нижней панели откройте вкладку **Каскад → Добавить каскад** и вставьте ключ.
-3. Панель сама проверит ключ живым запросом, покажет задержку и выходной IP, и включит каскад.
+1. Copy a `vless://` client key on the upstream panel (its “Clients” section).
+2. In your panel open **Cascade → Add cascade** and paste the key.
+3. The panel verifies the key with a live request, shows latency and the exit IP, then enables the cascade.
 
-Дальше по желанию: режим **«Все VLESS и Hysteria2»** или **«Только выбранные»** с галочками по клиентам, несколько каскадов с приоритетом, мгновенное отключение. Понимаются и ключи сторонних Xray-панелей.
+From there: “all VLESS and Hysteria2” or “selected clients” mode, several cascades with priority, instant disable. Keys from third-party Xray panels (TCP, WebSocket, gRPC, XHTTP, HTTPUpgrade, HTTP/2; TLS and Reality) are supported too.
 
-## Маршрутизация
+## Routing
 
-Вкладка управляет тем, какой трафик пойдёт напрямую, минуя каскад: списки прямых IP и доменов (с пресетами стран), домены «только через IPv4» и блокировка торрентов. Формат значений — обычный синтаксис правил Xray (`geoip:`, `geosite:`, `domain:`, `regexp:`), поэтому подойдёт любой готовый список.
+The Routing tab decides what bypasses the cascade: direct IP and domain lists (with country presets), “IPv4 only” domains and torrent blocking. Values use regular Xray rule syntax (`geoip:`, `geosite:`, `domain:`, `regexp:`), so any ready-made list works.
 
-## Обновления и резервные копии
-
-```bash
-onyx-panel-update      # обновить панель до последнего релиза
-ONYX                   # консольное меню: домен, логин, сертификат, удаление
-onyx-panel-uninstall   # полное удаление панели
-```
-
-Все операции доступны и из веб-интерфейса. Перед каждым обновлением автоматически создаётся резервная копия; если новая версия не запустилась, прежняя возвращается сама. Компоненты (Xray, OpenFlux) обновляются независимо, тоже с проверкой запуска и откатом.
-
-## Диагностика
+## Updates and backups
 
 ```bash
-systemctl status onyx-panel
-journalctl -u onyx-panel -n 100
-ss -lntup
+onyx-panel-update      # update the panel to the latest release
+ONYX                   # console menu: domain, login, certificate, uninstall
+onyx-panel-uninstall   # full removal
 ```
 
-## Безопасность
+Everything is also available from the web UI. A backup is created automatically before every update; if the new version fails to start, the previous one is restored by itself. Components (Xray, OpenFlux) update independently — also with a run-check and rollback.
 
-- Ссылки подписок, Node API token и адрес панели — секреты. Не публикуйте их.
-- Резервные копии содержат ключи доступа — храните их как пароли.
-- OpenFlux передаёт только IPv4/TCP; UDP и IPv6 через него не работают.
+## External API
 
-## Внешний API
+For bots and billing systems: create a key in **Settings → Security → External API keys** (the token is shown once) and send it as `Authorization: Bearer <token>`.
 
-Для ботов и биллингов: создайте ключ в «Настройках → Безопасность → Ключи внешнего API» (токен показывается один раз) и передавайте его в заголовке `Authorization: Bearer <токен>`.
-
-| Метод | Путь | Описание |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/ping` | проверка доступности |
-| GET | `/api/v1/clients` | список клиентов: трафик, статус, срок, ссылка |
-| POST | `/api/v1/clients` | создать клиента — `{"name":"…","protocol":"vless","devices":1}` |
-| POST | `/api/v1/clients/<id>/renew` | продлить доступ — `{"days":30}` |
-| POST | `/api/v1/clients/<id>/toggle` | включить/выключить — `{"enabled":false}` |
-| POST | `/api/v1/clients/<id>/delete` | удалить клиента |
-| GET | `/api/v1/clients/<id>/link` | ссылка-ключ клиента |
+| GET | `/api/v1/ping` | health check |
+| GET | `/api/v1/clients` | list clients: traffic, status, expiry, link |
+| POST | `/api/v1/clients` | create a client — `{"name":"…","protocol":"vless","devices":1}` |
+| POST | `/api/v1/clients/<id>/renew` | extend access — `{"days":30}` |
+| POST | `/api/v1/clients/<id>/toggle` | enable/disable — `{"enabled":false}` |
+| POST | `/api/v1/clients/<id>/delete` | delete a client |
+| GET | `/api/v1/clients/<id>/link` | the client's key link |
 
 ```bash
-curl -s -H "Authorization: Bearer onx_…" https://домен/panel-…/api/v1/clients
-curl -s -X POST -H "Authorization: Bearer onx_…" -d '{"name":"Друг","protocol":"vless"}' \
-  https://домен/panel-…/api/v1/clients
+curl -s -H "Authorization: Bearer onx_…" https://your-domain/panel-…/api/v1/clients
+curl -s -X POST -H "Authorization: Bearer onx_…" -d '{"name":"Friend","protocol":"vless"}' \
+  https://your-domain/panel-…/api/v1/clients
 ```
 
-## Поддержать проект
+## Security notes
 
-Панель бесплатная и развивается в свободное время. Если она вам полезна — это лучшая благодарность:
+- Subscription links, the Node API token and the panel URL are secrets. Never publish them.
+- Backups contain access keys — store them like passwords.
+- OpenFlux carries IPv4/TCP only; UDP and IPv6 do not work through it.
+
+## Contributing
+
+Bug reports and feature ideas are welcome — [open an issue](https://github.com/xCodeOn/Onyx-Panel/issues/new/choose). To work on the code locally, see [CONTRIBUTING.md](CONTRIBUTING.md); the test suite runs on every push.
+
+## Support the project
+
+The panel is free and developed in spare time. If it is useful to you, a star and a donation are the best thanks:
 
 <p align="center">
-  <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Поддержать проект" src="https://img.shields.io/badge/%F0%9F%92%9C_%D0%9F%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B0%D1%82%D1%8C_%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82-CloudTips-8b5cf6?style=for-the-badge"></a>
+  <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Support the project" src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F_Support_the_project-CloudTips-8b5cf6?style=for-the-badge"></a>
 </p>
 
-## Лицензия
+## License
 
-MIT. Подробности — в [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE) for details.

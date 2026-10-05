@@ -1,0 +1,22 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Installer heredocs compile
+        run: python3 tests/check_heredocs.py
+      - name: Module tests
+        run: python3 tests/test_modules.py
+      - name: Server smoke tests
+        run: python3 tests/test_server.py

@@ -1,0 +1,34 @@
+name: Bug report / Сообщение о проблеме
+description: Something is broken / Что-то работает не так
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Please fill in the details below. / Спасибо! Заполните, пожалуйста, пункты ниже.
+  - type: input
+    id: version
+    attributes:
+      label: Onyx Panel version / Версия панели
+      placeholder: "2.1.14"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / Система
+      placeholder: "Ubuntu 22.04"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened? / Что произошло?
+      description: Steps to reproduce, expected vs actual behaviour. / Шаги воспроизведения, ожидание и факт.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Журналы
+      description: "`journalctl -u onyx-panel -n 100` — remove secrets, keys and subscription links. / уберите секреты, ключи и ссылки подписок."
+      render: shell

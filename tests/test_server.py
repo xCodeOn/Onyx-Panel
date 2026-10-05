@@ -149,7 +149,10 @@ assert h2e.resp_json()["ok"] is True, h2e.output()
 assert store["totp"]["enabled"] is True
 h2w=_post("/totp-enable", {"code": "000000"}, cka)  # wrong code must be rejected
 assert h2w.resp_json()["ok"] is False
-h2d=_post("/totp-disable", {"code": onyx_totp.totp_at(d2s["secret"], timestamp=int(time.time())+31)}, cka) if False else _post("/totp-disable", {"code": onyx_totp.totp_at(d2s["secret"], timestamp=onyx_totp.time.time()+31)}, cka)
+# код следующего шага: берём ровно начало соседнего окна, иначе при попадании
+# в последнюю секунду периода код оказался бы через шаг и не подошёл бы (флейк)
+_next_step=(int(onyx_totp.time.time()//onyx_totp.PERIOD)+1)*onyx_totp.PERIOD
+h2d=_post("/totp-disable", {"code": onyx_totp.totp_at(d2s["secret"], timestamp=_next_step)}, cka)
 assert h2d.resp_json()["ok"] is True, h2d.output()
 assert "totp" not in store or not store.get("totp")
 print("9b) 2FA setup/enable/disable OK")

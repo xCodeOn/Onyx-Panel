@@ -1187,9 +1187,11 @@ def _mailru_docx():
     return buffer.getvalue()
 
 
-def _mailru_call(command, params=None, data=None):
+def _mailru_call(command, params=None, data=None, token_provider=None):
     """Вызов cloud.mail.ru/api/v2/<command> с OAuth-токеном; JSON-конверт {status, body}.
 
+    token_provider подставляет свой источник токена (по умолчанию — токен
+    OpenFlux); так облачные копии работают на независимом аккаунте.
     Отказ 401/403 означает протухший токен — один раз обновляем и повторяем."""
     def call(token):
         query = dict(params or {})
@@ -1226,12 +1228,13 @@ def _mailru_call(command, params=None, data=None):
                                 json.dumps(envelope.get("body", ""), ensure_ascii=False)[:200])
         return envelope.get("body")
 
+    provider = token_provider or _mailru_access_token
     try:
-        return parse(call(_mailru_access_token()))
+        return parse(call(provider()))
     except OpenFluxError as exc:
         if "401" not in str(exc) and "403" not in str(exc):
             raise
-    return parse(call(_mailru_access_token(force_refresh=True)))
+    return parse(call(provider(force_refresh=True)))
 
 
 def _mailru_upload(upload_url, token, payload):
