@@ -194,6 +194,24 @@ for route in JSON_ROUTES:
     if runs:
         leftovers[route] = sorted(set(leftovers.get(route, [])) | set(runs))
 
+# Client-facing pages: subscription page and invite page (all states)
+import time as _time
+import onyx_ui as _onyx_ui
+sub_fake = {"name": "Клиент Тест", "token": "tok123"}
+qrs_fake = [{"label": "VLESS XHTTP", "hint": "Быстрый канал", "link": "https://panel.example.com/s/tok123?vless=x", "png": "aGk="}]
+extra_pages = {
+    "/subscription": _onyx_ui.subscription_page_html(sub_fake, profiles, 123, 50, _time.time() + 86400, "panel.example.com", qrs_fake),
+    "/subscription-nolimit": _onyx_ui.subscription_page_html(sub_fake, profiles, 0, 0, None, "panel.example.com", qrs_fake),
+    "/invite-dead": _onyx_ui.invite_page_html(None, None, "panel.example.com", "/onyx-invite/tok123"),
+    "/invite": _onyx_ui.invite_page_html({"token": "t2", "name": "Гость", "max_uses": 3, "uses": 0, "ttl_days": 7, "protocols": ["vless"]}, None, "panel.example.com", "/onyx-invite/t2"),
+    "/invite-claimed": _onyx_ui.invite_page_html(None, {"token": "t3", "name": "Гость"}, "panel.example.com", "/onyx-invite/t3"),
+}
+for label, doc in extra_pages.items():
+    en_doc = _onyx_ui.i18n.document(doc)
+    runs = visible_cyrillic(en_doc)
+    if runs:
+        leftovers[label] = sorted(set(leftovers.get(label, [])) | set(runs))
+
 # Russian must remain Russian: sanity check the dictionary did not leak
 sid_cookie = cookie[1] if cookie else ""
 page = FakeHandler("GET", srv.PANEL_PATH + "/users", {"Cookie": sid_cookie + "; onyx_lang=ru"})
