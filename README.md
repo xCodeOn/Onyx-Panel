@@ -53,7 +53,7 @@ VLESS XHTTP · Hysteria2 · AmneziaWG 2.0/3.1 · MTProto · Telegram Web Proxy �
 | **Monitoring** | CPU/RAM/disk/load alerts to the bell and Telegram · traffic graphs for 24 h / 7 d / 30 days · per-client sparklines · live `journalctl` streams in the browser · SSH-free diagnostics checklist |
 | **Security** | TOTP two-factor auth · read-only observer account · login journal with new-device detection · UFW rules and listening ports in the panel · secret panel URL |
 | **Automation** | REST API with Bearer keys for bots and billing systems · one-time invite links · panel & component updates with automatic rollback · Telegram notifications for every event |
-| **Interface** | Dark glass “Flow” design · installable PWA with browser notifications · command palette (`Ctrl+K`) · landing-page editor with live preview · action journal · English & Russian UI with automatic language detection (browser Accept-Language, with a toggle in the sidebar) |
+| **Interface** | Dark glass “Flow” design · installable PWA with browser notifications · command palette (`Ctrl+K`) · landing-page editor with live preview · action journal · English & Russian UI with automatic language detection (browser Accept-Language) |
 
 ## Quick start
 

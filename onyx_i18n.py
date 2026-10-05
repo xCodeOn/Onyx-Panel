@@ -1,49 +1,40 @@
 """Panel i18n: per-request language detection and the RU→EN rendering pass.
 
 The panel markup is server-rendered in Russian.  For every request the handler
-stores the negotiated language (cookie override first, then Accept-Language)
-in a thread-local, and `document()` rewrites the finished HTML for English
-viewers with one bounded pass.  `t()` translates plain server strings (JSON
-messages) with the same dictionary.  The pass matches whole phrases with word
-boundaries, longest first, so user data and identifiers are never touched.
+stores the negotiated language (Accept-Language, i.e. the viewer's system
+language) in a thread-local, and `document()` rewrites the finished HTML for
+English viewers with one bounded pass.  `t()` translates plain server strings
+(JSON messages) with the same dictionary.  The pass matches whole phrases with
+word boundaries, longest first, so user data and identifiers are never touched.
 """
 import re
 import threading
 
 _LOCAL = threading.local()
-COOKIE_NAME = "onyx_lang"
-SUPPORTED = ("ru", "en")
 
 
-def set_request(cookie_header, accept_language):
+def set_request(accept_language):
     """Negotiate the language for the current request thread.
 
-    Cookie wins over the browser list so the sidebar toggle can pin a choice;
-    with no information at all the panel stays Russian (historical default).
+    Russian when the system language is Russian or when the browser sends no
+    list at all (scripts, curl); English for everyone else.
     """
-    chosen = None
-    match = re.search(COOKIE_NAME + r"=(ru|en)\b", cookie_header or "")
-    if match:
-        chosen = match.group(1)
-    if chosen is None:
-        best_tag, best_q = "", -1.0
-        for part in (accept_language or "").split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if ";" in part:
-                tag, _, params = part.partition(";")
-                try:
-                    q = float(re.search(r"q\s*=\s*([0-9.]+)", params).group(1))
-                except (AttributeError, ValueError):
-                    q = 0.0
-            else:
-                tag, q = part, 1.0
-            if q > best_q:
-                best_tag, best_q = tag.strip().lower(), q
-        if best_tag:
-            chosen = "ru" if best_tag.startswith("ru") else "en"
-    _LOCAL.lang = chosen or "ru"
+    best_tag, best_q = "", -1.0
+    for part in (accept_language or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ";" in part:
+            tag, _, params = part.partition(";")
+            try:
+                q = float(re.search(r"q\s*=\s*([0-9.]+)", params).group(1))
+            except (AttributeError, ValueError):
+                q = 0.0
+        else:
+            tag, q = part, 1.0
+        if q > best_q:
+            best_tag, best_q = tag.strip().lower(), q
+    _LOCAL.lang = ("ru" if best_tag.startswith("ru") else "en") if best_tag else "ru"
     return _LOCAL.lang
 
 

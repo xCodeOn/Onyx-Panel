@@ -199,7 +199,7 @@ for route in JSON_ROUTES:
 # translated too — the stream bypasses send_html/send_json.  The html fragment
 # is scanned as-is (comments stripped like in a real document); update status
 # values are scanned as plain strings.
-srv.i18n.set_request("", "en-US,en;q=0.9")
+srv.i18n.set_request("en-US,en;q=0.9")
 stream = srv.dashboard_stream_payload("static-test-csrf", 1)
 runs = visible_cyrillic(stream["html"])
 for value in (stream["update"] or {}).values() if isinstance(stream["update"], dict) else []:
@@ -281,10 +281,12 @@ page.do_GET()
 if '<html lang="ru">' not in page.body() or "Клиенты" not in page.body():
     failures.append("RU mode damaged: lang attr or nav labels missing")
 
+# A stale onyx_lang cookie (from the removed sidebar toggle) must be ignored:
+# language now comes from the system (Accept-Language) only.
 page = FakeHandler("GET", srv.PANEL_PATH + "/users", {"Cookie": sid_cookie + "; onyx_lang=en"})
 page.do_GET()
-if "Clients" not in page.body():
-    failures.append("cookie onyx_lang=en did not force English")
+if "Клиенты" not in page.body() or ">Clients<" in page.body():
+    failures.append("stale onyx_lang cookie must not force English anymore")
 
 # no Accept-Language and no cookie -> historical Russian default
 page = FakeHandler("GET", srv.PANEL_PATH + "/users", {"Cookie": sid_cookie})
@@ -312,4 +314,4 @@ if failures:
         print("  ", f)
     sys.exit(1)
 
-print("i18n OK: all pages render Cyrillic-free in English, RU mode intact, cookie override works")
+print("i18n OK: all pages render Cyrillic-free in English, RU mode intact, language follows Accept-Language only")

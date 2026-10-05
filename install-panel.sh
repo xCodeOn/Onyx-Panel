@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.17..."
+    echo "Updating Onyx Panel 2.1.18..."
 else
-    echo "Configuring Onyx Panel 2.1.17..."
+    echo "Configuring Onyx Panel 2.1.18..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -2806,13 +2806,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok":True}); return
         self.send_json({"ok":False,"message":"Not found"},404)
     def do_GET(self):
-        i18n.set_request(self.headers.get("Cookie",""), self.headers.get("Accept-Language",""))
+        i18n.set_request(self.headers.get("Accept-Language",""))
         path=urlparse(self.path).path
         if path.startswith(node_api.API_PREFIX+"/"):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.17","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.18","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3506,7 +3506,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
         self.redirect("/")
 
     def do_POST(self):
-        i18n.set_request(self.headers.get("Cookie",""), self.headers.get("Accept-Language",""))
+        i18n.set_request(self.headers.get("Accept-Language",""))
         path=urlparse(self.path).path
 
         if path.startswith(node_api.API_PREFIX+"/"):
@@ -5983,7 +5983,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.17
+Description=Onyx Panel 2.1.18
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6542,9 +6542,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.17 UPDATED"
+echo "          Onyx Panel 2.1.18 UPDATED"
 else
-echo "         Onyx Panel 2.1.17 IS READY"
+echo "         Onyx Panel 2.1.18 IS READY"
 fi
 echo "============================================================"
 echo
