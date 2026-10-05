@@ -195,6 +195,19 @@ for route in JSON_ROUTES:
     if runs:
         leftovers[route] = sorted(set(leftovers.get(route, [])) | set(runs))
 
+# Dashboard live stream (SSE) payload: rebuilt body + update status must be
+# translated too — the stream bypasses send_html/send_json.  The html fragment
+# is scanned as-is (comments stripped like in a real document); update status
+# values are scanned as plain strings.
+srv.i18n.set_request("", "en-US,en;q=0.9")
+stream = srv.dashboard_stream_payload("static-test-csrf", 1)
+runs = visible_cyrillic(stream["html"])
+for value in (stream["update"] or {}).values() if isinstance(stream["update"], dict) else []:
+    if isinstance(value, str):
+        runs.extend(visible_cyrillic(value))
+if runs:
+    leftovers["/dashboard-stream"] = sorted(set(runs))
+
 # Client-facing pages: subscription page and invite page (all states)
 import time as _time
 import onyx_ui as _onyx_ui

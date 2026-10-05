@@ -58,6 +58,8 @@ _LANG_ATTR = re.compile(r'<html lang="ru"')
 # Applied before the plain dictionary.
 EXTRA_RULES = [
     (re.compile(r"(?<!\w)до\s+(?=\d)"), "up to "),
+    (re.compile(r"Измерения VPS ещё не получены\."), "No VPS measurements yet."),
+    (re.compile(r"Измерения VPS не обновляются\."), "VPS measurements are not updating."),
 ]
 
 PAIRS = {
@@ -1241,6 +1243,12 @@ PAIRS.update({
     'Связь с панелью': 'The connection to the panel',
     'кратко прерывается на время перезапуска': 'briefly drops during the restart',
     'канал': 'channel', 'попробуйте снова': 'try again',
+    'Панель управления': 'Control panel',
+    '1 ч': '1 h', '6 ч': '6 h', '24 ч': '24 h', '7 дн': '7 d', '30 дн': '30 d',
+    'Измерения VPS ещё не получены.': 'No VPS measurements yet.',
+    'Измерения VPS не обновляются.': 'VPS measurements are not updating.',
+    'Нагрузка · 1 / 5 / 15 мин.': 'Load · 1 / 5 / 15 min',
+    'ч': 'h',
 })
 
 # --- static audit pass 2 (К–П) --------------------------------------------

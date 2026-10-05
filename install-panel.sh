@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.16..."
+    echo "Updating Onyx Panel 2.1.17..."
 else
-    echo "Configuring Onyx Panel 2.1.16..."
+    echo "Configuring Onyx Panel 2.1.17..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -2662,6 +2662,15 @@ def web_api_find(uid):
 def layout(title,body,active="",csrf=""):
     return page_layout(title,body,PANEL_PATH,active,DOMAIN,csrf,getattr(ROLE_LOCAL,"value","admin") or "admin")
 
+def dashboard_stream_payload(csrf,hours):
+    """Один кадр живого потока дашборда: перерисованный body + статус обновлений.
+    Фрагмент прогоняется через i18n — поток не идёт через send_html/send_json."""
+    profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
+    return {"html":i18n.document(dashboard_body(server_metrics.dashboard_data(hours),subscription_registry(),profiles,traffic(),
+                PANEL_PATH,DOMAIN,csrf,proxy_link,web_updates.current_version(),hours,nodes=nodes_live(),
+                node_series=nodes_chart_series(hours),node_summary=nodes_client_summary())),
+            "update":i18n.walk(web_updates.get_status())}
+
 class Handler(BaseHTTPRequestHandler):
     timeout=20
     def log_message(self,*a): pass
@@ -2803,7 +2812,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.16","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.17","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3119,12 +3128,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control","no-store")
                 self.send_header("X-Accel-Buffering","no")
                 self.end_headers()
-                profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
                 while True:
-                    payload={"html":dashboard_body(server_metrics.dashboard_data(hours),subscription_registry(),profiles,traffic(),
-                                PANEL_PATH,DOMAIN,self.csrf(),proxy_link,web_updates.current_version(),hours,nodes=nodes_live(),
-                                node_series=nodes_chart_series(hours),node_summary=nodes_client_summary()),
-                             "update":web_updates.get_status()}
+                    payload=dashboard_stream_payload(self.csrf(),hours)
                     self.wfile.write(b"data: "+json.dumps(payload,ensure_ascii=True).encode()+b"\n\n")
                     self.wfile.flush()
                     time.sleep(5)
@@ -5978,7 +5983,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.16
+Description=Onyx Panel 2.1.17
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6537,9 +6542,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.16 UPDATED"
+echo "          Onyx Panel 2.1.17 UPDATED"
 else
-echo "         Onyx Panel 2.1.16 IS READY"
+echo "         Onyx Panel 2.1.17 IS READY"
 fi
 echo "============================================================"
 echo
