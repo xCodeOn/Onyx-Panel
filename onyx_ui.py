@@ -2044,11 +2044,17 @@ function maybeNotifyUpdate(d){{window.dispatchEvent(new CustomEvent('onyx-update
 function updateView(d){{if(!d)return;updating=['queued','running'].includes(d.phase);if(updating){{notice.hidden=false;notice.textContent='Изменение версии выполняется. Откройте раздел «Обновления», чтобы увидеть статус.'}}if(d.available)maybeNotifyUpdate(d)}}
 function patchLive(html){{const template=document.createElement('template');template.innerHTML=html;template.content.querySelectorAll('[data-live-block]').forEach(next=>{{const current=root.querySelector('[data-live-block="'+CSS.escape(next.dataset.liveBlock)+'"]');if(!current||current.innerHTML===next.innerHTML)return;current.classList.add('refreshing');requestAnimationFrame(()=>{{current.innerHTML=next.innerHTML;current.className=next.className;current.setAttribute('data-live-block',next.dataset.liveBlock)}})}});root.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('selected',Number(b.dataset.range)===range))}}
 function updateClock(){{const seconds=Math.floor((Date.now()-lastSuccess)/1000);liveAge.textContent=seconds<2?'сейчас':seconds+' с назад';live.classList.toggle('stale',seconds>20);live.classList.toggle('offline',seconds>45)}}
-async function refresh(){{if(stream||busy||document.hidden)return;busy=true;try{{const r=await fetch('{esc(path)}/dashboard-data?hours='+range,{{cache:'no-store'}});if(r.redirected){{location.href='{esc(path)}/login';return}}if(!r.ok)throw new Error('Нет ответа от панели');const d=await r.json();patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(e){{live.classList.add('offline');notice.hidden=false;notice.textContent=updating?'Панель перезапускается во время обновления. Ожидаем восстановления связи…':'Нет связи с панелью. Данные на экране могут быть устаревшими.'}}finally{{busy=false}}}}
-let stream=null;
+async function refresh(){{if(busy||document.hidden)return;
+// Стрим должен приносить кадры сам; если он молчит дольше 10 с (плохой путь до
+// клиента), рвём его и обновляем обычным запросом — иначе живые блоки остаются
+// пустыми до ручной перезагрузки страницы.
+if(stream&&Date.now()-lastFrame<10000)return;
+if(stream){{stream.close();stream=null;setTimeout(startStream,5000)}}
+busy=true;try{{const r=await fetch('{esc(path)}/dashboard-data?hours='+range,{{cache:'no-store'}});if(r.redirected){{location.href='{esc(path)}/login';return}}if(!r.ok)throw new Error('Нет ответа от панели');const d=await r.json();patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(e){{live.classList.add('offline');notice.hidden=false;notice.textContent=updating?'Панель перезапускается во время обновления. Ожидаем восстановления связи…':'Нет связи с панелью. Данные на экране могут быть устаревшими.'}}finally{{busy=false}}}}
+let stream=null,lastFrame=0;
 function startStream(){{if(stream||!window.EventSource)return;
-try{{stream=new EventSource('{esc(path)}/dashboard-stream?hours='+range);
-stream.onmessage=e=>{{try{{const d=JSON.parse(e.data);patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(err){{}}}};
+try{{stream=new EventSource('{esc(path)}/dashboard-stream?hours='+range);lastFrame=Date.now();
+stream.onmessage=e=>{{lastFrame=Date.now();try{{const d=JSON.parse(e.data);patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(err){{}}}};
 stream.onerror=()=>{{if(stream){{stream.close();stream=null}}setTimeout(startStream,5000)}}}}catch(e){{stream=null}}}}
 startStream();
 async function automaticUpdateCheck(status){{if(status?.checked&&Date.now()/1000-Number(status.checked)<21600)return;try{{const r=await fetch('{esc(path)}/update-check',{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}'}})}});if(!r.ok||r.redirected)return;updateView(await r.json())}}catch(e){{}}}}
