@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.25..."
+    echo "Updating Onyx Panel 2.1.26..."
 else
-    echo "Configuring Onyx Panel 2.1.25..."
+    echo "Configuring Onyx Panel 2.1.26..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -2813,7 +2813,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.25","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.26","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -2906,7 +2906,7 @@ class Handler(BaseHTTPRequestHandler):
             else: self.send_html("Icon not found",404)
             return
         if path==PANEL_PATH+"/__/manifest.webmanifest":
-            manifest={"name":"Onyx Panel","short_name":"Onyx","start_url":PANEL_PATH+"/dashboard",
+            manifest={"name":"Onyx Panel","short_name":"Onyx Panel","start_url":PANEL_PATH+"/dashboard",
                       "display":"standalone","background_color":"#071116","theme_color":"#0f2028",
                       "id":PANEL_PATH+"/","lang":i18n.lang(),
                       "icons":[{"src":PANEL_PATH+"/__icon/192","sizes":"192x192","type":"image/png","purpose":"any"},
@@ -6025,7 +6025,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.25
+Description=Onyx Panel 2.1.26
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6584,9 +6584,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.25 UPDATED"
+echo "          Onyx Panel 2.1.26 UPDATED"
 else
-echo "         Onyx Panel 2.1.25 IS READY"
+echo "         Onyx Panel 2.1.26 IS READY"
 fi
 echo "============================================================"
 echo
