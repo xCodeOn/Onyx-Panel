@@ -259,6 +259,12 @@ document.addEventListener("click",e=>{const b=e.target.closest("#refreshDashboar
 # PWA: регистрация минимального service worker (панель ставится как приложение).
 PWA_JS="""<script>
 (()=>{if(!("serviceWorker" in navigator))return;
+// После обновления панели worker активируется (skipWaiting+claim) и начинает
+// управлять страницей: перезагружаем её ровно один раз, чтобы UI совпал с
+// бэкендом. Саму навигацию делает страница — не worker: clients.navigate()
+// из активации подвешивает загрузку в Safari.
+if(navigator.serviceWorker.controller){let reloaded=false;
+navigator.serviceWorker.addEventListener("controllerchange",()=>{if(reloaded)return;reloaded=true;location.reload()})}
 window.addEventListener("load",()=>{navigator.serviceWorker.register(@@SW@@,{scope:@@SCOPE@@+"/"}).catch(()=>{})});
 })();
 </script>"""
