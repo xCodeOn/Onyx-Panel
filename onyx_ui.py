@@ -1604,7 +1604,7 @@ input[type=date]{color-scheme:dark}
 /* ---------- Mobile: the rail becomes a floating bottom bar ---------- */
 @media(max-width:760px){
 .shell{border-radius:0;min-height:100dvh;margin:0;background:radial-gradient(ellipse 470px 420px at 45% 22%,rgba(120,88,77,.8),transparent 100%),var(--shell)}
-.sidebar{top:auto;bottom:10px;left:10px;right:10px;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:21px;box-shadow:none}
+.sidebar{top:auto;bottom:20px;left:10px;right:10px;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:30px;box-shadow:none}
 .brand{display:none}
 .nav-primary{flex-direction:row;gap:2px;margin:0;flex:1;justify-content:space-around}
 .nav-bottom{flex-direction:row;gap:2px;margin:0;padding-top:0}
@@ -2673,6 +2673,7 @@ SETTINGS_EXTRA_CSS = '''
 .audit-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .audit-filter select{font-size:11px;width:auto;max-width:230px;padding:8px 28px 8px 10px}
 .audit-filter button{font-size:11px;padding:8px 11px}
+@media(max-width:760px){.audit-filter select{flex:1 1 100%;width:100%;max-width:none;font-size:13px;padding:10px 34px 10px 12px}.audit-filter button{flex:1 1 100%;padding:11px 12px;font-size:12px}}
 .audit-table{width:100%;border-collapse:collapse;font-size:11px}
 .audit-table td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .audit-table tr:last-child td{border-bottom:0}
