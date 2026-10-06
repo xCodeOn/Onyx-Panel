@@ -141,6 +141,8 @@ PAIRS = {
     'Изменить доступ': 'Change access', 'Доступ включён': 'Access enabled',
     'Доступ, подписки и': 'Access, subscriptions and',
     'Доступна версия': 'Version available', 'Требуется обновление': 'Update required',
+    'Уведомлений нет': 'No notifications',
+    'Здесь появятся новые версии панели, изменения после обновления и события сервера.': 'New panel versions, update changelogs and server events will appear here.',
     'Приглашения для гостей': 'Guest invites', 'приглашение': 'invite',
     'Создать приглашение': 'Create invite', 'Приглашение создано': 'Invite created',
     'Не удалось создать приглашение.': 'Failed to create the invite.',
