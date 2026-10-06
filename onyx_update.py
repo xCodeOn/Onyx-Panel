@@ -190,18 +190,33 @@ def release_notes(tag):
 def announce_finished(data):
     """A finished update becomes one bell note with the release changelog."""
     target = str(data.get('target', '') or '')
-    if data.get('phase') != 'done' or not target or data.get('announced') == target: return
-    if target.lstrip('v') != current_version().lstrip('v'):
-        # The panel came back on a different version (rollback or manual fix):
-        # nothing to announce, but stop re-checking this target forever.
+    if data.get('phase') == 'done' and target and data.get('announced') != target:
+        if target.lstrip('v') != current_version().lstrip('v'):
+            # The panel came back on a different version (rollback or manual fix):
+            # nothing to announce, but stop re-checking this target forever.
+            data['announced'] = target
+            atomic_json(STATUS, data)
+            return
+        changes, link = release_notes(target)
+        add_note('changelog', target, changes=changes, link=link)
+        prune_available()
         data['announced'] = target
         atomic_json(STATUS, data)
         return
-    changes, link = release_notes(target)
-    add_note('changelog', target, changes=changes, link=link)
-    prune_available()
-    data['announced'] = target
-    atomic_json(STATUS, data)
+    # Обновление мимо панели (SSH, update.sh): панель сама замечает смену версии
+    # и добавляет запись в колокольчик, иначе список событий выглядит пустым.
+    current = current_version()
+    announced = data.get('announced')
+    if current and announced is not None and announced != current \
+            and data.get('phase') not in ('running', 'queued'):
+        try:
+            changes, link = release_notes('v' + current.lstrip('v'))
+        except Exception:
+            changes, link = [], ''
+        add_note('changelog', 'v' + current.lstrip('v'), changes=changes, link=link)
+        prune_available()
+        data['announced'] = 'v' + current.lstrip('v')
+        atomic_json(STATUS, data)
 
 
 def _lock(blocking=False):
