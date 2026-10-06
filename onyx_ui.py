@@ -228,6 +228,20 @@ function build(sel){
   sel.addEventListener("change",render);
   new MutationObserver(render).observe(sel,{childList:true});
   render();
+  if(sel.hasAttribute("data-selx-lock"))lockWidth();
+  function lockWidth(){
+    const freeze=()=>{
+      const longest=[...sel.options].reduce((a,o)=>o.textContent.length>(a?a.textContent.length:0)?o:a,null);
+      if(!longest)return;
+      const prev=label.textContent;
+      label.textContent=longest.textContent;
+      wrap.style.width="max-content";
+      const w=wrap.getBoundingClientRect().width;
+      label.textContent=prev;
+      wrap.style.width=Math.ceil(w)+"px";
+    };
+    (document.fonts&&document.fonts.ready)?document.fonts.ready.then(freeze):freeze();
+  }
 }
 document.querySelectorAll("select").forEach(build);
 new MutationObserver(muts=>{muts.forEach(m=>{m.addedNodes.forEach(n=>{if(n.nodeType===1){if(n.matches("select"))build(n);n.querySelectorAll("select").forEach(build)}})})}).observe(document.body,{childList:true,subtree:true});
@@ -2672,8 +2686,12 @@ SETTINGS_EXTRA_CSS = '''
 .panel-setting+.panel-setting{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}
 .audit-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .audit-filter select{font-size:11px;width:auto;max-width:230px;padding:8px 28px 8px 10px}
-.audit-filter button{font-size:11px;padding:8px 11px}
-@media(max-width:760px){.audit-filter select{flex:1 1 100%;width:100%;max-width:none;font-size:13px;padding:10px 34px 10px 12px}.audit-filter button{flex:1 1 100%;padding:11px 12px;font-size:12px}}
+.audit-filter button:not(.selx-trigger){font-size:11px;padding:8px 11px}
+.audit-filter .selx-trigger{font-size:11px;padding:9px 14px 9px 12px}
+.audit-filter .selx-label{flex:0 1 auto}
+.audit-filter .selx-caret{position:static}
+.audit-filter .selx-pop{right:auto;width:max-content;min-width:100%}
+@media(max-width:760px){.audit-filter button:not(.selx-trigger){flex:1 1 100%;padding:11px 12px;font-size:12px}}
 .audit-table{width:100%;border-collapse:collapse;font-size:11px}
 .audit-table td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .audit-table tr:last-child td{border-bottom:0}
@@ -2846,7 +2864,7 @@ def settings_extras(path, token, data):
             '<a class="btn" href="'+esc(path)+'/logs">'+extra_icon('terminal')+' Журналы</a></div>'
             '<p class="panel-setting-status" id="alertsStatus" role="status"></p></form></section>'
             '<section class="panel-setting"><div class="panel-setting-info"><b>Журнал действий</b><small>Что происходило в панели: клиенты, подписки, настройки, ноды, каскады. Хранится 500 последних событий.</small></div>'
-            '<div class="audit-filter"><select id="auditFilter" aria-label="Фильтр журнала"><option value="">Все события</option>'+options+'</select>'
+            '<div class="audit-filter"><select id="auditFilter" aria-label="Фильтр журнала" data-selx-lock><option value="">Все события</option>'+options+'</select>'
             '<button type="button" class="btn danger" id="auditClear">Очистить журнал</button></div>'
             '<table class="audit-table"><tbody id="auditRows">'+audit_rows+'</tbody></table></section>'
             '</div></div>')
