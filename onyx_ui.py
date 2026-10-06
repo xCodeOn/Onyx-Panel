@@ -1602,15 +1602,19 @@ input[type=date]{color-scheme:dark}
 .move-card p{margin:0 0 14px;color:var(--muted);font-size:12.5px;line-height:1.6}
 .move-card code{display:block;margin:0 0 16px;padding:9px 12px;border-radius:10px;border:1px solid var(--line-soft);background:var(--input);font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere}
 .move-card .btn{width:100%}
-/* Update modal states: spinning arc while installing, countdown before reload */
-.move-ring.spin svg{animation:updspin 1.1s linear infinite}
-@keyframes updspin{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
-.move-ring.spin .move-ring-fg{stroke-dasharray:64 212.5;stroke-dashoffset:0;transition:none}.move-card.spin .move-ring svg{animation:updspin 1.1s linear infinite}.move-card.spin .move-ring-fg{stroke-dasharray:64 212.5;stroke-dashoffset:0;transition:none}
+/* Update modal states: arc spins like the module-restart ring, countdown before reload */
+.move-ring.spin svg,.move-card.spin .move-ring svg{animation:none;transform:rotate(-90deg)}
+.move-ring.spin .move-ring-fg,.move-card.spin .move-ring-fg{stroke-dasharray:79 197.5;stroke-dashoffset:0;transition:none;animation:onyx-spin 1s linear infinite;transform-origin:center}
 .move-ring.time b,.move-card.time .move-ring b{font-size:19px;letter-spacing:.04em}
 .move-card.upd-done .move-ring b{color:var(--green)}
 .move-card.upd-done .move-ring-fg{stroke:var(--green)}
 .move-card.upd-err .move-ring b{color:var(--red)}
 .move-card.upd-err .move-ring-fg{stroke:var(--red)}
+/* Плавное появление всех модалок (dialog) */
+dialog[open]{animation:onyx-dialog-in .24s cubic-bezier(.2,.9,.3,1.08)}
+@keyframes onyx-dialog-in{from{opacity:0;transform:scale(.955) translateY(10px)}to{opacity:1;transform:none}}
+dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease}
+@keyframes onyx-backdrop-in{from{opacity:0}to{opacity:1}}
 .upd-actions{justify-content:center;margin-top:6px}
 .upd-actions[hidden],.upd-actions button[hidden]{display:none}
 /* "Update available" flag on the Updates page */
