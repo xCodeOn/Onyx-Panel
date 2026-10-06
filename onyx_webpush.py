@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.request
@@ -26,8 +27,9 @@ def _b64url(data: bytes) -> str:
 
 
 def _atomic_json(path: Path, payload):
-    tmp = path.with_suffix(path.suffix + '.tmp')
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # Имя tmp уникально для каждой записи: подписки пушат параллельные потоки,
+    # общее имя приводило к гонке на os.replace.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.' + path.name + '.', suffix='.tmp')
     try:
         with os.fdopen(fd, 'w', encoding='ascii') as handle:
             json.dump(payload, handle)

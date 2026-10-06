@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 import time
 from onyx_metrics import atomic_json, read_state
 
@@ -13,6 +14,12 @@ STATUS = ROOT / 'status.json'
 NOTES = ROOT / 'notifications.json'
 VERSION = Path('/etc/onyx-panel/version')
 UNIT = 'onyx-panel-web-update.service'
+# Панель многопоточная (ThreadingHTTPServer): update-status, поток дашборда и
+# события колокольчика читают-пишут notes параллельно. Мьютекс держит
+# целостность read-modify-write внутри процесса; состояние на диске всё равно
+# атомарно через os.replace, поэтому процессов достаточно даже без файлового лока.
+_NOTES_LOCK = threading.RLock()
+_ANNOUNCE_LOCK = threading.Lock()
 # Onyx Panel ships self-contained: the updater normally reinstalls from the
 # package already unpacked on this server. Set ONYX_UPDATE_REPOSITORY to check
 # and pull releases from your own Git repository instead.
@@ -81,7 +88,16 @@ def get_status():
     data['current'] = current_version()
     data['available'] = newer(data.get('latest', ''), data['current'])
     data['can_install'] = bool(data.get('releases'))
-    announce_finished(data)
+    # Объявление версии тянет GitHub и переписывает notes: не параллелим его по
+    # потокам и не даём сбить выдачу статуса — сломанный announce не должен
+    # ронять /update-status, поток дашборда и /notifications с 502.
+    if _ANNOUNCE_LOCK.acquire(blocking=False):
+        try:
+            announce_finished(data)
+        except Exception as exc:
+            print('update announce:', type(exc).__name__, file=sys.stderr, flush=True)
+        finally:
+            _ANNOUNCE_LOCK.release()
     return data
 
 
@@ -110,21 +126,22 @@ def notes_public():
 
 def add_note(kind, version, changes=None, link=''):
     """Append or refresh an event; one note per (kind, version), read flag kept."""
-    items = load_notes()
-    record = {'kind': kind, 'version': version, 'created': int(time.time()), 'read': False,
-              'changes': [str(change) for change in (changes or [])], 'link': str(link or ''),
-              'current': current_version()}
-    is_new = True
-    for index, item in enumerate(items):
-        if item.get('kind') == kind and item.get('version') == version:
-            record['read'] = bool(item.get('read'))
-            record['created'] = item.get('created', record['created'])
-            items[index] = record
-            is_new = False
-            break
-    if is_new:
-        items.append(record)
-    save_notes(items)
+    with _NOTES_LOCK:
+        items = load_notes()
+        record = {'kind': kind, 'version': version, 'created': int(time.time()), 'read': False,
+                  'changes': [str(change) for change in (changes or [])], 'link': str(link or ''),
+                  'current': current_version()}
+        is_new = True
+        for index, item in enumerate(items):
+            if item.get('kind') == kind and item.get('version') == version:
+                record['read'] = bool(item.get('read'))
+                record['created'] = item.get('created', record['created'])
+                items[index] = record
+                is_new = False
+                break
+        if is_new:
+            items.append(record)
+        save_notes(items)
     if is_new:
         # Новое событие колокольчика: будим PWA-подписки Web Push (пустой ping).
         try:
@@ -136,20 +153,23 @@ def add_note(kind, version, changes=None, link=''):
 
 
 def mark_notes_read():
-    items = load_notes()
-    for item in items: item['read'] = True
-    save_notes(items)
+    with _NOTES_LOCK:
+        items = load_notes()
+        for item in items: item['read'] = True
+        save_notes(items)
 
 
 def clear_notes():
-    save_notes([])
+    with _NOTES_LOCK:
+        save_notes([])
 
 
 def prune_available(current=''):
     """Drop "available" notes for versions that are already installed."""
     current = current or current_version()
-    save_notes([item for item in load_notes()
-                if not (item.get('kind') == 'available' and not newer(item.get('version', ''), current))])
+    with _NOTES_LOCK:
+        save_notes([item for item in load_notes()
+                    if not (item.get('kind') == 'available' and not newer(item.get('version', ''), current))])
 
 
 def repo_slug():
@@ -191,6 +211,9 @@ def announce_finished(data):
     """A finished update becomes one bell note with the release changelog."""
     target = str(data.get('target', '') or '')
     if data.get('phase') == 'done' and target and data.get('announced') != target:
+        # Вызвавший поток мог прочитать статус до чужого announce — сверяемся с диском.
+        if read_state(STATUS).get('announced') == target:
+            return
         if target.lstrip('v') != current_version().lstrip('v'):
             # The panel came back on a different version (rollback or manual fix):
             # nothing to announce, but stop re-checking this target forever.
@@ -209,13 +232,16 @@ def announce_finished(data):
     announced = data.get('announced')
     if current and announced is not None and announced != current \
             and data.get('phase') not in ('running', 'queued'):
+        note_version = 'v' + current.lstrip('v')
+        if read_state(STATUS).get('announced') == note_version:
+            return
         try:
-            changes, link = release_notes('v' + current.lstrip('v'))
+            changes, link = release_notes(note_version)
         except Exception:
             changes, link = [], ''
-        add_note('changelog', 'v' + current.lstrip('v'), changes=changes, link=link)
+        add_note('changelog', note_version, changes=changes, link=link)
         prune_available()
-        data['announced'] = 'v' + current.lstrip('v')
+        data['announced'] = note_version
         atomic_json(STATUS, data)
 
 

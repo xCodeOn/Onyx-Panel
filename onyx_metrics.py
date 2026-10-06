@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -31,15 +32,19 @@ def read_state(path=None):
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Уникальное tmp-имя: панель и обновлятель пишут один файл из разных процессов,
-    # общее имя приводило к гонке на os.replace.
-    tmp = path.with_name(path.name + f'.{os.getpid()}.tmp')
-    with tmp.open('w', encoding='utf-8') as f:
-        json.dump(value, f, ensure_ascii=True, separators=(',', ':'))
-        f.flush()
-        os.fsync(f.fileno())
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    # Имя tmp уникально для каждой записи: панель многопоточная, потоки делят
+    # один PID, и общее имя приводило к гонке на os.replace (FileNotFoundError).
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix='.' + path.name + '.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(value, f, ensure_ascii=True, separators=(',', ':'))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
 
 
 def proc_text(name):

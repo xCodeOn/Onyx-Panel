@@ -1798,8 +1798,14 @@ document.querySelectorAll(".onyx-cal").forEach(wrap=>{
 PRESET_THUMBS_JS='''<script>
 (()=>{const presets=@@PRESETS@@,cards=[...document.querySelectorAll('.preset[data-preset-card]')];
 const fit=card=>{const f=card.querySelector('.preset-frame');if(f)card.style.setProperty('--s',(card.clientWidth/1280).toFixed(4))};
+// Песочница превью не исполняет скрипты (см. комментарий выше): вычищаем их до
+// вставки, чтобы Safari не писал "Blocked script execution in about:srcdoc".
+const clean=html=>{try{const doc=new DOMParser().parseFromString(html,'text/html');
+  doc.querySelectorAll('script').forEach(el=>el.remove());
+  doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]) if(/^on/i.test(a.name)) el.removeAttribute(a.name)});
+  return (doc.doctype?'<!doctype html>':'')+doc.documentElement.outerHTML}catch(e){return ''}};
 const load=card=>{const p=presets[card.dataset.presetId],f=card.querySelector('.preset-frame');
-  if(!p||!p.html||!f||f.dataset.loaded)return;f.dataset.loaded='1';f.srcdoc=p.html;card.classList.add('has-frame');fit(card)};
+  if(!p||!p.html||!f||f.dataset.loaded)return;const src=clean(p.html);if(!src)return;f.dataset.loaded='1';f.srcdoc=src;card.classList.add('has-frame');fit(card)};
 cards.forEach(fit);addEventListener('resize',()=>cards.forEach(fit));
 if('IntersectionObserver'in window){const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){io.unobserve(en.target);load(en.target)}})},{rootMargin:'240px'});cards.forEach(c=>io.observe(c))}
 else cards.forEach(load);
