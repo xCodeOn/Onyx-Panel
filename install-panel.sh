@@ -118,7 +118,7 @@ MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
     [[ -s "$BASE/assets/${PWA_ICON}.png" ]] || die "PWA icon is missing: assets/${PWA_ICON}.png"
 done
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
 FLAG_ARCHIVE="$BASE/onyx-panel/flags.tar.gz"
@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.20..."
+    echo "Updating Onyx Panel 2.1.21..."
 else
-    echo "Configuring Onyx Panel 2.1.20..."
+    echo "Configuring Onyx Panel 2.1.21..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -503,7 +503,7 @@ fi
 
 echo "[1/6] Writing manager..."
 
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
     install -o root -g root -m 0644 "$BASE/$module" "$APP_DIR/$module"
 done
@@ -1768,6 +1768,7 @@ import onyx_i18n as i18n
 from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand, duration, limit_bar
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
+import onyx_webpush as web_push
 import onyx_components as components
 import onyx_nodes as node_api
 import onyx_openflux as openflux
@@ -2812,7 +2813,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.20","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.21","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -2915,9 +2916,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_data(json.dumps(manifest,ensure_ascii=True),mime="application/manifest+json",
                 headers={"Cache-Control":"no-store"}); return
         if path==PANEL_PATH+"/__/sw.js":
-            # Минимальный service worker: нужен только чтобы браузер считал
-            # панель устанавливаемым приложением. Кэширования нет — панель живая.
-            body=b"self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});"
+            # Service worker PWA: кэширования нет — панель живая. Push приходит
+            # пустым пингом: worker сам забирает свежие уведомления колокольчика.
+            body=("const SCOPE=self.registration.scope;const ICON=SCOPE+'__favicon';"
+                  "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});"
+                  "self.addEventListener('push',e=>{e.waitUntil((async()=>{"
+                  "const show=(title,txt,tag)=>self.registration.showNotification(title,{body:txt,tag,icon:ICON,badge:ICON,data:{url:SCOPE}});"
+                  "try{const r=await fetch(SCOPE+'notifications',{cache:'no-store'});"
+                  "if(!r.ok||r.redirected)throw new Error('no session');"
+                  "const d=await r.json();const fresh=(Array.isArray(d.items)?d.items:[]).filter(i=>!i.read).slice(-3).reverse();"
+                  "if(!fresh.length)throw new Error('empty');"
+                  "await Promise.all(fresh.map(i=>{"
+                  "const v=String(i.version||'').replace(/^v/,'');"
+                  "const t=i.kind==='available'?'Доступна версия '+v:i.kind==='changelog'?'Onyx Panel '+v+' обновлена':i.kind==='alert'?'Сервер':i.kind==='limit'?'Лимит трафика':i.kind==='openflux'?'OpenFlux':'Onyx Panel';"
+                  "return show(t,(i.changes&&i.changes[0])||'Новое событие в панели',(i.kind||'')+':'+v+':'+(i.created||''))}));"
+                  "}catch(err){await show('Onyx Panel','Новое событие в панели','onyx:'+Date.now())}})())});"
+                  "self.addEventListener('notificationclick',e=>{e.waitUntil((async()=>{"
+                  "const url=(e.notification.data&&e.notification.data.url)||SCOPE;e.notification.close();"
+                  "const list=await self.clients.matchAll({type:'window',includeUncontrolled:true});"
+                  "for(const c of list){if(c.url.indexOf(url)===0){await c.focus();return}}"
+                  "await self.clients.openWindow(url)})())});").encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type","text/javascript; charset=utf-8")
             self.send_header("Content-Length",str(len(body)))
@@ -3192,6 +3210,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(web_updates.get_status()); return
         if path==PANEL_PATH+"/notifications":
             self.send_json({"ok":True,**web_updates.notes_public()}); return
+        if path==PANEL_PATH+"/push-config":
+            # Публичный VAPID-ключ: клиент подписывается на Web Push колокольчика.
+            self.send_json({"ok":True,"publicKey":web_push.public_key()}); return
         if path==PANEL_PATH+"/component-status":
             self.send_json(components.status()); return
         if path==PANEL_PATH+"/nodes-state":
@@ -3669,6 +3690,14 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             if path.endswith("-clear"): web_updates.clear_notes()
             else: web_updates.mark_notes_read()
             self.send_json({"ok":True}); return
+
+        if path in (PANEL_PATH+"/push-subscribe",PANEL_PATH+"/push-unsubscribe"):
+            try:
+                if path.endswith("-subscribe"): web_push.save_subscription(form.get("endpoint",""),form.get("keys",""))
+                else: web_push.remove_subscription(form.get("endpoint",""))
+                self.send_json({"ok":True})
+            except ValueError as exc: self.send_json({"message":str(exc)},400)
+            return
 
         if path==PANEL_PATH+"/component-verify":
             self.send_json(components.verify(form.get("component",""),form.get("target","")))
@@ -5943,7 +5972,7 @@ PY
 fi
 
 python3 -m py_compile "$APP_FILE"
-python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_warp.py" "$APP_DIR/onyx_reality.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
+python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_webpush.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_warp.py" "$APP_DIR/onyx_reality.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
 
 
 # ---- Finish installation: service, Caddy route, permissions, start ----
@@ -5983,7 +6012,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.20
+Description=Onyx Panel 2.1.21
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6542,9 +6571,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.20 UPDATED"
+echo "          Onyx Panel 2.1.21 UPDATED"
 else
-echo "         Onyx Panel 2.1.20 IS READY"
+echo "         Onyx Panel 2.1.21 IS READY"
 fi
 echo "============================================================"
 echo

@@ -233,12 +233,16 @@ function build(sel){
     const freeze=()=>{
       const longest=[...sel.options].reduce((a,o)=>o.textContent.length>(a?a.textContent.length:0)?o:a,null);
       if(!longest)return;
-      const prev=label.textContent;
-      label.textContent=longest.textContent;
-      wrap.style.width="max-content";
-      const w=wrap.getBoundingClientRect().width;
-      label.textContent=prev;
-      wrap.style.width=Math.ceil(w)+"px";
+      // Замер по клону триггера вне дерева: блок может быть скрыт (свёрнутая карточка), и живой замер даст ноль.
+      const box=document.createElement("div");
+      box.style.cssText="position:absolute;left:-99999px;top:0;width:max-content";
+      const clone=btn.cloneNode(true);
+      clone.querySelector(".selx-label").textContent=longest.textContent;
+      box.appendChild(clone);
+      document.body.appendChild(box);
+      const w=box.getBoundingClientRect().width;
+      box.remove();
+      if(w>0)wrap.style.width=Math.ceil(w)+"px";
     };
     (document.fonts&&document.fonts.ready)?document.fonts.ready.then(freeze):freeze();
   }
@@ -712,7 +716,27 @@ function render(){
 async function load(){try{const r=await fetch(PATH+'/notifications',{cache:'no-store'});if(!r.ok||r.redirected)return;const d=await r.json();const fresh=(Array.isArray(d.items)?d.items.slice():[]).reverse();const known=new Set(items.map(i=>i.kind+':'+i.version+':'+i.created));notifyNew(fresh.filter(i=>!i.read&&!known.has(i.kind+':'+i.version+':'+i.created)));items=fresh;unread=Number(d.unread)||0;badge();if(open)render()}catch(e){}}
 function notifyNew(fresh){if(!fresh.length||!('Notification' in window)||Notification.permission!=='granted')return;fresh.slice(0,3).forEach(it=>{const title=it.kind==='alert'?'Сервер':it.kind==='limit'?'Лимит трафика':'Onyx Panel';const body=((it.changes||[])[0])||(it.kind==='available'?('Доступна версия '+short(it.version)):'Новое событие');try{const n=new Notification(title,{body:body.slice(0,160),tag:it.kind+':'+it.version});n.onclick=()=>{window.focus();n.close()}}catch(e){}})}
 function markRead(){if(unread<1)return;unread=0;badge();items.forEach(i=>i.read=true);if(open)render();fetch(PATH+'/notifications-read',{method:'POST',body:new URLSearchParams({csrf:CSRF})}).catch(()=>{})}
-(function(){const b=document.querySelector('[data-bell-notify]');if(!b||!('Notification' in window)||Notification.permission!=='default')return;b.hidden=false;b.addEventListener('click',()=>{Notification.requestPermission().then(p=>{if(p!=='default')b.hidden=true})})})();
+(function(){const b=document.querySelector('[data-bell-notify]');if(!b||!('Notification' in window)||Notification.permission!=='default')return;b.hidden=false;b.addEventListener('click',()=>{Notification.requestPermission().then(p=>{if(p!=='default'){b.hidden=true;onyxPushSync()}})})();
+/* Web Push колокольчика: при выданном разрешении держим подписку актуальной,
+   чтобы события приходили, даже когда PWA закрыт (push-пинг будит service worker). */
+async function onyxPushSync(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))return;
+  if(Notification.permission!=='granted')return;
+  try{
+    const reg=await navigator.serviceWorker.getRegistration(PATH+'/');
+    if(!reg||!reg.pushManager)return;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      const cfg=await fetch(PATH+'/push-config',{cache:'no-store'}).then(r=>r.ok&&!r.redirected?r.json():null).catch(()=>null);
+      if(!cfg||!cfg.publicKey)return;
+      const raw=atob(cfg.publicKey.replace(/-/g,'+').replace(/_/g,'/'));
+      const key=Uint8Array.from(raw,c=>c.charCodeAt(0));
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+    }
+    await fetch(PATH+'/push-subscribe',{method:'POST',body:new URLSearchParams({csrf:CSRF,endpoint:sub.endpoint,keys:JSON.stringify(sub.toJSON().keys||{})})}).catch(()=>{});
+  }catch(e){}
+}
+onyxPushSync();})();
 function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=(btn.getBoundingClientRect().bottom+9)+'px';menu.style.width='auto';menu.style.maxWidth='none'}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth=''}menu.hidden=!state;if(state)load().then(markRead)}
 btn.addEventListener('click',e=>{e.stopPropagation();setOpen(!open)});
 document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap'))setOpen(false)});

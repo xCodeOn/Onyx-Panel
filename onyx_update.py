@@ -114,15 +114,24 @@ def add_note(kind, version, changes=None, link=''):
     record = {'kind': kind, 'version': version, 'created': int(time.time()), 'read': False,
               'changes': [str(change) for change in (changes or [])], 'link': str(link or ''),
               'current': current_version()}
+    is_new = True
     for index, item in enumerate(items):
         if item.get('kind') == kind and item.get('version') == version:
             record['read'] = bool(item.get('read'))
             record['created'] = item.get('created', record['created'])
             items[index] = record
+            is_new = False
             break
-    else:
+    if is_new:
         items.append(record)
     save_notes(items)
+    if is_new:
+        # Новое событие колокольчика: будим PWA-подписки Web Push (пустой ping).
+        try:
+            import onyx_webpush
+            onyx_webpush.notify_new(record)
+        except Exception as exc:
+            print('webpush notify:', type(exc).__name__, file=sys.stderr, flush=True)
     return record
 
 
