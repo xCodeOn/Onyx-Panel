@@ -741,7 +741,7 @@ async function onyxPushSync(){
   }catch(e){}
 }
 onyxPushSync();})();
-function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=(btn.getBoundingClientRect().bottom+9)+'px';menu.style.width='auto';menu.style.maxWidth='none';if(menu.parentElement!==document.body)document.body.append(menu)}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth='';if(menu.parentElement!==bellWrap)bellWrap.append(menu)}menu.hidden=!state;if(state)load().then(markRead)}
+function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=Math.max(Math.round(btn.getBoundingClientRect().bottom)+9,80)+'px';menu.style.width='auto';menu.style.maxWidth='none';if(menu.parentElement!==document.body)document.body.append(menu)}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth='';if(menu.parentElement!==bellWrap)bellWrap.append(menu)}menu.hidden=!state;if(state)load().then(markRead)}
 btn.addEventListener('click',e=>{e.stopPropagation();setOpen(!open)});
 document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap')&&!e.target.closest('[data-bell-menu]'))setOpen(false)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)setOpen(false)});

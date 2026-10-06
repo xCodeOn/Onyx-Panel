@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.27..."
+    echo "Updating Onyx Panel 2.1.28..."
 else
-    echo "Configuring Onyx Panel 2.1.27..."
+    echo "Configuring Onyx Panel 2.1.28..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -2813,7 +2813,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.27","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.28","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -2918,8 +2918,10 @@ class Handler(BaseHTTPRequestHandler):
         if path==PANEL_PATH+"/__/sw.js":
             # Service worker PWA: кэширования нет — панель живая. Push приходит
             # пустым пингом: worker сам забирает свежие уведомления колокольчика.
-            body=("const SCOPE=self.registration.scope;const ICON=SCOPE+'__favicon';"
-                  "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});"
+            # VER в теле меняет байты sw.js каждый релиз: браузер обновляет worker,
+            # а тот при активации перезагружает открытые страницы — UI не застревает.
+            body=("const VER="+json.dumps(web_updates.current_version())+";const SCOPE=self.registration.scope;const ICON=SCOPE+'__favicon';"
+                  "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim().then(()=>self.clients.matchAll({type:'window',includeUncontrolled:true})).then(cs=>Promise.all(cs.map(c=>{try{return c.navigate(c.url)}catch(err){return Promise.resolve()}}))))});self.addEventListener('fetch',()=>{});"
                   "self.addEventListener('push',e=>{e.waitUntil((async()=>{"
                   "const show=(title,txt,tag)=>self.registration.showNotification(title,{body:txt,tag,icon:ICON,badge:ICON,data:{url:SCOPE}});"
                   "try{const r=await fetch(SCOPE+'notifications',{cache:'no-store'});"
@@ -6025,7 +6027,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.27
+Description=Onyx Panel 2.1.28
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6584,9 +6586,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.27 UPDATED"
+echo "          Onyx Panel 2.1.28 UPDATED"
 else
-echo "         Onyx Panel 2.1.27 IS READY"
+echo "         Onyx Panel 2.1.28 IS READY"
 fi
 echo "============================================================"
 echo
