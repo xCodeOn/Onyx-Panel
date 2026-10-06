@@ -31,7 +31,9 @@ def read_state(path=None):
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = path.with_suffix('.tmp')
+    # Уникальное tmp-имя: панель и обновлятель пишут один файл из разных процессов,
+    # общее имя приводило к гонке на os.replace.
+    tmp = path.with_name(path.name + f'.{os.getpid()}.tmp')
     with tmp.open('w', encoding='utf-8') as f:
         json.dump(value, f, ensure_ascii=True, separators=(',', ':'))
         f.flush()
