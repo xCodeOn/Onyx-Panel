@@ -251,6 +251,8 @@ function build(sel){
 }
 document.querySelectorAll("select").forEach(build);
 new MutationObserver(muts=>{muts.forEach(m=>{m.addedNodes.forEach(n=>{if(n.nodeType===1){if(n.matches("select"))build(n);n.querySelectorAll("select").forEach(build)}})})}).observe(document.body,{childList:true,subtree:true});
+/* Кнопка обновления дашборда: иконка крутится две секунды после клика */
+document.addEventListener("click",e=>{const b=e.target.closest("#refreshDashboard");if(!b)return;b.classList.add("spin2");clearTimeout(b._onyxSpin);b._onyxSpin=setTimeout(()=>b.classList.remove("spin2"),2000)});
 })();</script>"""
 
 
@@ -688,7 +690,7 @@ box.addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(!b)retu
 BELL_JS='''<script>
 (()=>{const PATH=@@PATH@@,CSRF='@@CSRF@@';
 const btn=document.querySelector('[data-bell]');if(!btn)return;
-const menu=btn.parentElement.querySelector('[data-bell-menu]'),list=menu.querySelector('[data-bell-list]'),count=btn.querySelector('[data-bell-count]');
+const bellWrap=btn.parentElement,menu=bellWrap.querySelector('[data-bell-menu]'),list=menu.querySelector('[data-bell-list]'),count=btn.querySelector('[data-bell-count]');
 let items=[],unread=0,open=false,watching=false;
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=ts=>{try{return new Date(ts*1000).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
@@ -739,9 +741,9 @@ async function onyxPushSync(){
   }catch(e){}
 }
 onyxPushSync();})();
-function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=(btn.getBoundingClientRect().bottom+9)+'px';menu.style.width='auto';menu.style.maxWidth='none'}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth=''}menu.hidden=!state;if(state)load().then(markRead)}
+function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=(btn.getBoundingClientRect().bottom+9)+'px';menu.style.width='auto';menu.style.maxWidth='none';if(menu.parentElement!==document.body)document.body.append(menu)}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth='';if(menu.parentElement!==bellWrap)bellWrap.append(menu)}menu.hidden=!state;if(state)load().then(markRead)}
 btn.addEventListener('click',e=>{e.stopPropagation();setOpen(!open)});
-document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap'))setOpen(false)});
+document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap')&&!e.target.closest('[data-bell-menu]'))setOpen(false)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)setOpen(false)});
 function watch(){if(watching)return;watching=true;let down=false;
   const tick=setInterval(async()=>{let d=null;
@@ -779,6 +781,14 @@ setInterval(async()=>{if(document.hidden)return;try{await fetch(PATH+'/update-ch
 </script>'''
 
 
+def ui_version():
+    """Версия установленной панели: страницы помечаются ею для авто-перезагрузки UI."""
+    try:
+        return open('/etc/onyx-panel/version', encoding='ascii').read().strip()
+    except OSError:
+        return ''
+
+
 def page_layout(title, body, path, active, domain, csrf='', role='admin'):
     nav = ''
     for key, label, glyph in [('dashboard', 'Дашборд', 'grid'), ('users', 'Клиенты', 'users'), ('nodes', 'Ноды', 'nodes'),
@@ -788,8 +798,8 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
         state = ' active' if key == active else ''
         nav += f'<a class="nav-button{state}" href="{esc(path)}/{key}" data-tip="{label}" aria-label="{label}"{current}>{icon(glyph)}</a>'
     banner = f'''<aside id="releaseBanner" class="release-banner" role="status" hidden><span class="release-banner-mark">{icon('refresh')}</span><div class="release-banner-copy"><b>Доступна новая версия Onyx Panel</b><small>Обновление можно установить с автоматической резервной копией</small></div><span id="releaseBannerVersion" class="release-banner-version"></span><div class="release-banner-actions"><a class="btn primary" href="{esc(path)}/updates">Посмотреть</a><button type="button" id="releaseBannerClose" class="release-banner-close" aria-label="Скрыть уведомление">×</button></div></aside>'''
-    banner_script = f'''<script>(()=>{{const banner=document.getElementById('releaseBanner'),version=document.getElementById('releaseBannerVersion'),close=document.getElementById('releaseBannerClose');if(!banner)return;function dismissed(v){{try{{return localStorage.getItem('onyx-release-banner:'+v)==='1'}}catch(e){{return false}}}}function show(d){{if(!d||!d.available||!d.latest||dismissed(d.latest)){{banner.hidden=true;return}}banner.dataset.version=d.latest;version.textContent=(d.current||'—')+' → '+d.latest;banner.hidden=false}}async function check(){{try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(r.ok&&!r.redirected)show(await r.json())}}catch(e){{}}}}close.addEventListener('click',()=>{{const v=banner.dataset.version;if(v)try{{localStorage.setItem('onyx-release-banner:'+v,'1')}}catch(e){{}}banner.hidden=true}});window.addEventListener('onyx-update-status',e=>show(e.detail));check();setInterval(check,30000)}})();</script>'''
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>{esc(title)} · Onyx Panel</title><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}</style></head><body data-role="{esc(role)}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: клиенты, функции, разделы…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{PWA_INSTALL_DIALOG.replace("@@LOGO@@",esc(path)+"/__logo")}{COMMON_JS}{PWA_JS.replace("@@SW@@",json.dumps(path+"/__/sw.js")).replace("@@SCOPE@@",json.dumps(path))}{PWA_INSTALL_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path))}{PANEL_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
+    banner_script = f'''<script>(()=>{{const banner=document.getElementById('releaseBanner'),version=document.getElementById('releaseBannerVersion'),close=document.getElementById('releaseBannerClose');if(!banner)return;function dismissed(v){{try{{return localStorage.getItem('onyx-release-banner:'+v)==='1'}}catch(e){{return false}}}}function show(d){{if(!d||!d.available||!d.latest||dismissed(d.latest)){{banner.hidden=true;return}}banner.dataset.version=d.latest;version.textContent=(d.current||'—')+' → '+d.latest;banner.hidden=false}}async function check(){{try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(!r.ok||r.redirected)return;const d=await r.json();const mine=document.body.dataset.uiVersion;if(d.current&&mine&&d.current!==mine&&!['queued','running'].includes(d.phase)){{location.reload();return}}show(d)}}catch(e){{}}}}close.addEventListener('click',()=>{{const v=banner.dataset.version;if(v)try{{localStorage.setItem('onyx-release-banner:'+v,'1')}}catch(e){{}}banner.hidden=true}});window.addEventListener('onyx-update-status',e=>show(e.detail));check();setInterval(check,30000)}})();</script>'''
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>{esc(title)} · Onyx Panel</title><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}</style></head><body data-role="{esc(role)}" data-ui-version="{esc(ui_version())}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: клиенты, функции, разделы…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{PWA_INSTALL_DIALOG.replace("@@LOGO@@",esc(path)+"/__logo")}{COMMON_JS}{PWA_JS.replace("@@SW@@",json.dumps(path+"/__/sw.js")).replace("@@SCOPE@@",json.dumps(path))}{PWA_INSTALL_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path))}{PANEL_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
 
 
 def login_ui(path, totp=False):
@@ -1615,6 +1625,9 @@ dialog[open]{animation:onyx-dialog-in .24s cubic-bezier(.2,.9,.3,1.08)}
 @keyframes onyx-dialog-in{from{opacity:0;transform:scale(.955) translateY(10px)}to{opacity:1;transform:none}}
 dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease}
 @keyframes onyx-backdrop-in{from{opacity:0}to{opacity:1}}
+/* Кнопка обновления дашборда: иконка крутится две секунды после клика */
+#refreshDashboard.spin2 .ico{animation:onyx-refresh-spin 2s linear}
+@keyframes onyx-refresh-spin{from{transform:rotate(0deg)}to{transform:rotate(720deg)}}
 .upd-actions{justify-content:center;margin-top:6px}
 .upd-actions[hidden],.upd-actions button[hidden]{display:none}
 /* "Update available" flag on the Updates page */
