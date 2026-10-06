@@ -468,9 +468,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.24..."
+    echo "Updating Onyx Panel 2.1.25..."
 else
-    echo "Configuring Onyx Panel 2.1.24..."
+    echo "Configuring Onyx Panel 2.1.25..."
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -2813,7 +2813,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.24","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.25","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -5974,6 +5974,19 @@ fi
 python3 -m py_compile "$APP_FILE"
 python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_webpush.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_warp.py" "$APP_DIR/onyx_reality.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
 
+# ---- Web Push: VAPID-ключи для уведомлений колокольчика (идемпотентно) ----
+echo "[2.9/6] Preparing Web Push keys..."
+python3 - <<PY
+import sys
+sys.path.insert(0, "$APP_DIR")
+try:
+    import onyx_webpush
+    pub = onyx_webpush.public_key()
+    print("      VAPID public key:", (pub[:20] + "...") if pub else "unavailable (push notifications disabled)")
+except Exception as exc:
+    print("      Web Push keys skipped:", type(exc).__name__)
+PY
+
 
 # ---- Finish installation: service, Caddy route, permissions, start ----
 echo "[3/6] Creating data..."
@@ -6012,7 +6025,7 @@ fi
 echo "[4/6] Creating systemd service..."
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.24
+Description=Onyx Panel 2.1.25
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6571,9 +6584,9 @@ fi
 echo
 echo "============================================================"
 if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.24 UPDATED"
+echo "          Onyx Panel 2.1.25 UPDATED"
 else
-echo "         Onyx Panel 2.1.24 IS READY"
+echo "         Onyx Panel 2.1.25 IS READY"
 fi
 echo "============================================================"
 echo

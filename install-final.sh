@@ -4,7 +4,7 @@ BASE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-for file in install-panel.sh install-core.sh uninstall-onyx-panel.sh update.sh onyx-logo.png onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py; do
+for file in install-panel.sh install-core.sh uninstall-onyx-panel.sh update.sh onyx-logo.png onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py; do
     [[ -s "$BASE/$file" ]] || die "Package is incomplete: missing $file. Extract the complete archive."
 done
 [[ -s "$BASE/assets/OpenFlux-linux-amd64" || -s "$BASE/OpenFlux-linux-amd64" ]] ||
@@ -28,7 +28,7 @@ cleanup_credentials() {
 }
 trap cleanup_credentials EXIT
 
-echo "Onyx Panel 2.1.24: preparing server..."
+echo "Onyx Panel 2.1.25: preparing server..."
 
 PANEL_UPDATE=0
 if [[ -s /var/lib/onyx-panel/data.json ]] &&
@@ -75,7 +75,7 @@ nft list table ip onyx_awg >/dev/null 2>&1 ||
 systemctl is-active --quiet onyx-panel-sync-tls.timer ||
     die "The Xray TLS synchronization timer did not start."
 echo "Installation complete."
-printf '%s\n' '2.1.24' > /etc/onyx-panel/version
+printf '%s\n' '2.1.25' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/version
 
 # Keep a private copy of the complete package on the server so the panel can
@@ -86,6 +86,6 @@ if [[ "$BASE" != "/opt/onyx-panel-package" ]]; then
     cp -a "$BASE/." /opt/onyx-panel-package.tmp/
     rm -rf /opt/onyx-panel-package
     mv /opt/onyx-panel-package.tmp /opt/onyx-panel-package
-    printf '%s\n' '2.1.24' > /opt/onyx-panel-package/version
+    printf '%s\n' '2.1.25' > /opt/onyx-panel-package/version
     chmod 0600 /opt/onyx-panel-package/version
 fi
