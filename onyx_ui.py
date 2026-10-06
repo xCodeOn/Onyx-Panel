@@ -234,7 +234,9 @@ function build(sel){
       const longest=[...sel.options].reduce((a,o)=>o.textContent.length>(a?a.textContent.length:0)?o:a,null);
       if(!longest)return;
       // Замер по клону триггера вне дерева: блок может быть скрыт (свёрнутая карточка), и живой замер даст ноль.
+      // Класс audit-filter нужен, чтобы контекстные правила (.audit-filter .selx-trigger) применились и к клону.
       const box=document.createElement("div");
+      box.className="audit-filter";
       box.style.cssText="position:absolute;left:-99999px;top:0;width:max-content";
       const clone=btn.cloneNode(true);
       clone.querySelector(".selx-label").textContent=longest.textContent;
@@ -2715,7 +2717,7 @@ SETTINGS_EXTRA_CSS = '''
 .audit-filter .selx-label{flex:0 1 auto}
 .audit-filter .selx-caret{position:static}
 .audit-filter .selx-pop{right:auto;width:max-content;min-width:100%}
-@media(max-width:760px){.audit-filter button:not(.selx-trigger){flex:1 1 100%;padding:11px 12px;font-size:12px}}
+@media(max-width:760px){.audit-filter .selx{flex-shrink:0}.audit-filter .selx-trigger{font-size:10px;padding:9px 12px 9px 10px}.audit-filter button:not(.selx-trigger){flex:1 1 auto;padding:10px;font-size:11px;white-space:nowrap}}
 .audit-table{width:100%;border-collapse:collapse;font-size:11px}
 .audit-table td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .audit-table tr:last-child td{border-bottom:0}
