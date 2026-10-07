@@ -8,3 +8,6 @@ LICENSE text eol=lf
 *.png binary
 *.gz binary
 assets/* binary
+
+# Nested asset dirs are not covered by assets/* — keep Telegram bundle byte-exact
+assets/mtproxy/* -text
