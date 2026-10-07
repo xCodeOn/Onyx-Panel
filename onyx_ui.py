@@ -1262,8 +1262,6 @@ function patch(nodes){{
     }}
     const ver=card.querySelector('[data-node-version]');
     if(ver&&typeof s.version==='string'&&s.version)ver.textContent=s.version;
-    const upd=card.querySelector('[data-node-update]');
-    if(upd)upd.hidden=!(s.enabled&&s.online&&s.outdated);
     const live=card.querySelector('[data-node-live]');
     if(live&&typeof s.html==='string'){{
       if(live.innerHTML!==s.html)live.innerHTML=s.html;
@@ -1300,17 +1298,70 @@ if(dform)dform.addEventListener('submit',async e=>{{
   }}catch(err){{if(window.onyxToast)onyxToast(err.message||'Не удалось удалить ноду.','err')}}
   finally{{delete dform.dataset.busy}}
 }});
+const uOverlay=document.createElement('div');uOverlay.className='move-overlay';uOverlay.hidden=true;
+uOverlay.innerHTML='<div class="move-card" id="nodeUpdCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="nodeUpdMark">…</b></div><h3 id="nodeUpdTitle">Обновление ноды</h3><p id="nodeUpdText">Связываемся с нодой…</p><div class="node-add-steps" id="nodeUpdSteps"><span>Связь с нодой</span><span>Запуск обновления</span><span>Ожидание версии</span></div><div class="actions upd-actions" id="nodeUpdActions" hidden><button type="button" class="primary" id="nodeUpdClose">Закрыть</button></div></div>';
+document.body.append(uOverlay);
+const uCard=uOverlay.querySelector('#nodeUpdCard'),uMark=uOverlay.querySelector('#nodeUpdMark'),uTitle=uOverlay.querySelector('#nodeUpdTitle'),uText=uOverlay.querySelector('#nodeUpdText'),uSteps=[...uOverlay.querySelectorAll('#nodeUpdSteps span')],uActions=uOverlay.querySelector('#nodeUpdActions'),uCloseBtn=uOverlay.querySelector('#nodeUpdClose');
+let uStageTimer=null,uHideTimer=null;
+function uSetStage(i){{uSteps.forEach((s,j)=>{{s.classList.toggle('done',j<i);s.classList.toggle('active',j===i)}})}}
+function uCloseModal(){{clearInterval(uStageTimer);clearTimeout(uHideTimer);uOverlay.classList.remove('show');setTimeout(()=>{{uOverlay.hidden=true}},260)}}
+uCloseBtn.addEventListener('click',uCloseModal);
+function uResult(ok,title,message){{
+ clearInterval(uStageTimer);uCard.classList.remove('spin');
+ if(ok){{
+  uSteps.forEach(s=>{{s.classList.remove('active');s.classList.add('done')}});
+  uCard.classList.add('upd-done');uMark.textContent='✓';
+  uTitle.textContent=title;uText.textContent=message||'';
+  uHideTimer=setTimeout(uCloseModal,1800);
+ }}else{{
+  uSteps.forEach(s=>s.classList.remove('active'));
+  uCard.classList.add('upd-err');uMark.textContent='!';
+  uTitle.textContent=title;uText.textContent=message||'';
+  uActions.hidden=false;
+ }}
+}}
+function uBegin(){{
+ uCard.classList.remove('upd-done','upd-err');uCard.classList.add('spin');uMark.textContent='…';
+ uTitle.textContent='Обновление ноды';uText.textContent='Связываемся с нодой…';
+ uActions.hidden=true;uOverlay.hidden=false;requestAnimationFrame(()=>uOverlay.classList.add('show'));
+ uSetStage(0);uStageTimer=setInterval(()=>uSetStage(1),700);
+}}
 document.addEventListener('click',async e=>{{
   const b=e.target.closest('[data-node-update]');if(!b)return;
   if(b.classList.contains('busy'))return;b.classList.add('busy');
+  uBegin();
   try{{
     const r=await fetch(PATH+'/node-action',{{method:'POST',headers:{{'X-Onyx-Async':'1'}},
       body:new URLSearchParams({{csrf:b.dataset.csrf,operation:'update',id:b.dataset.nodeUpdate}})}});
     let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
     if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось запустить обновление ноды.');
-    if(window.onyxToast)onyxToast(d.message||'Обновление ноды запущено.');
-  }}catch(err){{if(window.onyxToast)onyxToast(err.message||'Не удалось запустить обновление ноды.','err')}}
-  finally{{b.classList.remove('busy')}}
+    clearInterval(uStageTimer);uSetStage(2);
+    uText.textContent='Обновление запущено — ждём новую версию…';
+    const started=Date.now();let misses=0;
+    while(Date.now()-started<15*60*1000){{
+      await new Promise(res=>setTimeout(res,2500));
+      const sec=Math.floor((Date.now()-started)/1000);
+      const clock=Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+      try{{
+        const nr=await fetch(PATH+'/nodes-state',{{cache:'no-store'}});
+        if(nr.ok){{
+          const n=((await nr.json()).nodes||[]).find(x=>x&&x.id===b.dataset.nodeUpdate);
+          if(n&&n.version&&!n.outdated){{
+            uResult(true,'Нода обновлена','Версия '+n.version+' — нода в строю.');
+            if(window.onyxToast)onyxToast('Нода обновлена.');return;
+          }}
+          if(n&&n.online===false)uText.textContent='Нода перезапускается — ждём возвращения… '+clock;
+          else uText.textContent='Нода обновляется… '+clock;
+          misses=0;continue;
+        }}
+      }}catch(e2){{}}
+      misses++;
+      uText.textContent=(misses<4?'Нода обновляется… ':'Связь с нодой пропала, ждём… ')+' '+clock;
+    }}
+    uResult(false,'Не дождались обновления','Нода не подтвердила новую версию за 15 минут — проверьте её позже.');
+  }}catch(err){{
+    uResult(false,'Обновить ноду не удалось',err.message||'Неизвестная ошибка.');
+  }}finally{{b.classList.remove('busy')}}
 }});
 }})();
 </script>'''
@@ -1391,7 +1442,7 @@ def nodes_ui(nodes, local, connection_token, path, csrf):
     for node in nodes:
         icon_flag=node_flag_image(node.get('country_code','UN'),path)
         cards.append(f'''<article class="card node-card" data-node-id="{esc(node.get('id',''))}">
-<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><button type="button" class="node-update-btn" data-node-update="{esc(node.get('id',''))}" data-csrf="{esc(csrf)}" title="Обновить ноду" aria-label="Обновить ноду" hidden>{icon('refresh')}</button><span class="badge {'on' if node.get('enabled',True) else ''}" data-node-badge="{esc(node.get('id',''))}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
+<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><button type="button" class="node-update-btn" data-node-update="{esc(node.get('id',''))}" data-csrf="{esc(csrf)}" title="Обновить ноду" aria-label="Обновить ноду">{icon('refresh')}</button><span class="badge {'on' if node.get('enabled',True) else ''}" data-node-badge="{esc(node.get('id',''))}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
 <div class="node-endpoint">{icon('link')}<span>{esc(node.get('url',''))}</span></div>
 <div class="node-card-meta"><div><span>Версия</span><strong data-node-version="{esc(node.get('id',''))}">{esc(node.get('version','—'))}</strong></div><div><span>Подключения</span><strong>VLESS · Hysteria2</strong></div></div>
 <div class="node-live" data-node-live="{esc(node.get('id',''))}"><p class="node-live-note">Запрашиваем состояние ноды…</p></div>

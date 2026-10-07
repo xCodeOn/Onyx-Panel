@@ -2868,7 +2868,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.45","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.46","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -6158,7 +6158,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.45
+Description=Onyx Panel 2.1.46
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
