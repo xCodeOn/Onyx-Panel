@@ -1611,10 +1611,11 @@ input[type=date]{color-scheme:dark}
 .move-overlay.show .move-card{transform:none}
 .move-ring{position:relative;width:104px;height:104px;margin:0 auto 16px}
 .move-ring svg{width:100%;height:100%;display:block}
-.move-ring circle{fill:none;stroke-width:5;stroke-linecap:round;transform-box:view-box;transform-origin:center}
+.move-ring circle{fill:none;stroke-width:5;stroke-linecap:round}
 .move-ring .bg{stroke:var(--line)}
 .move-ring .fg{stroke:var(--accent);stroke-dasharray:150.8;stroke-dashoffset:0}
-.move-ring.spin .fg,.move-card.spin .move-ring .fg{stroke-dasharray:113;stroke-dashoffset:70;animation:onyx-spin 1s linear infinite}
+.move-ring.spin svg,.move-card.spin .move-ring svg{animation:onyx-spin 1s linear infinite}
+.move-ring.spin .fg,.move-card.spin .move-ring .fg{stroke-dasharray:113;stroke-dashoffset:70}
 .move-ring b{position:absolute;inset:0;display:grid;place-items:center;font:600 30px/1 var(--font-mono);color:var(--accent)}
 .move-card h3{font-size:19px;font-weight:600;letter-spacing:.01em;margin:0 0 8px}
 .move-card p{margin:0 0 14px;color:var(--muted);font-size:12.5px;line-height:1.6}
@@ -1694,7 +1695,10 @@ main{padding:20px 12px 100px}
 /* Короткая обратная связь по действию пользователя работает и при reduce motion */
 #refreshDashboard.spin2 .ico{animation:onyx-refresh-spin 2s linear!important}
 dialog[open]{animation:onyx-dialog-in .24s cubic-bezier(.2,.9,.3,1.08)!important}
-dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease!important}}
+dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease!important}
+/* Прогресс-кольца перезапуска/обновления — функциональный отклик, крутятся и при reduce motion */
+.onyx-ops-ring{animation:onyx-spin 1s linear infinite!important}
+.move-ring.spin svg,.move-card.spin .move-ring svg{animation:onyx-spin 1s linear infinite!important}}
 """
 
 
@@ -2086,12 +2090,12 @@ CSS += '''
 .onyx-ops-card{width:min(380px,calc(100vw - 32px));padding:28px 26px;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow)}
 .onyx-ops-card h3{font-size:16px;margin:0 0 6px}
 .onyx-ops-card p{font-size:12px;color:var(--muted);margin:0;min-height:18px}
-.onyx-ops-ring{width:60px;height:60px;margin:0 auto 16px;display:block}
-.onyx-ops-ring circle{fill:none;stroke-width:5;stroke-linecap:round;transform-box:view-box;transform-origin:center}
+.onyx-ops-ring{width:60px;height:60px;margin:0 auto 16px;display:block;animation:onyx-spin 1s linear infinite}
+.onyx-ops-ring circle{fill:none;stroke-width:5;stroke-linecap:round}
 .onyx-ops-ring .bg{stroke:var(--line)}
-.onyx-ops-ring .fg{stroke:var(--accent);stroke-dasharray:113;stroke-dashoffset:70;animation:onyx-spin 1s linear infinite}
+.onyx-ops-ring .fg{stroke:var(--accent);stroke-dasharray:113;stroke-dashoffset:70}
 @keyframes onyx-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.onyx-ops-ring .fg{animation:none}}
+
 .routing-row{display:grid;grid-template-columns:minmax(220px,320px) minmax(0,1fr);gap:20px;padding:20px 0;border-top:1px solid var(--line);align-items:start}.routing-row:first-of-type{border-top:0;padding-top:4px}.routing-row h3{font-size:14px;margin:0}.routing-row small{display:block;font-size:11px;color:var(--muted);margin-top:5px;line-height:1.55}@media(max-width:760px){.routing-row{grid-template-columns:1fr;gap:10px}}
 .routing-presets{display:flex;flex-wrap:wrap;gap:7px}
 .routing-preset{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px dashed var(--line);border-radius:10px;background:var(--raised);font-size:11px;font-weight:550;color:var(--muted)}
