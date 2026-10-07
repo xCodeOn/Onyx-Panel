@@ -1275,6 +1275,31 @@ async function tick(){{
 }}
 tick();timer=setInterval(tick,5000);
 document.addEventListener('visibilitychange',()=>{{if(!document.hidden)tick()}});
+const dform=document.querySelector('[data-node-delete-form]');
+if(dform)dform.addEventListener('submit',async e=>{{
+  e.preventDefault();
+  if(dform.dataset.busy)return;dform.dataset.busy='1';
+  const del=async force=>{{
+    const r=await fetch(dform.getAttribute('action'),{{method:'POST',headers:{{'X-Onyx-Async':'1'}},
+      body:new URLSearchParams({{csrf:dform.querySelector('[name=csrf]').value,operation:'delete',
+        id:dform.querySelector('[name=id]').value,force:force?'1':'0'}})}});
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
+    if(!r.ok||!d.ok){{const err=new Error(d.message||'Не удалось удалить ноду.');err.canForce=!!d.can_force;throw err}}
+    return d;
+  }};
+  try{{
+    if(!(await onyxConfirm('Удалить ноду из этой панели?',{{danger:true}})))return;
+    try{{await del(false);
+      if(window.onyxToast)onyxToast('Нода удалена.');setTimeout(()=>location.reload(),600)}}
+    catch(err){{
+      if(!err.canForce)throw err;
+      if(!(await onyxConfirm('Нода не отвечает: '+err.message+' Удалить принудительно? Профили на этой ноде останутся.',{{danger:true}})))return;
+      await del(true);
+      if(window.onyxToast)onyxToast('Нода удалена принудительно.');setTimeout(()=>location.reload(),600);
+    }}
+  }}catch(err){{if(window.onyxToast)onyxToast(err.message||'Не удалось удалить ноду.','err')}}
+  finally{{delete dform.dataset.busy}}
+}});
 document.addEventListener('click',async e=>{{
   const b=e.target.closest('[data-node-update]');if(!b)return;
   if(b.classList.contains('busy'))return;b.classList.add('busy');
@@ -1370,7 +1395,7 @@ def nodes_ui(nodes, local, connection_token, path, csrf):
 <div class="node-endpoint">{icon('link')}<span>{esc(node.get('url',''))}</span></div>
 <div class="node-card-meta"><div><span>Версия</span><strong data-node-version="{esc(node.get('id',''))}">{esc(node.get('version','—'))}</strong></div><div><span>Подключения</span><strong>VLESS · Hysteria2</strong></div></div>
 <div class="node-live" data-node-live="{esc(node.get('id',''))}"><p class="node-live-note">Запрашиваем состояние ноды…</p></div>
-<form class="node-remove" method="post" action="{esc(path)}/node-action" data-confirm="Удалить ноду из этой панели?"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(node.get('id',''))}"><button class="danger">Удалить ноду</button></form></article>''')
+<form class="node-remove" method="post" action="{esc(path)}/node-action" data-node-delete-form><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(node.get('id',''))}"><button class="danger">Удалить ноду</button></form></article>''')
     local_flag=node_flag_image(local.get('country_code','UN'),path)
     country_options=node_country_select(local)
     local_country=local.get('country_name','Сервер')

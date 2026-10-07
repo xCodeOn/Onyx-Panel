@@ -2868,7 +2868,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.44","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.45","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3835,11 +3835,23 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     nodes=node_api.load_nodes(NODES_FILE); uid=form.get("id","")
                     selected=next((n for n in nodes if n.get("id")==uid),None)
                     if selected is None: raise node_api.NodeError("Нода не найдена.")
-                    # Revoke remotely before forgetting the only credential that
-                    # can remove controller-created profiles from this node.
-                    node_api.purge_profiles(selected)
+                    force=form.get("force","")=="1"
+                    async_delete=self.headers.get("X-Onyx-Async","")=="1"
+                    if not force:
+                        # Revoke remotely before forgetting the only credential
+                        # that can remove controller-created profiles from this
+                        # node. Force delete skips this for dead nodes.
+                        try:
+                            node_api.purge_profiles(selected)
+                        except node_api.NodeError as exc:
+                            if async_delete:
+                                self.send_json({"ok":False,"message":str(exc),"can_force":True}); return
+                            raise
                     node_api.save_nodes(NODES_FILE,[n for n in nodes if n.get("id")!=uid])
-                    audit('node-delete',uid,selected.get("name","") or selected.get("url",""))
+                    audit('node-delete',uid,(selected.get("name","") or selected.get("url",""))+(" (принудительно)" if force else ""))
+                    if async_delete:
+                        self.send_json({"ok":True}); return
+                    self.redirect("/nodes")
                 elif operation=="location":
                     node_api.save_location(LOCATION_FILE,form)
                 elif operation=="update":
@@ -6146,7 +6158,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.44
+Description=Onyx Panel 2.1.45
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
