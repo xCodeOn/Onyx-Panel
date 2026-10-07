@@ -142,6 +142,10 @@ ui_explain() {
             meaning="Не получилось скачать нужный компонент — нет доступа в интернет или DNS не работает."
             hint="Проверьте: curl -I https://github.com — и настройки файрвола/прокси на сервере."
             ;;
+        *зеркала*)
+            meaning="Основной источник и все зеркала недоступны одновременно — на сервере нет рабочего интернета."
+            hint="Проверьте: curl -I https://github.com; при необходимости задайте свои зеркала: ONYX_GH_MIRRORS='https://ghproxy.net https://gh-proxy.com' bash install.sh"
+            ;;
         *invalid\ domain*|*valid\ domain*)
             meaning="Домен введён неверно: он должен быть вида proxy.example.com, без http://, порта и подчёркиваний."
             hint="Пример правильного ввода: proxy.example.com"
@@ -212,4 +216,141 @@ ui_success_begin() {
 ui_success_end() {
     printf '%s\n' "${C_GREEN}${B}  ╚══════════════════════════════════════════════════════════╝${R}"
     printf '%s\n' ""
+}
+
+# ── Resilient downloads ─────────────────────────────────────────────────────
+# GitHub is intermittently unreachable from some networks (RU, CN, mobile
+# carriers). Every caller still verifies checksums, so mirrors are transport
+# only. Override ONYX_GH_MIRRORS (space-separated prefixes) to customize;
+# set ONYX_FETCH_SKIP_DIRECT=1 to force the mirror path.
+ONYX_GH_MIRRORS="${ONYX_GH_MIRRORS:-https://ghproxy.net https://gh-proxy.com https://ghfast.top}"
+
+onyx_fetch() {
+    # onyx_fetch OUTPUT URL [EXTRA_URLS...]
+    # Direct URL first, then GitHub mirror prefixes for github.com/codeload/
+    # raw URLs, then explicit extra URLs. Returns non-zero when everything
+    # fails; the caller decides whether that is fatal (die) or tolerable.
+    local out="$1" url="$2" candidate
+    shift 2
+    local -a candidates=("$url")
+    if [[ "$url" == *github.com* || "$url" == *codeload.github.com* ]]; then
+        local m
+        for m in $ONYX_GH_MIRRORS; do
+            candidates+=("${m%/}/${url}")
+        done
+    fi
+    candidates+=("$@")
+    if [[ "${ONYX_FETCH_SKIP_DIRECT:-0}" == 1 && ${#candidates[@]} -gt 1 ]]; then
+        candidates=("${candidates[@]:1}")
+    fi
+    for candidate in "${candidates[@]}"; do
+        if curl --fail --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 2 --retry-all-errors --connect-timeout 15 \
+            --output "$out" "$candidate"; then
+            return 0
+        fi
+        rm -f "$out"
+    done
+    ui_err "Не удалось скачать: $url — GitHub и зеркала недоступны."
+    return 1
+}
+
+onyx_git_fetch_pinned() {
+    # onyx_git_fetch_pinned DIR REPO_URL REF MODE COMMIT [SHA256]
+    # Fetch a pinned source tree: plain git first; when GitHub git endpoints
+    # are unreachable, fall back to the pinned github archive tarball through
+    # the mirrors. MODE is "commit" or "tag". SHA256, when given, must match
+    # the github archive tarball (release bundles ship exactly that archive,
+    # so bundle checksums are valid for it). Leaves DIR with sources; .git
+    # exists only on the git path.
+    local dir="$1" repo="$2" ref="$3" mode="$4" commit="$5" want_sha="${6:-}"
+    if [[ ! -d "$dir/.git" ]]; then
+        rm -rf "$dir"
+        mkdir -p "$dir"
+        git -C "$dir" init -q
+    fi
+    git -C "$dir" remote remove origin 2>/dev/null || true
+    git -C "$dir" remote add origin "$repo"
+    if [[ "$mode" == "tag" ]]; then
+        git -C "$dir" fetch -q --depth 1 origin tag "$ref" 2>/dev/null &&
+            git -C "$dir" checkout -q --detach FETCH_HEAD 2>/dev/null || true
+    else
+        git -C "$dir" fetch -q --depth 1 origin "$ref" 2>/dev/null &&
+            git -C "$dir" checkout -q --detach --force FETCH_HEAD 2>/dev/null || true
+    fi
+    [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$commit" ]] && return 0
+    ui_warn "git-эндпоинты GitHub недоступны — качаю закреплённый архив через зеркала..."
+    local tarball repo_path
+    repo_path="${repo#https://github.com/}"
+    repo_path="${repo_path%.git}"
+    tarball="$(mktemp /tmp/onyx-pinned-src.XXXXXX.tar.gz)"
+    if ! onyx_fetch "$tarball" "https://github.com/${repo_path}/archive/${commit}.tar.gz"; then
+        rm -f "$tarball"
+        return 1
+    fi
+    if [[ -n "$want_sha" ]]; then
+        echo "$want_sha  $tarball" | sha256sum -c - >/dev/null 2>&1 || {
+            rm -f "$tarball"
+            ui_err "Контрольная сумма архивного tarball не совпала (${repo_path}@${commit})."
+            return 1
+        }
+    fi
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    tar -xzf "$tarball" -C "$dir" --strip-components=1 --no-same-owner
+    rm -f "$tarball"
+}
+
+onyx_curl_shim_dir() {
+    # onyx_curl_shim_dir DIR — create a directory with a `curl` shim that
+    # behaves like real curl, then retries GitHub URLs through the mirrors,
+    # then falls back to bundled Telegram files (proxy-secret/proxy-multi.conf)
+    # for core.telegram.org endpoints. Used to run the pinned MTProxy
+    # installer unmodified on networks where GitHub/Telegram are blocked:
+    #   PATH="$DIR:$PATH" ONYX_REAL_CURL="$(command -v curl)" \
+    #       ONYX_BUNDLED_DIR="$BASE/assets/mtproxy" "$MT_INSTALLER"
+    local dir="$1"
+    install -d -m 0755 "$dir"
+    cat > "$dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+# Onyx Panel curl shim: transparent mirror/bundle fallback. See
+# onyx_curl_shim_dir in onyx-install-ui.sh.
+set -uo pipefail
+REAL_CURL="${ONYX_REAL_CURL:-/usr/bin/curl}"
+"$REAL_CURL" "$@"
+rc=$?
+[[ $rc -eq 0 ]] && exit 0
+url=""
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" || "$prev" == "-o" ]]; then
+        out="$a"
+    elif [[ "$a" == --output=* ]]; then
+        out="${a#*=}"
+    elif [[ "$a" != -* ]]; then
+        url="$a"
+    fi
+    prev="$a"
+done
+if [[ -n "$out" && -n "$url" && "$url" == *github.com/* ]]; then
+    for m in ${ONYX_GH_MIRRORS:-}; do
+        "$REAL_CURL" --fail --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 2 --retry-all-errors --connect-timeout 15 \
+            --output "$out" "${m%/}/${url}" && exit 0
+    done
+fi
+if [[ -n "$out" && -n "${ONYX_BUNDLED_DIR:-}" && -d "$ONYX_BUNDLED_DIR" ]]; then
+    case "$url" in
+        *getProxySecret) [[ -s "$ONYX_BUNDLED_DIR/proxy-secret" ]] && \
+            cp "$ONYX_BUNDLED_DIR/proxy-secret" "$out" && exit 0 ;;
+        *getProxyConfig) [[ -s "$ONYX_BUNDLED_DIR/proxy-multi.conf" ]] && \
+            cp "$ONYX_BUNDLED_DIR/proxy-multi.conf" "$out" && exit 0 ;;
+    esac
+fi
+exit "$rc"
+SHIM
+    chmod 0755 "$dir/curl"
 }

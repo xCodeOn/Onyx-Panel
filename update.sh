@@ -23,6 +23,35 @@ LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 if [[ ! -s "$LOCAL_SOURCE/install-final.sh" && -d /opt/onyx-panel-package ]]; then
     LOCAL_SOURCE="/opt/onyx-panel-package"
 fi
+
+# Shared download helpers (mirror fallbacks) when the UI kit is available;
+# a plain curl-only onyx_fetch keeps older local packages working.
+UI_LIB="${LOCAL_SOURCE}/onyx-install-ui.sh"
+if [[ -s "$UI_LIB" ]]; then
+    # shellcheck source=onyx-install-ui.sh
+    . "$UI_LIB"
+else
+    ONYX_GH_MIRRORS="${ONYX_GH_MIRRORS:-https://ghproxy.net https://gh-proxy.com https://ghfast.top}"
+    ui_warn() { echo "  WARNING: $*" >&2; }
+    onyx_fetch() {
+        local out="$1" url="$2" candidate
+        shift 2
+        local -a candidates=("$url")
+        if [[ "$url" == *github.com* || "$url" == *codeload.github.com* ]]; then
+            local m
+            for m in $ONYX_GH_MIRRORS; do candidates+=("${m%/}/${url}"); done
+        fi
+        candidates+=("$@")
+        for candidate in "${candidates[@]}"; do
+            curl --fail --silent --show-error --location \
+                --proto '=https' --proto-redir '=https' --tlsv1.2 \
+                --retry 2 --retry-all-errors --connect-timeout 15 \
+                --output "$out" "$candidate" && return 0
+            rm -f "$out"
+        done
+        return 1
+    }
+fi
 # The local package is the offline fallback. It must be complete only when the
 # repository cannot provide the files; a reachable repository is the source of
 # truth, and a stale local package must not block the update (the successful
@@ -308,9 +337,22 @@ trap finish EXIT
 echo "Preparing Onyx Panel update files..."
 if [[ -n "$REPOSITORY" && "$REMOTE_OK" == 1 ]]; then
     if ! git clone --depth 1 --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
-        echo "Clone failed — falling back to the local package."
-        require_local_archive
-        cp -a "$LOCAL_SOURCE/." "$TEMP_DIR/source/"
+        ui_warn "git clone не сработал — качаю tarball ${RELEASE_REF} через зеркала..."
+        REPO_PATH="${REPOSITORY#*github.com/}"
+        REPO_PATH="${REPO_PATH%.git}"
+        UPDATE_TARBALL="$TEMP_DIR/release.tar.gz"
+        if onyx_fetch "$UPDATE_TARBALL" \
+                "https://codeload.github.com/${REPO_PATH}/tar.gz/refs/tags/${RELEASE_REF}" \
+                "https://github.com/${REPO_PATH}/archive/${RELEASE_REF}.tar.gz" &&
+           tar -xzf "$UPDATE_TARBALL" -C "$TEMP_DIR" 2>/dev/null &&
+           mv "$TEMP_DIR"/Onyx-Panel-*/ "$TEMP_DIR/source" 2>/dev/null; then
+            rm -f "$UPDATE_TARBALL"
+            echo "Release tarball extracted; continuing the update."
+        else
+            echo "Clone failed — falling back to the local package."
+            require_local_archive
+            cp -a "$LOCAL_SOURCE/." "$TEMP_DIR/source/"
+        fi
     fi
 else
     require_local_archive

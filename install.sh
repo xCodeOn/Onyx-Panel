@@ -51,10 +51,25 @@ echo "Onyx Panel: release ${LATEST}..."
 WORK="$(mktemp -d /tmp/onyx-panel-install.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
-curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --retry-all-errors \
-    --connect-timeout 20 --max-time 300 \
-    -o "$WORK/onyx-panel.tar.gz" \
-    "https://codeload.github.com/${REPO_SLUG}/tar.gz/refs/tags/${LATEST}"
+# codeload serves tags under refs/tags/; branches only under HEAD.
+DL_REF="refs/tags/${LATEST}"
+[[ "$LATEST" == "main" ]] && DL_REF="HEAD"
+
+# Direct GitHub first, then mirrors (codeload form for gh-proxy.com, archive
+# form for the rest) so installs work when GitHub is throttled or blocked.
+ONYX_DL_OK=0
+for dl in \
+    "https://codeload.github.com/${REPO_SLUG}/tar.gz/${DL_REF}" \
+    "https://gh-proxy.com/https://codeload.github.com/${REPO_SLUG}/tar.gz/${DL_REF}" \
+    "https://ghproxy.net/https://github.com/${REPO_SLUG}/archive/${LATEST}.tar.gz" \
+    "https://gh-proxy.com/https://github.com/${REPO_SLUG}/archive/${LATEST}.tar.gz" \
+    "https://ghfast.top/https://github.com/${REPO_SLUG}/archive/${LATEST}.tar.gz"; do
+    curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
+        -o "$WORK/onyx-panel.tar.gz" "$dl" && { ONYX_DL_OK=1; break; }
+done
+[[ "$ONYX_DL_OK" == 1 ]] ||
+    die "Could not download the Onyx Panel release: GitHub и зеркала недоступны."
 mkdir -p "$WORK/package"
 tar -xzf "$WORK/onyx-panel.tar.gz" -C "$WORK/package" --strip-components=1 --no-same-owner
 

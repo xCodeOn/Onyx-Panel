@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="2.1.37"
+VERSION="2.1.38"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -32,6 +32,46 @@ else
     ui_trap_error() { local c="$1"; trap - ERR; echo "ERROR: command failed (code $c, line ${BASH_LINENO[0]:-?})." >&2; exit "$c"; }
     ui_success_begin() { echo "== $* =="; }
     ui_success_end() { echo; }
+    ONYX_GH_MIRRORS="${ONYX_GH_MIRRORS:-https://ghproxy.net https://gh-proxy.com https://ghfast.top}"
+    onyx_fetch() {
+        local out="$1" url="$2" candidate
+        shift 2
+        local -a candidates=("$url")
+        if [[ "$url" == *github.com* || "$url" == *codeload.github.com* ]]; then
+            local m
+            for m in $ONYX_GH_MIRRORS; do candidates+=("${m%/}/${url}"); done
+        fi
+        candidates+=("$@")
+        for candidate in "${candidates[@]}"; do
+            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15                 --output "$out" "$candidate" && return 0
+            rm -f "$out"
+        done
+        return 1
+    }
+    onyx_git_fetch_pinned() {
+        local dir="$1" repo="$2" ref="$3" mode="$4" commit="$5"
+        if [[ ! -d "$dir/.git" ]]; then
+            rm -rf "$dir"; mkdir -p "$dir"; git -C "$dir" init -q
+        fi
+        git -C "$dir" remote remove origin 2>/dev/null || true
+        git -C "$dir" remote add origin "$repo"
+        if [[ "$mode" == "tag" ]]; then
+            git -C "$dir" fetch -q --depth 1 origin tag "$ref" &&
+                git -C "$dir" checkout -q --detach FETCH_HEAD || true
+        else
+            git -C "$dir" fetch -q --depth 1 origin "$ref" &&
+                git -C "$dir" checkout -q --detach --force FETCH_HEAD || true
+        fi
+        [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$commit" ]] && return 0
+        local tarball repo_path
+        repo_path="${repo#https://github.com/}"; repo_path="${repo_path%.git}"
+        tarball="$(mktemp /tmp/onyx-pinned-src.XXXXXX.tar.gz)"
+        onyx_fetch "$tarball" "https://github.com/${repo_path}/archive/${commit}.tar.gz" || { rm -f "$tarball"; return 1; }
+        rm -rf "$dir"; mkdir -p "$dir"
+        tar -xzf "$tarball" -C "$dir" --strip-components=1 --no-same-owner
+        rm -f "$tarball"
+    }
+    onyx_curl_shim_dir() { mkdir -p "$1"; }
 fi
 die() { ui_die "$@"; }
 REPO_DIR="/root/tproxy-server"
@@ -448,17 +488,21 @@ if [[ -s "$TPROXY_SOURCE_BUNDLED" ]] &&
     [[ -s "$REPO_DIR/deploy/install-mtproxy.sh" ]] ||
         die "Bundled tproxy-server source is incomplete."
 else
-    if [[ ! -d "$REPO_DIR/.git" ]]; then
-        rm -rf "$REPO_DIR"
-        mkdir -p "$REPO_DIR"
-        git -C "$REPO_DIR" init
-        git -C "$REPO_DIR" remote add origin https://github.com/telegramdesktop/tproxy-server.git
-    fi
     echo "      Fetching pinned tproxy-server release source..."
-    git -C "$REPO_DIR" fetch --depth 1 origin "$TPROXY_REF"
-    git -C "$REPO_DIR" checkout --detach --force FETCH_HEAD
-    [[ "$(git -C "$REPO_DIR" rev-parse HEAD)" == "$TPROXY_REF" ]] ||
-        die "Pinned tproxy-server source verification failed."
+    onyx_git_fetch_pinned "$REPO_DIR" "https://github.com/telegramdesktop/tproxy-server.git" \
+        "$TPROXY_REF" commit "$TPROXY_REF" "$TPROXY_SOURCE_SHA256" ||
+        die "Could not download the pinned tproxy-server source: GitHub и зеркала недоступны."
+    # The archive fallback leaves no .git and no ref check, so pin the
+    # security-critical lines of the extracted installer instead: MTProxy
+    # must be built from the official TelegramMessenger archive and the
+    # proxy-secret/config must come from core.telegram.org. The installer's
+    # own pinned sha256 then covers the archive contents.
+    if [[ ! -d "$REPO_DIR/.git" ]]; then
+        grep -Fq 'https://github.com/TelegramMessenger/MTProxy/archive/' "$REPO_DIR/deploy/install-mtproxy.sh" &&
+            grep -Fq 'https://core.telegram.org/getProxySecret' "$REPO_DIR/deploy/install-mtproxy.sh" &&
+            grep -Fq 'https://core.telegram.org/getProxyConfig' "$REPO_DIR/deploy/install-mtproxy.sh" ||
+            die "Pinned tproxy-server source verification failed."
+    fi
 fi
 cd "$REPO_DIR"
 
@@ -478,10 +522,9 @@ else
         cp "$caddy_bundled" "$caddy_archive"
     else
         echo "      Caddy archive not found in assets/; downloading it..."
-        curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --output "$caddy_archive" \
-            "https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_amd64.tar.gz"
+        onyx_fetch "$caddy_archive" \
+            "https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_amd64.tar.gz" ||
+            die "Could not download Caddy: GitHub и зеркала недоступны."
     fi
 
     test "$(sha512sum "$caddy_archive" | awk '{print $1}')" = "$caddy_sha512" ||
@@ -522,7 +565,19 @@ if [[ "$REUSE_MT" != "1" ]]; then
         -e 's/^apt-get update$/apt-get -o DPkg::Lock::Timeout=600 update/' \
         -e 's/^apt-get install /apt-get -o DPkg::Lock::Timeout=600 install /' \
         "$MT_INSTALLER"
-    "$MT_INSTALLER"
+    # Resilient downloads inside the pinned installer: run it under a curl
+    # shim that retries GitHub through mirrors and falls back to the bundled
+    # Telegram proxy-secret/proxy-multi.conf when core.telegram.org is
+    # unreachable. The installer's own sha256/size checks stay in force.
+    MT_SHIM_DIR="$(mktemp -d /tmp/onyx-curl-shim.XXXXXX)"
+    onyx_curl_shim_dir "$MT_SHIM_DIR"
+    REAL_CURL_BIN="$(command -v curl)"
+    PATH="${MT_SHIM_DIR}:${PATH}" \
+        ONYX_REAL_CURL="$REAL_CURL_BIN" \
+        ONYX_GH_MIRRORS="$ONYX_GH_MIRRORS" \
+        ONYX_BUNDLED_DIR="${BASE}/assets/mtproxy" \
+        "$MT_INSTALLER"
+    rm -rf "$MT_SHIM_DIR"
 else
     echo "      MTProxy installation skipped; existing instance is already listening on :2398."
 fi
@@ -579,10 +634,11 @@ else
         cp "$go_bundled" "$go_archive"
     else
         echo "      Go toolchain not found in assets/; downloading it..."
-        curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --output "$go_archive" \
-            "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz"
+        onyx_fetch "$go_archive" \
+            "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" \
+            "https://mirrors.aliyun.com/golang/go${go_version}.linux-amd64.tar.gz" \
+            "https://dl.google.com/go/go${go_version}.linux-amd64.tar.gz" ||
+            die "Could not download the Go toolchain."
     fi
 
     test "$(sha256sum "$go_archive" | awk '{print $1}')" = "$go_sha256" ||
@@ -643,7 +699,7 @@ if [[ "$CADDY_MODE" == "owner" ]]; then
 else
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-printf '%s\n' '2.1.37' > /etc/onyx-panel/version
+printf '%s\n' '2.1.38' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/primary-secret
 chmod 0600 /etc/onyx-panel/caddy-owned
 chmod 0600 /etc/onyx-panel/version

@@ -25,6 +25,46 @@ else
     ui_trap_error() { local c="$1"; trap - ERR; echo "ERROR: command failed (code $c, line ${BASH_LINENO[0]:-?})." >&2; exit "$c"; }
     ui_success_begin() { echo "== $* =="; }
     ui_success_end() { echo; }
+    ONYX_GH_MIRRORS="${ONYX_GH_MIRRORS:-https://ghproxy.net https://gh-proxy.com https://ghfast.top}"
+    onyx_fetch() {
+        local out="$1" url="$2" candidate
+        shift 2
+        local -a candidates=("$url")
+        if [[ "$url" == *github.com* || "$url" == *codeload.github.com* ]]; then
+            local m
+            for m in $ONYX_GH_MIRRORS; do candidates+=("${m%/}/${url}"); done
+        fi
+        candidates+=("$@")
+        for candidate in "${candidates[@]}"; do
+            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15                 --output "$out" "$candidate" && return 0
+            rm -f "$out"
+        done
+        return 1
+    }
+    onyx_git_fetch_pinned() {
+        local dir="$1" repo="$2" ref="$3" mode="$4" commit="$5"
+        if [[ ! -d "$dir/.git" ]]; then
+            rm -rf "$dir"; mkdir -p "$dir"; git -C "$dir" init -q
+        fi
+        git -C "$dir" remote remove origin 2>/dev/null || true
+        git -C "$dir" remote add origin "$repo"
+        if [[ "$mode" == "tag" ]]; then
+            git -C "$dir" fetch -q --depth 1 origin tag "$ref" &&
+                git -C "$dir" checkout -q --detach FETCH_HEAD || true
+        else
+            git -C "$dir" fetch -q --depth 1 origin "$ref" &&
+                git -C "$dir" checkout -q --detach --force FETCH_HEAD || true
+        fi
+        [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$commit" ]] && return 0
+        local tarball repo_path
+        repo_path="${repo#https://github.com/}"; repo_path="${repo_path%.git}"
+        tarball="$(mktemp /tmp/onyx-pinned-src.XXXXXX.tar.gz)"
+        onyx_fetch "$tarball" "https://github.com/${repo_path}/archive/${commit}.tar.gz" || { rm -f "$tarball"; return 1; }
+        rm -rf "$dir"; mkdir -p "$dir"
+        tar -xzf "$tarball" -C "$dir" --strip-components=1 --no-same-owner
+        rm -f "$tarball"
+    }
+    onyx_curl_shim_dir() { mkdir -p "$1"; }
 fi
 die() { ui_die "$@"; }
 trap 'ui_trap_error $?' ERR
@@ -185,11 +225,9 @@ if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --ver
                 apt-get -o DPkg::Lock::Timeout=600 update
                 apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
             fi
-            git -C "$AWG_GO_SOURCE" init -q
-            git -C "$AWG_GO_SOURCE" remote add origin https://github.com/amnezia-vpn/amneziawg-go.git
-            git -C "$AWG_GO_SOURCE" fetch -q --depth 1 origin tag "$AWG_GO_VERSION"
-            git -C "$AWG_GO_SOURCE" checkout -q --detach FETCH_HEAD
-            [[ "$(git -C "$AWG_GO_SOURCE" rev-parse HEAD)" == "$AWG_GO_COMMIT" ]] || die "AmneziaWG Go source verification failed."
+            onyx_git_fetch_pinned "$AWG_GO_SOURCE" "https://github.com/amnezia-vpn/amneziawg-go.git" \
+                "$AWG_GO_VERSION" tag "$AWG_GO_COMMIT" "$AWG_GO_SOURCE_SHA256" ||
+                die "Could not download the AmneziaWG Go source: GitHub и зеркала недоступны."
         fi
         (cd "$AWG_GO_SOURCE" && PATH="$(dirname "$GO_BIN"):$PATH" make amneziawg-go)
         install -o root -g root -m 0755 "$AWG_GO_SOURCE/amneziawg-go" /usr/local/bin/amneziawg-go
@@ -215,9 +253,9 @@ if [[ ! -x /usr/local/bin/awg ]] || ! /usr/local/bin/awg --version 2>&1 | grep -
             cp "$AWG_TOOLS_BUNDLED" "$AWG_TOOLS_ARCHIVE"
         else
             echo "      AmneziaWG tools archive not found in assets/; downloading it..."
-            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
-                --retry 3 --retry-all-errors --connect-timeout 20 --output "$AWG_TOOLS_ARCHIVE" \
-                "https://github.com/amnezia-vpn/amneziawg-tools/releases/download/${AWG_TOOLS_VERSION}/ubuntu-22.04-amneziawg-tools.zip"
+            onyx_fetch "$AWG_TOOLS_ARCHIVE" \
+                "https://github.com/amnezia-vpn/amneziawg-tools/releases/download/${AWG_TOOLS_VERSION}/ubuntu-22.04-amneziawg-tools.zip" ||
+                die "Could not download the AmneziaWG tools archive: GitHub и зеркала недоступны."
         fi
         echo "${AWG_TOOLS_SHA256}  ${AWG_TOOLS_ARCHIVE}" | sha256sum -c - >/dev/null || die "AmneziaWG tools checksum verification failed."
         unzip -q "$AWG_TOOLS_ARCHIVE" -d "$AWG_TOOLS_DIR"
@@ -378,11 +416,9 @@ elif [[ ! -x "$XRAY_BIN" ]] || ! "$XRAY_BIN" version 2>/dev/null | grep -q "${XR
         cp "$XRAY_BUNDLED" "$XRAY_ARCHIVE"
     else
         echo "      Xray archive not found in assets/; downloading it..."
-        curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 3 --retry-all-errors --connect-timeout 20 \
-            --output "$XRAY_ARCHIVE" \
-            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip"
+        onyx_fetch "$XRAY_ARCHIVE" \
+            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" ||
+            die "Could not download Xray: GitHub и зеркала недоступны."
     fi
     echo "${XRAY_SHA256}  ${XRAY_ARCHIVE}" | sha256sum -c - >/dev/null || die "Xray checksum verification failed."
     unzip -q "$XRAY_ARCHIVE" xray -d "$XRAY_UNPACK"
@@ -402,10 +438,7 @@ if [[ -s "${BASE}/assets/Xray-linux-64.zip" ]]; then
     echo "      Using geo databases included with this release."
     unzip -q -o "${BASE}/assets/Xray-linux-64.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
 else
-    curl --fail --silent --show-error --location \
-        --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        --retry 3 --retry-all-errors --connect-timeout 20 \
-        --output "$XRAY_GEO_TMP/geo.zip" \
+    onyx_fetch "$XRAY_GEO_TMP/geo.zip" \
         "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
     && unzip -q -o "$XRAY_GEO_TMP/geo.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
     rm -f "$XRAY_GEO_TMP/geo.zip"
@@ -434,11 +467,9 @@ elif [[ ! -x "$OPENFLUX_BIN" ]] || ! sha256sum "$OPENFLUX_BIN" | grep -q "^${OPE
         echo "      Using OpenFlux included with this release."
     else
         OPENFLUX_DOWNLOAD="$(mktemp /tmp/onyx-panel-openflux.XXXXXX)"
-        curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 3 --retry-all-errors --connect-timeout 20 \
-            --output "$OPENFLUX_DOWNLOAD" \
-            "https://github.com/damnurmum/OpenFlux-Android/releases/download/v${OPENFLUX_VERSION}/openflux-linux-amd64"
+        onyx_fetch "$OPENFLUX_DOWNLOAD" \
+            "https://github.com/damnurmum/OpenFlux-Android/releases/download/v${OPENFLUX_VERSION}/openflux-linux-amd64" ||
+            die "Could not download OpenFlux: GitHub и зеркала недоступны."
     fi
     echo "${OPENFLUX_SHA256}  ${OPENFLUX_DOWNLOAD}" | sha256sum -c - >/dev/null || die "OpenFlux checksum verification failed."
     install -o root -g root -m 0755 "$OPENFLUX_DOWNLOAD" "$OPENFLUX_BIN"
@@ -2837,7 +2868,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.37","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.38","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -6064,7 +6095,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.37
+Description=Onyx Panel 2.1.38
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
