@@ -2868,7 +2868,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.41","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.42","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3633,6 +3633,27 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     uid=str(request.get("id",""))
                     if not re.fullmatch(r"[a-f0-9]{16}",uid): self.send_json({"ok":False,"message":"Invalid profile id"},400); return
                     ctl("delete",uid); self.send_json({"ok":True}); return
+                if path==node_api.API_PREFIX+"/panel-update":
+                    # The controlling panel asks this node to bring its own
+                    # Onyx Panel up to the controller's version.
+                    wanted=str(request.get("version","") or "").strip()
+                    try: catalog=web_updates.check_release()
+                    except (OSError,subprocess.TimeoutExpired):
+                        self.send_json({"ok":False,"message":"Нода не смогла связаться с репозиторием обновлений."},503); return
+                    releases=[str(r) for r in (catalog or {}).get("releases",[]) if isinstance(r,str)]
+                    target=wanted if wanted in releases else str((catalog or {}).get("latest","") or "")
+                    if not target:
+                        self.send_json({"ok":False,"message":"Каталог релизов на ноде пуст."},503); return
+                    try: web_updates.start_update(target)
+                    except ValueError as exc:
+                        text=str(exc)
+                        if "уже установлена" in text:
+                            self.send_json({"ok":True,"message":"Нода уже на этой версии."}); return
+                        if "уже выполняется" in text:
+                            self.send_json({"ok":True,"message":"Обновление ноды уже выполняется."}); return
+                        self.send_json({"ok":False,"message":text},409); return
+                    audit('node-remote-update',target,'запущено обновление панели на ноде')
+                    self.send_json({"ok":True,"message":"Обновление ноды запущено","target":target}); return
                 self.send_json({"ok":False,"message":"Not found"},404)
             except (ValueError,json.JSONDecodeError) as exc: self.send_json({"ok":False,"message":str(exc)},400)
             except Exception as exc:
@@ -3811,6 +3832,26 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     audit('node-delete',uid,selected.get("name","") or selected.get("url",""))
                 elif operation=="location":
                     node_api.save_location(LOCATION_FILE,form)
+                elif operation=="update":
+                    # Remote panel update: ask the node to bring its own Onyx
+                    # Panel to this controller's version.
+                    uid=form.get("id","")
+                    selected=next((n for n in node_api.load_nodes(NODES_FILE) if n.get("id")==uid),None)
+                    async_update=self.headers.get("X-Onyx-Async","")=="1"
+                    def update_error(message,status=400):
+                        if async_update: self.send_json({"ok":False,"message":str(message)},status)
+                        else: self.send_html(esc(str(message)),status)
+                    if selected is None:
+                        update_error("Нода не найдена."); return
+                    try:
+                        node_api.request(selected,"POST",node_api.API_PREFIX+"/panel-update",
+                            {"version":web_updates.current_version()},timeout=40)
+                    except node_api.NodeError as exc:
+                        update_error(str(exc),502); return
+                    audit('node-update',uid,selected.get("name","") or selected.get("url",""))
+                    if async_update:
+                        self.send_json({"ok":True,"message":"Обновление ноды запущено — версия обновится через несколько минут."}); return
+                    self.redirect("/nodes")
                 else: raise node_api.NodeError("Неизвестная операция с нодой.")
                 self.redirect("/nodes")
             except node_api.NodeError as exc:
@@ -6095,7 +6136,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.41
+Description=Onyx Panel 2.1.42
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
