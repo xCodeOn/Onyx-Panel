@@ -92,7 +92,7 @@ cleanup_credentials() {
 }
 trap cleanup_credentials EXIT
 
-ui_banner "v2.1.43"
+ui_banner "v2.1.44"
 ui_stage "Подготовка сервера"
 
 PANEL_UPDATE=0
@@ -140,7 +140,7 @@ nft list table ip onyx_awg >/dev/null 2>&1 ||
 systemctl is-active --quiet onyx-panel-sync-tls.timer ||
     die "The Xray TLS synchronization timer did not start."
 ui_ok "Все проверки пройдены — установка завершена."
-printf '%s\n' '2.1.43' > /etc/onyx-panel/version
+printf '%s\n' '2.1.44' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/version
 
 # Keep a private copy of the complete package on the server so the panel can
@@ -151,6 +151,6 @@ if [[ "$BASE" != "/opt/onyx-panel-package" ]]; then
     cp -a "$BASE/." /opt/onyx-panel-package.tmp/
     rm -rf /opt/onyx-panel-package
     mv /opt/onyx-panel-package.tmp /opt/onyx-panel-package
-    printf '%s\n' '2.1.43' > /opt/onyx-panel-package/version
+    printf '%s\n' '2.1.44' > /opt/onyx-panel-package/version
     chmod 0600 /opt/onyx-panel-package/version
 fi

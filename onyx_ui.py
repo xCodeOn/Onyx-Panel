@@ -1393,7 +1393,7 @@ CSS += '''
 CSS += '''
 .node-card-head>.node-update-btn{margin-left:auto}
 .node-card-head>.node-update-btn+.badge{margin-left:0}
-.node-update-btn{display:grid;place-items:center;width:30px;height:30px;border:1px solid color-mix(in srgb,var(--amber) 45%,var(--line));border-radius:9px;background:var(--raised);color:var(--amber);cursor:pointer;flex:0 0 auto}
+.node-update-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--amber) 45%,var(--line));border-radius:9px;background:var(--raised);color:var(--amber);cursor:pointer;flex:0 0 auto}
 .node-update-btn .ico{width:15px;height:15px}
 .node-update-btn:hover{border-color:var(--accent);color:var(--accent)}
 .node-update-btn.busy .ico{animation:onyx-spin 1s linear infinite}
