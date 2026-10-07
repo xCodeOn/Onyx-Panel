@@ -2868,7 +2868,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.42","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.43","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3812,15 +3812,25 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             try:
                 operation=form.get("operation","")
                 if operation=="add":
-                    bundled=node_api.parse_connection_token(form.get("connection_token",""))
-                    candidate=bundled["url"]
-                    if urlparse(candidate).hostname==DOMAIN:
-                        raise node_api.NodeError("Нельзя добавить эту же панель как удалённую ноду.")
-                    node_api.add_node(NODES_FILE,form)
-                    audit('node-add',form.get("url","")[:80],form.get("name",""))
-                    # A freshly added node must serve traffic under the same
-                    # routing policy; the push runs after the redirect returns.
-                    threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
+                    async_add=self.headers.get("X-Onyx-Async","")=="1"
+                    def add_error(message,status=400):
+                        if async_add: self.send_json({"ok":False,"message":str(message)},status)
+                        else: self.send_html(esc(str(message)),status)
+                    try:
+                        bundled=node_api.parse_connection_token(form.get("connection_token",""))
+                        candidate=bundled["url"]
+                        if urlparse(candidate).hostname==DOMAIN:
+                            raise node_api.NodeError("Нельзя добавить эту же панель как удалённую ноду.")
+                        added=node_api.add_node(NODES_FILE,form)
+                        audit('node-add',form.get("url","")[:80],form.get("name",""))
+                        # A freshly added node must serve traffic under the same
+                        # routing policy; the push runs after the redirect returns.
+                        threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
+                    except node_api.NodeError as exc:
+                        add_error(str(exc)); return
+                    if async_add:
+                        self.send_json({"ok":True,"node":added}); return
+                    self.redirect("/nodes")
                 elif operation=="delete":
                     nodes=node_api.load_nodes(NODES_FILE); uid=form.get("id","")
                     selected=next((n for n in nodes if n.get("id")==uid),None)
@@ -6136,7 +6146,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.42
+Description=Onyx Panel 2.1.43
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service

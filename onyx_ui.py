@@ -1303,6 +1303,64 @@ def node_country_select(local):
     return ''.join(options)
 
 
+def node_add_script(path):
+    """Beautiful check-and-add overlay for the node connect form: staged
+    progress with the spinning ring, then a green or red final state."""
+    return f'''<script>
+(()=>{{const form=document.querySelector('[data-node-add-form]');if(!form)return;
+const PATH={json.dumps(path)};
+const overlay=document.createElement('div');overlay.className='move-overlay';overlay.hidden=true;
+overlay.innerHTML='<div class="move-card" id="nodeAddCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="nodeAddMark">…</b></div><h3 id="nodeAddTitle">Добавление ноды</h3><p id="nodeAddText">Проверяем данные…</p><div class="node-add-steps" id="nodeAddSteps"><span>Токен</span><span>Связь с нодой</span><span>Локация и версия</span></div><div class="actions upd-actions" id="nodeAddActions" hidden><button type="button" class="primary" id="nodeAddDismiss">Закрыть</button></div></div>';
+document.body.append(overlay);
+const card=overlay.querySelector('#nodeAddCard'),mark=overlay.querySelector('#nodeAddMark'),title=overlay.querySelector('#nodeAddTitle'),text=overlay.querySelector('#nodeAddText'),steps=[...overlay.querySelectorAll('#nodeAddSteps span')],actions=overlay.querySelector('#nodeAddActions'),dismiss=overlay.querySelector('#nodeAddDismiss'),submit=form.querySelector('button.primary');
+let stageTimer=null,hideTimer=null;
+function setStage(i){{steps.forEach((s,j)=>{{s.classList.toggle('done',j<i);s.classList.toggle('active',j===i)}})}}
+function begin(){{
+ card.classList.remove('upd-done','upd-err');card.classList.add('spin');mark.textContent='…';
+ title.textContent='Добавление ноды';text.textContent='Проверяем данные…';
+ actions.hidden=true;overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'));
+ setStage(0);let stage=0;
+ stageTimer=setInterval(()=>{{stage=Math.min(stage+1,steps.length-1);setStage(stage);
+  if(stage===1)text.textContent='Связываемся с нодой — проверяем API и домен…';
+  if(stage===2)text.textContent='Читаем локацию и версию панели…';}},1100);
+}}
+function result(ok,message){{
+ clearInterval(stageTimer);
+ card.classList.remove('spin');
+ if(ok){{
+  steps.forEach(s=>{{s.classList.remove('active');s.classList.add('done')}});
+  card.classList.add('upd-done');mark.textContent='✓';
+  title.textContent='Нода добавлена';text.textContent=message||'Готово — нода подключена к общей подписке.';
+  hideTimer=setTimeout(()=>{{close();location.reload()}},1700);
+ }}else{{
+  steps.forEach(s=>s.classList.remove('active'));
+  card.classList.add('upd-err');mark.textContent='!';
+  title.textContent='Нода не добавлена';text.textContent=message||'Неизвестная ошибка.';
+  actions.hidden=false;dismiss.focus();
+ }}
+}}
+function close(){{
+ clearInterval(stageTimer);clearTimeout(hideTimer);
+ overlay.classList.remove('show');setTimeout(()=>{{overlay.hidden=true}},260);
+}}
+dismiss.addEventListener('click',close);
+form.addEventListener('submit',async e=>{{
+ e.preventDefault();
+ if(form.dataset.busy)return;form.dataset.busy='1';submit.disabled=true;
+ begin();
+ try{{
+  const r=await fetch(form.getAttribute('action'),{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams(new FormData(form))}});
+  let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
+  if(!r.ok||!d.ok)throw new Error(d.message||'Панель отклонила запрос.');
+  const n=d.node||{{}};
+  result(true,[n.country_name,n.version?'версия '+n.version:''].filter(Boolean).join(' · ')||'Готово — нода подключена.');
+ }}catch(err){{result(false,err.message||'Не удалось связаться с панелью.')}}
+ finally{{delete form.dataset.busy;submit.disabled=false}}
+}});
+}})();
+</script>'''
+
+
 def nodes_ui(nodes, local, connection_token, path, csrf):
     cards=[]
     for node in nodes:
@@ -1326,8 +1384,8 @@ def nodes_ui(nodes, local, connection_token, path, csrf):
 <section class="card local-node-card"><div class="local-node-head"><span class="local-node-flag">{local_flag}</span><div><span class="eyebrow">ТЕКУЩАЯ НОДА</span><h2>{esc(local_city)}</h2><small>{esc(local_country)}</small></div><span class="badge on">Активна</span></div>
 <form class="node-location-form" method="post" action="{esc(path)}/node-action"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="location"><input id="nodeCountryName" type="hidden" name="country_name" value="{esc(local.get('country_name','Сервер'))}"><div class="location-fields"><div class="country-flag-field"><label>Страна ноды</label><select id="nodeCountry" name="country_code" required>{country_options}</select></div><div><label>Город / название локации</label><input name="name" maxlength="80" value="{esc(local.get('name','Основная локация'))}" placeholder="Хельсинки" required></div></div><div class="location-actions"><small>Страна и город определяются по IP автоматически. Здесь их можно исправить вручную.</small><button class="primary">Сохранить</button></div></form><script>(()=>{{const select=document.getElementById('nodeCountry'),name=document.getElementById('nodeCountryName');if(select&&name)select.addEventListener('change',()=>{{name.value=select.selectedOptions[0].dataset.countryName||'Сервер'}})}})();</script>
 <div class="node-token-box"><div class="node-token-title"><span>{icon('link')}</span><div><strong>Node API token</strong><small>Адрес и защищённый ключ подключения этой ноды</small></div></div><div class="node-token-copy"><input value="{esc(connection_token)}" readonly spellcheck="false" aria-label="Node API token"><button type="button" data-copy="{esc(connection_token)}">{icon('copy')}<span>Копировать</span></button></div><p>Храните токен как пароль. Он нужен только администратору другой Onyx-панели.</p><details><summary>Доступные методы API</summary><div class="api-methods"><code>GET · /status</code><code>GET · /profiles</code><code>GET · /metrics</code><code>POST · /profiles/create</code><code>POST · /profiles/delete</code><code>POST · /panel-update</code></div></details></div></section>
-<section class="card node-connect-card"><div class="connect-mark">{icon('nodes')}</div><span class="eyebrow">НОВАЯ ЛОКАЦИЯ</span><h2>Подключить удалённую ноду</h2><p>Добавьте ещё один VPS в общую подписку. Все параметры загрузятся автоматически.</p><ol class="node-connect-steps"><li><i>1</i><span>Скопируйте Node API token на другом сервере</span></li><li><i>2</i><span>Вставьте его в поле ниже</span></li><li><i>3</i><span>Панель проверит домен, страну и доступность API</span></li></ol><form method="post" action="{esc(path)}/node-action"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="add"><label>Node API token</label><div class="node-connect-input"><input name="connection_token" autocomplete="off" spellcheck="false" placeholder="onyxnode1_…" required><button class="primary">Проверить и добавить</button></div><small class="secure-hint">Соединение проверяется через HTTPS. Токен не передаётся сторонним сервисам.</small></form></section></div>
-<section class="nodes-section"><div class="nodes-section-head"><div><span class="eyebrow">NETWORK MAP</span><h2>Подключённые ноды</h2></div><span class="pill">{len(nodes)} / 16</span></div><div class="nodes-list">{''.join(cards) if cards else empty}</div></section>{node_state_script(path)}'''
+<section class="card node-connect-card"><div class="connect-mark">{icon('nodes')}</div><span class="eyebrow">НОВАЯ ЛОКАЦИЯ</span><h2>Подключить удалённую ноду</h2><p>Добавьте ещё один VPS в общую подписку. Все параметры загрузятся автоматически.</p><ol class="node-connect-steps"><li><i>1</i><span>Скопируйте Node API token на другом сервере</span></li><li><i>2</i><span>Вставьте его в поле ниже</span></li><li><i>3</i><span>Панель проверит домен, страну и доступность API</span></li></ol><form method="post" action="{esc(path)}/node-action" data-node-add-form><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="add"><label>Node API token</label><div class="node-connect-input"><input name="connection_token" autocomplete="off" spellcheck="false" placeholder="onyxnode1_…" required><button class="primary">Проверить и добавить</button></div><small class="secure-hint">Соединение проверяется через HTTPS. Токен не передаётся сторонним сервисам.</small></form></section></div>
+<section class="nodes-section"><div class="nodes-section-head"><div><span class="eyebrow">NETWORK MAP</span><h2>Подключённые ноды</h2></div><span class="pill">{len(nodes)} / 16</span></div><div class="nodes-list">{''.join(cards) if cards else empty}</div></section>{node_add_script(path)}{node_state_script(path)}'''
 
 
 CSS += '''
@@ -1340,6 +1398,12 @@ CSS += '''
 .node-update-btn:hover{border-color:var(--accent);color:var(--accent)}
 .node-update-btn.busy .ico{animation:onyx-spin 1s linear infinite}
 .node-update-btn[hidden]{display:none}'''
+CSS += '''
+.node-add-steps{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin:2px 0 6px}
+.node-add-steps span{padding:6px 11px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--muted);font-size:10.5px}
+.node-add-steps span.active{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));color:var(--accent);background:var(--tint)}
+.node-add-steps span.done{border-color:color-mix(in srgb,var(--green) 40%,transparent);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
+.node-add-steps span.done:after{content:" ✓"}'''
 
 
 CSS += '''

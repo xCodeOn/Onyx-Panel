@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="2.1.42"
+VERSION="2.1.43"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -699,7 +699,7 @@ if [[ "$CADDY_MODE" == "owner" ]]; then
 else
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-printf '%s\n' '2.1.42' > /etc/onyx-panel/version
+printf '%s\n' '2.1.43' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/primary-secret
 chmod 0600 /etc/onyx-panel/caddy-owned
 chmod 0600 /etc/onyx-panel/version
