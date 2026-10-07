@@ -66,15 +66,62 @@ ui_banner() {
 }
 
 # ── Stages and lines ────────────────────────────────────────────────────────
-UI_STEP_N=0
+UI_STEP_N="${UI_STEP_N:-0}"
+UI_STAGE_STATE="${ONYX_STAGE_STATE:-}"
+UI_PROGRESS_PID=""
+
+ui_progress_stop() {
+    [[ -n "$UI_PROGRESS_PID" ]] || return 0
+    kill "$UI_PROGRESS_PID" 2>/dev/null || true
+    wait "$UI_PROGRESS_PID" 2>/dev/null || true
+    UI_PROGRESS_PID=""
+    if [[ -t 2 ]]; then printf '\r\033[K' >&2; fi
+}
+
+ui_progress_start() {
+    local message="${1:-Выполняется}"
+    ui_progress_stop
+    [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]] || return 0
+    (
+        local frames='|/-\\' index=0
+        while true; do
+            printf '\r  %s %s' "${frames:index++%4:1}" "$message" >&2
+            sleep 0.2
+        done
+    ) &
+    UI_PROGRESS_PID=$!
+}
+
+ui_run_with_progress() {
+    local message="$1" rc
+    shift
+    ui_progress_start "$message"
+    if "$@"; then
+        ui_progress_stop
+    else
+        rc=$?
+        ui_progress_stop
+        return "$rc"
+    fi
+}
+
 ui_stage() {
+    ui_progress_stop
+    if [[ -n "$UI_STAGE_STATE" && -s "$UI_STAGE_STATE" ]]; then
+        UI_STEP_N="$(<"$UI_STAGE_STATE")"
+        [[ "$UI_STEP_N" =~ ^[0-9]+$ ]] || UI_STEP_N=0
+    fi
     UI_STEP_N=$((UI_STEP_N + 1))
+    if [[ -n "$UI_STAGE_STATE" ]]; then
+        printf '%s\n' "$UI_STEP_N" > "${UI_STAGE_STATE}.tmp.$$"
+        mv -f "${UI_STAGE_STATE}.tmp.$$" "$UI_STAGE_STATE"
+    fi
     printf '\n%s\n' "${C_ACCENT}${B}──[ ${UI_STEP_N} ]${R}${C_WHITE}${B} $* ${R}"
 }
-ui_ok()   { printf '%s\n' "${C_GREEN}  ✔${R} $*"; }
+ui_ok()   { ui_progress_stop; printf '%s\n' "${C_GREEN}  ✔${R} $*"; }
 ui_info() { printf '%s\n' "${C_GREY}  ·${R} $*"; }
-ui_warn() { printf '%s\n' "${C_AMBER}  ▲${R} $*"; }
-ui_err()  { printf '%s\n' "${C_RED}  ✗${R} $*" >&2; }
+ui_warn() { ui_progress_stop; printf '%s\n' "${C_AMBER}  ▲${R} $*"; }
+ui_err()  { ui_progress_stop; printf '%s\n' "${C_RED}  ✗${R} $*" >&2; }
 ui_kv()   { printf '%s\n' "${C_GREY}  ${1}:${R} ${C_WHITE}${2}${R}"; }
 
 # ── Error explanations ──────────────────────────────────────────────────────
@@ -181,6 +228,7 @@ ui_explain() {
 # ── die / failure reporting ─────────────────────────────────────────────────
 # Installers route their die() here: red message + explanation + exit 1.
 ui_die() {
+    ui_progress_stop
     printf '%s\n' "" >&2
     printf '%s\n' "${C_RED}${B}  ✗ ОШИБКА:${R} ${C_RED}$*${R}" >&2
     printf '%s\n' "${C_RED}  ${UI_HR}${R}" >&2
@@ -193,6 +241,7 @@ ui_die() {
 # script (set -e). Call as:  trap 'ui_trap_error $?' ERR
 ui_trap_error() {
     local code="${1:-$?}"
+    ui_progress_stop
     trap - ERR
     printf '%s\n' "" >&2
     printf '%s\n' "${C_RED}${B}  ╔═══${R}${C_RED}${B} УСТАНОВКА ПРЕРВАНА — код ${code} ${R}" >&2

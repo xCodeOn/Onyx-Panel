@@ -89,10 +89,16 @@ cleanup_credentials() {
         command -v shred >/dev/null 2>&1 && shred -u /etc/onyx-panel/install-credentials 2>/dev/null || \
             rm -f /etc/onyx-panel/install-credentials
     fi
+    if [[ -n "${ONYX_STAGE_STATE:-}" ]]; then
+        rm -f "$ONYX_STAGE_STATE" "${ONYX_STAGE_STATE}.tmp.$$"
+    fi
 }
 trap cleanup_credentials EXIT
 
-ui_banner "v2.1.46"
+ONYX_STAGE_STATE="$(mktemp "${TMPDIR:-/tmp}/onyx-install-stage.XXXXXX")"
+export ONYX_STAGE_STATE
+
+ui_banner "v2.2.0"
 ui_stage "Подготовка сервера"
 
 PANEL_UPDATE=0
@@ -140,7 +146,7 @@ nft list table ip onyx_awg >/dev/null 2>&1 ||
 systemctl is-active --quiet onyx-panel-sync-tls.timer ||
     die "The Xray TLS synchronization timer did not start."
 ui_ok "Все проверки пройдены — установка завершена."
-printf '%s\n' '2.1.46' > /etc/onyx-panel/version
+printf '%s\n' '2.2.0' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/version
 
 # Keep a private copy of the complete package on the server so the panel can
@@ -151,6 +157,6 @@ if [[ "$BASE" != "/opt/onyx-panel-package" ]]; then
     cp -a "$BASE/." /opt/onyx-panel-package.tmp/
     rm -rf /opt/onyx-panel-package
     mv /opt/onyx-panel-package.tmp /opt/onyx-panel-package
-    printf '%s\n' '2.1.46' > /opt/onyx-panel-package/version
+    printf '%s\n' '2.2.0' > /opt/onyx-panel-package/version
     chmod 0600 /opt/onyx-panel-package/version
 fi

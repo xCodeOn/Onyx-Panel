@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="2.1.46"
+VERSION="2.2.0"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -22,6 +22,7 @@ else
     UI_HR="------------------------------------------------------------"
     ui_banner() { :; }
     ui_stage() { echo; echo "== $* =="; }
+    ui_run_with_progress() { local message="$1"; shift; echo "  $message..."; "$@"; }
     ui_ok() { echo "  [ok] $*"; }
     ui_info() { echo "  $*"; }
     ui_warn() { echo "  WARNING: $*" >&2; }
@@ -276,8 +277,8 @@ echo
 echo "      Preparing primary secret..."
 command -v openssl >/dev/null 2>&1 || {
     export DEBIAN_FRONTEND=noninteractive
-    apt-get -o DPkg::Lock::Timeout=600 update
-    apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends openssl
+    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    ui_run_with_progress "Установка openssl" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends openssl
 }
 SECRET="$(cat /etc/onyx-panel/primary-secret 2>/dev/null || true)"
 if ! valid_secret "$SECRET" && [[ -s /etc/tproxy-server/profiles.json ]]; then
@@ -320,8 +321,8 @@ esac
 echo
 ui_stage "Установка зависимостей"
 export DEBIAN_FRONTEND=noninteractive
-apt-get -o DPkg::Lock::Timeout=600 update
-apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
+ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+ui_run_with_progress "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
     ca-certificates curl git openssl dnsutils nftables \
     build-essential libssl-dev util-linux zlib1g-dev
 echo "      OK"
@@ -699,7 +700,7 @@ if [[ "$CADDY_MODE" == "owner" ]]; then
 else
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-printf '%s\n' '2.1.46' > /etc/onyx-panel/version
+printf '%s\n' '2.2.0' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/primary-secret
 chmod 0600 /etc/onyx-panel/caddy-owned
 chmod 0600 /etc/onyx-panel/version

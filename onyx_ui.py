@@ -1260,6 +1260,10 @@ function patch(nodes){{
       const [cls,label]=!s.enabled?['','Отключена']:!s.online?['','Нет связи']:s.outdated?['warn','Требуется обновление']:['on','Подключена'];
       badge.className='badge'+(cls?' '+cls:'');badge.textContent=label;
     }}
+    // Кнопка обновления нужна только нодам с устаревшей версией; во время
+    // собственного обновления её не прячем, чтобы не сбивать поллинг.
+    const btn=card.querySelector('[data-node-update]');
+    if(btn&&typeof s.outdated==='boolean'&&!btn.classList.contains('busy'))btn.hidden=!s.outdated;
     const ver=card.querySelector('[data-node-version]');
     if(ver&&typeof s.version==='string'&&s.version)ver.textContent=s.version;
     const live=card.querySelector('[data-node-live]');
@@ -1442,7 +1446,7 @@ def nodes_ui(nodes, local, connection_token, path, csrf):
     for node in nodes:
         icon_flag=node_flag_image(node.get('country_code','UN'),path)
         cards.append(f'''<article class="card node-card" data-node-id="{esc(node.get('id',''))}">
-<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><button type="button" class="node-update-btn" data-node-update="{esc(node.get('id',''))}" data-csrf="{esc(csrf)}" title="Обновить ноду" aria-label="Обновить ноду">{icon('refresh')}</button><span class="badge {'on' if node.get('enabled',True) else ''}" data-node-badge="{esc(node.get('id',''))}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
+<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><button type="button" class="node-update-btn" hidden data-node-update="{esc(node.get('id',''))}" data-csrf="{esc(csrf)}" title="Обновить ноду" aria-label="Обновить ноду">{icon('refresh')}</button><span class="badge {'on' if node.get('enabled',True) else ''}" data-node-badge="{esc(node.get('id',''))}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
 <div class="node-endpoint">{icon('link')}<span>{esc(node.get('url',''))}</span></div>
 <div class="node-card-meta"><div><span>Версия</span><strong data-node-version="{esc(node.get('id',''))}">{esc(node.get('version','—'))}</strong></div><div><span>Подключения</span><strong>VLESS · Hysteria2</strong></div></div>
 <div class="node-live" data-node-live="{esc(node.get('id',''))}"><p class="node-live-note">Запрашиваем состояние ноды…</p></div>
@@ -1480,6 +1484,16 @@ CSS += '''
 .node-add-steps span.active{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));color:var(--accent);background:var(--tint)}
 .node-add-steps span.done{border-color:color-mix(in srgb,var(--green) 40%,transparent);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
 .node-add-steps span.done:after{content:" ✓"}'''
+CSS += '''
+/* На телефоне три шага обязаны уместиться в одну строку: подписи ужимаются,
+   карточке уменьшается боковой padding, галочка done убирается — она лишь
+   расширяет самый длинный чип в момент, когда модалка уже закрывается. */
+@media(max-width:560px){
+  .move-card{padding:26px 14px}
+  .node-add-steps{flex-wrap:nowrap;gap:4px}
+  .node-add-steps span{padding:5px 6px;font-size:9px;white-space:nowrap}
+  .node-add-steps span.done:after{content:""}
+}'''
 
 
 CSS += '''

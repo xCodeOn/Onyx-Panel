@@ -15,6 +15,7 @@ else
     UI_HR="------------------------------------------------------------"
     ui_banner() { :; }
     ui_stage() { echo; echo "== $* =="; }
+    ui_run_with_progress() { local message="$1"; shift; echo "  $message..."; "$@"; }
     ui_ok() { echo "  [ok] $*"; }
     ui_info() { echo "  $*"; }
     ui_warn() { echo "  WARNING: $*" >&2; }
@@ -201,16 +202,16 @@ fi
 echo "      Preparing AmneziaWG 2.0 / 3.1..."
 AWG_INSTALLED_NOW=0
 if ! command -v ip >/dev/null 2>&1; then
-    apt-get -o DPkg::Lock::Timeout=600 update
-    apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends iproute2
+    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends iproute2
 fi
 if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --version 2>&1 | grep -Fq "$AWG_GO_VERSION"; then
     if [[ -s "$AWG_GO_BUNDLED" ]] && echo "${AWG_GO_SHA256}  ${AWG_GO_BUNDLED}" | sha256sum -c - >/dev/null; then
         install -o root -g root -m 0755 "$AWG_GO_BUNDLED" /usr/local/bin/amneziawg-go
     else
         if ! command -v git >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
-            apt-get -o DPkg::Lock::Timeout=600 update
-            apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git build-essential
+            ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+            ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git build-essential
         fi
         GO_BIN="$(find /opt -maxdepth 3 -type f -path '/opt/go*/bin/go' -print -quit 2>/dev/null || true)"
         [[ -x "$GO_BIN" ]] || GO_BIN="$(command -v go || true)"
@@ -222,8 +223,8 @@ if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --ver
             tar -xzf "$AWG_GO_SOURCE_BUNDLED" -C "$AWG_GO_SOURCE" --strip-components=1 --no-same-owner
         else
             if ! command -v git >/dev/null 2>&1; then
-                apt-get -o DPkg::Lock::Timeout=600 update
-                apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
+                ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+                ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
             fi
             onyx_git_fetch_pinned "$AWG_GO_SOURCE" "https://github.com/amnezia-vpn/amneziawg-go.git" \
                 "$AWG_GO_VERSION" tag "$AWG_GO_COMMIT" "$AWG_GO_SOURCE_SHA256" ||
@@ -243,8 +244,8 @@ if [[ ! -x /usr/local/bin/awg ]] || ! /usr/local/bin/awg --version 2>&1 | grep -
         install -o root -g root -m 0755 "$AWG_QUICK_BUNDLED" /usr/local/bin/awg-quick
     else
         if ! command -v unzip >/dev/null 2>&1; then
-            apt-get -o DPkg::Lock::Timeout=600 update
-            apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends unzip
+            ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+            ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends unzip
         fi
         AWG_TOOLS_ARCHIVE="$(mktemp /tmp/onyx-awg-tools.XXXXXX.zip)"
         AWG_TOOLS_DIR="$(mktemp -d /tmp/onyx-awg-tools.XXXXXX)"
@@ -373,8 +374,8 @@ chmod 0644 /etc/systemd/system/caddy.service.d/tproxy.conf
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v qrencode >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v xz >/dev/null 2>&1; then
-    apt-get -o DPkg::Lock::Timeout=600 update
-    apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends qrencode unzip xz-utils
+    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends qrencode unzip xz-utils
 fi
 
 install -d -m 0755 "$APP_DIR" /etc/onyx-panel
@@ -2868,7 +2869,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.46","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.2.0","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -3473,6 +3474,9 @@ try{const r=await fetch(importForm.dataset.preview,{method:"POST",headers:{"X-On
 let res;try{res=await r.json()}catch(e){throw new Error("Панель вернула некорректный ответ.")}
 if(!r.ok||!res.ok)throw new Error(res.message||"Архив не читается.");
 const p=res.preview,c=p.counts||{},cur=p.current||{};
+const warn=document.getElementById("prevWarning");
+if(p.cross_domain){warn.hidden=false;warn.textContent="Копия с домена "+p.domain+" — перенесём только клиентов, сайт и политики; доменные ключи, Reality и локация останутся текущими ("+p.current_domain+").";}
+else{warn.hidden=true;warn.textContent="";}
 document.getElementById("prevVersion").textContent=(p.version||"?")+(p.domain?" · "+p.domain:"");
 document.getElementById("prevExported").textContent=p.exported?new Date(p.exported*1000).toLocaleString("ru-RU"):"—";
 document.getElementById("prevCounts").innerHTML=
@@ -3585,7 +3589,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 {editor_rest}
 {extra_cards2['script']}
 {security_dialogs}
-<dialog id="importPreview" class="create-dialog" hidden><div class="dialog-head"><div><h2>Что заменит эта копия</h2><small id="prevVersion">—</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><p class="muted" style="font-size:11px;margin:0 0 10px">Копия создана: <span id="prevExported">—</span>. Восстановление заменяет настройки, клиентов и заглушки целиком; прежнее состояние сохраняется в /var/lib/onyx-panel/import-backup.</p><table class="login-log"><thead><tr><th>Что</th><th>В копии</th><th>Сейчас</th></tr></thead><tbody id="prevCounts"></tbody></table><p class="note" id="prevClients" style="margin:12px 0 0"></p><div class="actions create-actions"><button type="button" class="btn" id="importCancel">Отмена</button><button type="button" class="btn primary" id="importConfirm">Восстановить</button></div></div></dialog>
+<dialog id="importPreview" class="create-dialog" hidden><div class="dialog-head"><div><h2>Что заменит эта копия</h2><small id="prevVersion">—</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><p class="muted" style="font-size:11px;margin:0 0 10px">Копия создана: <span id="prevExported">—</span>. Восстановление заменяет настройки, клиентов и заглушки целиком; прежнее состояние сохраняется в /var/lib/onyx-panel/import-backup.</p><p id="prevWarning" class="panel-setting-status warn" hidden style="margin:0 0 10px"></p><table class="login-log"><thead><tr><th>Что</th><th>В копии</th><th>Сейчас</th></tr></thead><tbody id="prevCounts"></tbody></table><p class="note" id="prevClients" style="margin:12px 0 0"></p><div class="actions create-actions"><button type="button" class="btn" id="importCancel">Отмена</button><button type="button" class="btn primary" id="importConfirm">Восстановить</button></div></div></dialog>
 {panel_js}{security_js.replace("@@PATH@@",json.dumps(PANEL_PATH)).replace("@@CSRF@@",json.dumps(token))}'''
             self.send_html(layout("Настройки",body,"settings",self.csrf())); return
 
@@ -4999,6 +5003,32 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 backup_path="/var/lib/onyx-panel/import-backup-%s.tar.gz"%stamp
                 with open(backup_path,"wb") as f: f.write(build_backup_tar())
                 os.chmod(backup_path,0o600)
+                src_domain=str(meta.get("domain",""))
+                cross_domain=bool(src_domain) and src_domain!=DOMAIN
+                if cross_domain:
+                    # Кросс-доменный перенос: пропускаем файлы, привязанные к
+                    # исходному серверу — ключ федерации нод, MTProto-хост,
+                    # Reality, локацию, manifest, xray-path и config.json
+                    # (он производный — пересоберём из целевой reality +
+                    # импортированных пользователей).
+                    skip={"panel/api.key","onyx-panel/mtproto-host","panel/location.json",
+                          "onyx-panel/manifest","panel/reality.json","onyx-panel/xray-path",
+                          "onyx-xray/config.json"}
+                    for arc in list(restore):
+                        if arc in skip: del restore[arc]
+                    # data.json сливаем: переносим клиентов, подписки, сайт и
+                    # политики; сохраняем учётки, интеграции и доменные ключи
+                    # целевой панели.
+                    if "panel/data.json" in restore:
+                        try: src_data=json.loads(restore["panel/data.json"].decode("utf-8"))
+                        except Exception: src_data={}
+                        try:
+                            with open("/var/lib/onyx-panel/data.json",encoding="utf-8") as f: tgt_data=json.load(f)
+                        except Exception: tgt_data={}
+                        for k in ("subscriptions","users","expires","site","max_devices",
+                                  "limit_disabled","failover","pending","op_error","device_secrets"):
+                            if k in src_data: tgt_data[k]=src_data[k]
+                        restore["panel/data.json"]=json.dumps(tgt_data,ensure_ascii=False).encode("utf-8")
                 dest_map={arc:(phys,0o640 if arc=="onyx-xray/config.json" else 0o600) for arc,phys,_ in BACKUP_FILES}
                 for arc,data in restore.items():
                     if arc.startswith("onyx-panel/awg/"):
@@ -5015,25 +5045,41 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 print("import apply failed:",type(exc).__name__,file=sys.stderr,flush=True)
                 imp_fail("Не удалось записать файлы. Проверьте диск и повторите."); return
             xray="onyx-xray/config.json" in restore
-            if "onyx-panel/xray-path" in restore:
-                def _sync_caddy_vless():
-                    try:
-                        new_path=open("/etc/onyx-panel/xray-path",encoding="utf-8").read().strip()
-                        s=open("/etc/caddy/Caddyfile",encoding="utf-8").read()
-                        s2,n=re.subn(r"/vless-[a-f0-9]{24}",new_path,s)
-                        if n and s2!=s:
-                            open("/etc/caddy/Caddyfile","w",encoding="utf-8").write(s2)
-                            subprocess.run(["caddy","fmt","--overwrite","/etc/caddy/Caddyfile"],capture_output=True,timeout=20)
-                            subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60,start_new_session=True)
-                    except Exception:
-                        pass
-                timer=threading.Timer(1.5,_sync_caddy_vless); timer.daemon=True; timer.start()
-            if xray:
-                def _restart_xray():
-                    try: subprocess.run(["systemctl","restart","onyx-panel-xray.service"],capture_output=True,timeout=60)
-                    except Exception: pass
-                timer=threading.Timer(1.0,_restart_xray); timer.daemon=True; timer.start()
-            msg="Импортировано файлов: %d. Предыдущее состояние сохранено: %s."%(len(restore),backup_path)+(" Xray перезапускается." if xray else "")
+            cascade_err=""
+            if cross_domain:
+                # config.json не копировали — пересобираем из целевой reality/
+                # routing/warp/cascades + импортированных пользователей.
+                try: ctl("cascade-apply")
+                except Exception as exc:
+                    cascade_err=cascade_detail(exc)
+                    print("cross-domain cascade-apply failed:",cascade_err,file=sys.stderr,flush=True)
+                xray=True
+            else:
+                if "onyx-panel/xray-path" in restore:
+                    def _sync_caddy_vless():
+                        try:
+                            new_path=open("/etc/onyx-panel/xray-path",encoding="utf-8").read().strip()
+                            s=open("/etc/caddy/Caddyfile",encoding="utf-8").read()
+                            s2,n=re.subn(r"/vless-[a-f0-9]{24}",new_path,s)
+                            if n and s2!=s:
+                                open("/etc/caddy/Caddyfile","w",encoding="utf-8").write(s2)
+                                subprocess.run(["caddy","fmt","--overwrite","/etc/caddy/Caddyfile"],capture_output=True,timeout=20)
+                                subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60,start_new_session=True)
+                        except Exception:
+                            pass
+                    timer=threading.Timer(1.5,_sync_caddy_vless); timer.daemon=True; timer.start()
+                if xray:
+                    def _restart_xray():
+                        try: subprocess.run(["systemctl","restart","onyx-panel-xray.service"],capture_output=True,timeout=60)
+                        except Exception: pass
+                    timer=threading.Timer(1.0,_restart_xray); timer.daemon=True; timer.start()
+            if cross_domain:
+                msg="Кросс-доменный импорт (%s → %s): перенесено файлов %d — клиенты, сайт и политики; доменные ключи, Reality и локация сохранены текущими."%(src_domain,DOMAIN,len(restore))
+                if cascade_err: msg+=" Xray не пересобран (%s) — проверьте Reality."%cascade_err[:80]
+                else: msg+=" Xray пересобран."
+                msg+=" Предыдущее состояние: %s."%backup_path
+            else:
+                msg="Импортировано файлов: %d. Предыдущее состояние сохранено: %s."%(len(restore),backup_path)+(" Xray перезапускается." if xray else "")
             audit('import',backup_path,msg)
             if async_action: self.send_json({"ok":True,"message":msg})
             else: self.redirect("/settings")
@@ -5315,8 +5361,10 @@ def backup_preview(blob):
     current_subscriptions=subscription_registry()
     current_users=[u for u in users() if u.get("id")!="primary"]
     new_names=sorted({str(u.get("name","")) for u in profiles}-({str(u.get("name","")) for u in current_users}))
+    src_domain=str(manifest.get("domain",""))
+    cross_domain=bool(src_domain) and src_domain!=DOMAIN
     return {"version":str(manifest.get("version","?")),"exported":int(manifest.get("exported",0) or 0),
-            "domain":str(manifest.get("domain","")),
+            "domain":src_domain,"current_domain":DOMAIN,"cross_domain":cross_domain,
             "counts":{"profiles":len(profiles),"subscriptions":len(subs),"devices":devices,
                       "expires":len(data.get("expires",{}) or {}),"awg":len([n for n in names if n.startswith("onyx-panel/awg/")])},
             "current":{"profiles":len(current_users),"subscriptions":len(current_subscriptions)},
@@ -6108,7 +6156,7 @@ python3 -m py_compile "$APP_FILE"
 python3 -m py_compile "$APP_DIR/onyx_subscriptions.py" "$APP_DIR/onyx_panel_extras.py" "$APP_DIR/onyx_ui.py" "$APP_DIR/onyx_metrics.py" "$APP_DIR/onyx_update.py" "$APP_DIR/onyx_webpush.py" "$APP_DIR/onyx_nodes.py" "$APP_DIR/onyx_openflux.py" "$APP_DIR/onyx_awg.py" "$APP_DIR/onyx_firewall.py" "$APP_DIR/onyx_components.py" "$APP_DIR/onyx_cascade.py" "$APP_DIR/onyx_routing.py" "$APP_DIR/onyx_warp.py" "$APP_DIR/onyx_reality.py" "$APP_DIR/onyx_telegram.py" "$APP_DIR/onyx_totp.py" "$APP_DIR/onyx_access.py" "$APP_DIR/onyx_webapi.py" "$APP_DIR/onyx_failover.py"
 
 # ---- Web Push: VAPID-ключи для уведомлений колокольчика (идемпотентно) ----
-echo "[2.9/6] Preparing Web Push keys..."
+ui_stage "Подготовка ключей Web Push"
 python3 - <<PY
 import sys
 sys.path.insert(0, "$APP_DIR")
@@ -6131,7 +6179,7 @@ PY
 chown root:root "$DATA_FILE"
 chmod 0600 "$DATA_FILE"
 
-echo "[3.5/6] Verifying administrator credentials..."
+ui_stage "Проверка учётных данных администратора"
 if [[ "$UPDATING" == "1" ]]; then
 python3 - "$DATA_FILE" <<'PY'
 import json, sys
@@ -6158,7 +6206,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.46
+Description=Onyx Panel 2.2.0
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6182,7 +6230,7 @@ WantedBy=multi-user.target
 EOF
 chmod 0644 "$SERVICE_FILE"
 
-echo "[4.2/6] Installing Onyx console menu..."
+ui_stage "Установка меню Onyx"
 # Replace the updater atomically: the running outer update.sh may still be
 # executing from this exact path, so never truncate its inode in place.
 install -o root -g root -m 0755 "$BASE/update.sh" /usr/local/sbin/.onyx-panel-update.new
