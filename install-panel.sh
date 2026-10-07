@@ -3,6 +3,31 @@ set -Eeuo pipefail
 umask 077
 
 BASE="$(cd "$(dirname "$0")" && pwd)"
+
+# Visual kit: banner, colored stages, explained red errors (see install-final.sh).
+UI_LIB="${BASE}/onyx-install-ui.sh"
+if [[ -s "$UI_LIB" ]]; then
+    # shellcheck source=onyx-install-ui.sh
+    . "$UI_LIB"
+else
+    R='' B='' DIM='' C_RED='' C_GREEN='' C_AMBER='' C_ACCENT='' C_BLUE='' C_VIOLET='' C_GREY='' C_WHITE=''
+    UI_UTF8=0
+    UI_HR="------------------------------------------------------------"
+    ui_banner() { :; }
+    ui_stage() { echo; echo "== $* =="; }
+    ui_ok() { echo "  [ok] $*"; }
+    ui_info() { echo "  $*"; }
+    ui_warn() { echo "  WARNING: $*" >&2; }
+    ui_err() { echo "  ERROR: $*" >&2; }
+    ui_kv() { echo "  $1: $2"; }
+    ui_explain() { :; }
+    ui_die() { echo "ERROR: $*" >&2; exit 1; }
+    ui_trap_error() { local c="$1"; trap - ERR; echo "ERROR: command failed (code $c, line ${BASH_LINENO[0]:-?})." >&2; exit "$c"; }
+    ui_success_begin() { echo "== $* =="; }
+    ui_success_end() { echo; }
+fi
+die() { ui_die "$@"; }
+trap 'ui_trap_error $?' ERR
 APP_DIR="/opt/onyx-panel"
 DATA_DIR="/var/lib/onyx-panel"
 DATA_FILE="${DATA_DIR}/data.json"
@@ -59,7 +84,6 @@ AWG_TOOLS_BUNDLED="${BASE}/assets/amneziawg-tools-ubuntu-22.04.zip"
 AWG_GO_SOURCE_BUNDLED="${BASE}/assets/amneziawg-go-b5928ef.tar.gz"
 AWG_GO_SOURCE_SHA256="10bf7458e090bf52f87df27adcd3904a60e4d17fab844d9415e46379147f1ab4"
 
-die(){ echo "ERROR: $*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "Run as root."
 . /etc/os-release
 case "${ID:-}" in
@@ -103,12 +127,12 @@ if ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$DOMAIN" == *.* ]] && 
 fi
 if ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$DOMAIN" == *.* ]]; then
     [[ -t 0 ]] || die "The domain could not be recovered. Re-run with ONYX_PANEL_DOMAIN=proxy.example.com."
-    echo "Домен старой установки не найден автоматически."
+    ui_warn "Домен старой установки не найден автоматически."
     while true; do
-        read -r -p "Введите действующий домен Onyx Panel: " DOMAIN
+        read -r -p "  ${C_ACCENT}${B}▸ Домен Onyx Panel${R}: " DOMAIN
         DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"; DOMAIN="${DOMAIN,,}"
         [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$DOMAIN" == *.* ]] && break
-        echo "Некорректный домен. Пример: proxy.example.com"
+        ui_err "Некорректный домен. Пример: proxy.example.com"
     done
 fi
 MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
@@ -292,8 +316,8 @@ if ! [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] && 
     ACME_EMAIL="$(sed -n 's/^[[:space:]]*email[[:space:]][[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' /etc/caddy/Caddyfile | head -n1 || true)"
 fi
 if ! [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
-    echo "Caddy ACME email is missing or invalid."
-    read -r -p "ACME email: " ACME_EMAIL
+    ui_warn "Email Caddy ACME не найден или неверен."
+    read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R}: " ACME_EMAIL
     [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] ||
         die "Invalid ACME email."
 fi
@@ -468,9 +492,9 @@ XRAY_PATH="$(cat "$XRAY_PATH_FILE")"
 [[ "$XRAY_PATH" =~ ^/vless-[a-f0-9]{24}$ ]] || die "Stored VLESS path is invalid."
 
 if [[ "$UPDATING" == "1" ]]; then
-    echo "Updating Onyx Panel 2.1.36..."
+    ui_stage "Обновление Onyx Panel"
 else
-    echo "Configuring Onyx Panel 2.1.36..."
+    ui_stage "Настройка Onyx Panel"
 fi
 INSTALL_CREDENTIALS="/etc/onyx-panel/install-credentials"
 if [[ "$UPDATING" == "1" ]]; then
@@ -491,17 +515,17 @@ elif [[ -s "$INSTALL_CREDENTIALS" ]]; then
     rm -f "$INSTALL_CREDENTIALS"
     [[ -n "$ADMIN" && -n "$PASS" ]] || die "Panel credentials are invalid."
 else
-    read -r -p "Логин администратора [admin]: " ADMIN
+    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора${R} ${C_GREY}[admin]${R}: " ADMIN
     ADMIN="${ADMIN:-admin}"
     while true; do
-        read -r -s -p "Пароль администратора: " PASS
+        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PASS
         echo
-        [[ ${#PASS} -ge 3 ]] || { echo "Пароль должен содержать минимум 3 символа."; continue; }
+        [[ ${#PASS} -ge 3 ]] || { ui_warn "Пароль должен содержать минимум 3 символа."; continue; }
         break
     done
 fi
 
-echo "[1/6] Writing manager..."
+ui_stage "Менеджер onyx-panelctl"
 
 for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
@@ -1733,7 +1757,7 @@ if ! /usr/local/sbin/onyx-panel-sync-tls; then
     echo "      NOTE: Caddy certificate is not available to Xray yet; VLESS remains available, while Hysteria 2 can be created after certificate issuance."
 fi
 
-echo "[2/6] Writing panel..."
+ui_stage "Код панели и модули"
 
 cat > "$APP_FILE" <<'PY'
 #!/usr/bin/env python3
@@ -2813,7 +2837,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.api_auth(): return
             if path==node_api.API_PREFIX+"/status":
                 loc=node_api.load_location(LOCATION_FILE)
-                self.send_json({"ok":True,"api_version":1,"version":"2.1.36","domain":DOMAIN,
+                self.send_json({"ok":True,"api_version":1,"version":"2.1.37","domain":DOMAIN,
                     "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
             if path==node_api.API_PREFIX+"/profiles":
                 result=[]
@@ -6004,7 +6028,7 @@ PY
 
 
 # ---- Finish installation: service, Caddy route, permissions, start ----
-echo "[3/6] Creating data..."
+ui_stage "Хранилище данных"
 python3 - <<PY
 import json
 with open("${DATA_FILE}", encoding="utf-8") as f:
@@ -6037,10 +6061,10 @@ print("      Administrator credentials verified.")
 PY
 fi
 
-echo "[4/6] Creating systemd service..."
+ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.1.36
+Description=Onyx Panel 2.1.37
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -6325,7 +6349,7 @@ ONYX
 chmod 0755 /usr/local/sbin/ONYX
 ln -sfn /usr/local/sbin/ONYX /usr/local/sbin/onyx
 
-echo "[4.5/6] Configuring Caddy panel route..."
+ui_stage "Маршрут панели в Caddy"
 CADDYFILE="/etc/caddy/Caddyfile"
 test -s "$CADDYFILE" || die "Caddyfile is missing."
 
@@ -6509,7 +6533,7 @@ chown -R root:tproxy /srv/tproxy-site
 find /srv/tproxy-site -type d -exec chmod 0750 {} +
 find /srv/tproxy-site -type f -exec chmod 0640 {} +
 
-echo "[5/6] Starting service..."
+ui_stage "Запуск сервиса"
 systemctl restart caddy.service
 systemctl restart tproxy-server.service
 systemctl restart mtproxy.service
@@ -6548,7 +6572,7 @@ for unit in caddy.service tproxy-server.service mtproxy.service onyx-panel.servi
     }
 done
 
-echo "[6/6] Checking panel service and route..."
+ui_stage "Финальная проверка панели"
 if ! systemctl is-active --quiet onyx-panel.service; then
     echo "ERROR: onyx-panel.service is not active."
     systemctl --no-pager --full status onyx-panel.service || true
@@ -6596,18 +6620,6 @@ if [[ -e /etc/onyx-panel/naive-caddy-owned ]]; then
     rm -f /etc/onyx-panel/naive-caddy-owned
 fi
 
-echo
-echo "============================================================"
-if [[ "$UPDATING" == "1" ]]; then
-echo "          Onyx Panel 2.1.36 UPDATED"
-else
-echo "         Onyx Panel 2.1.36 IS READY"
-fi
-echo "============================================================"
-echo
-echo "Panel URL:"
-echo "  https://${DOMAIN}${PANEL_PATH}/login"
-echo
 NODE_API_TOKEN="$(python3 - "$DOMAIN" <<'PY'
 import sys
 sys.path.insert(0,"/opt/onyx-panel")
@@ -6619,20 +6631,20 @@ except (OSError,ValueError):
     pass
 PY
 )"
-if [[ "$UPDATING" != "1" && "$NODE_API_TOKEN" == onyxnode1_* ]]; then
-echo "Node API token:"
-echo "  ${NODE_API_TOKEN}"
-echo
-fi
-echo "Administrator login:"
-echo "  ${ADMIN}"
-echo
+
 if [[ "$UPDATING" == "1" ]]; then
-echo "Administrator password: retained (unchanged)"
-echo
+    ui_success_begin "ONYX PANEL — ОБНОВЛЕНО"
 else
-echo "Administrator password:"
-echo "  ${PASS}"
-echo
+    ui_success_begin "ONYX PANEL — УСТАНОВЛЕНО"
 fi
-echo "============================================================"
+ui_kv "Адрес панели" "https://${DOMAIN}${PANEL_PATH}/login"
+if [[ "$UPDATING" != "1" && "$NODE_API_TOKEN" == onyxnode1_* ]]; then
+    ui_kv "Node API token" "${NODE_API_TOKEN}"
+fi
+ui_kv "Логин администратора" "${ADMIN}"
+if [[ "$UPDATING" == "1" ]]; then
+    ui_kv "Пароль" "сохранён без изменений"
+else
+    ui_kv "Пароль" "${PASS}"
+fi
+ui_success_end

@@ -3,7 +3,31 @@ set -Eeuo pipefail
 BASE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 
-die() { echo "ERROR: $*" >&2; exit 1; }
+# Visual kit: banner, colored stages, explained red errors. When the kit file
+# is missing (offline update from an old package) fall back to plain output.
+UI_LIB="${BASE}/onyx-install-ui.sh"
+if [[ -s "$UI_LIB" ]]; then
+    # shellcheck source=onyx-install-ui.sh
+    . "$UI_LIB"
+else
+    R='' B='' DIM='' C_RED='' C_GREEN='' C_AMBER='' C_ACCENT='' C_BLUE='' C_VIOLET='' C_GREY='' C_WHITE=''
+    UI_UTF8=0
+    UI_HR="------------------------------------------------------------"
+    ui_banner() { :; }
+    ui_stage() { echo; echo "== $* =="; }
+    ui_ok() { echo "  [ok] $*"; }
+    ui_info() { echo "  $*"; }
+    ui_warn() { echo "  WARNING: $*" >&2; }
+    ui_err() { echo "  ERROR: $*" >&2; }
+    ui_kv() { echo "  $1: $2"; }
+    ui_explain() { :; }
+    ui_die() { echo "ERROR: $*" >&2; exit 1; }
+    ui_trap_error() { local c="$1"; trap - ERR; echo "ERROR: command failed (code $c, line ${BASH_LINENO[0]:-?})." >&2; exit "$c"; }
+    ui_success_begin() { echo "== $* =="; }
+    ui_success_end() { echo; }
+fi
+die() { ui_die "$@"; }
+trap 'ui_trap_error $?' ERR
 for file in install-panel.sh install-core.sh uninstall-onyx-panel.sh update.sh onyx-logo.png onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py; do
     [[ -s "$BASE/$file" ]] || die "Package is incomplete: missing $file. Extract the complete archive."
 done
@@ -28,7 +52,8 @@ cleanup_credentials() {
 }
 trap cleanup_credentials EXIT
 
-echo "Onyx Panel 2.1.36: preparing server..."
+ui_banner "v2.1.37"
+ui_stage "Подготовка сервера"
 
 PANEL_UPDATE=0
 if [[ -s /var/lib/onyx-panel/data.json ]] &&
@@ -36,9 +61,9 @@ if [[ -s /var/lib/onyx-panel/data.json ]] &&
    sed -n 's/^Environment=ONYX_PANEL_PATH=//p' /etc/systemd/system/onyx-panel.service |
        head -n1 | grep -Eq '^/[a-z0-9][a-z0-9-]{2,58}[a-z0-9]$'; then
     PANEL_UPDATE=1
-    echo "Existing control panel detected; its users, password, address and site HTML will be preserved."
+    ui_info "Найдена установленная панель: пользователи, пароль, адрес и HTML сайта будут сохранены."
 else
-    echo "Installation/resume mode enabled. Existing compatible services will be reused and missing components installed."
+    ui_info "Режим установки/продолжения: совместимые сервисы будут переиспользованы, недостающие — установлены."
 fi
 
 # Install the recovery command before making system changes so even an
@@ -48,10 +73,10 @@ install -o root -g root -m 0755 \
     "$BASE/uninstall-onyx-panel.sh" \
     /usr/local/sbin/onyx-panel-uninstall
 
-echo "Installing proxy services..."
+ui_stage "Прокси-сервисы: MTProxy · релей tproxy · Caddy"
 bash "$BASE/install-core.sh"
 
-echo "Installing control panel..."
+ui_stage "Панель управления Onyx Panel"
 if [[ "$PANEL_UPDATE" == 1 ]]; then
     ONYX_PANEL_UPDATE=1 bash "$BASE/install-panel.sh"
 else
@@ -59,7 +84,7 @@ else
 fi
 
 for unit in caddy.service mtproxy.service tproxy-server.service onyx-panel.service onyx-panel-firewall.service; do
-    systemctl is-active --quiet "$unit" || { echo "Installation failed: $unit did not start."; exit 1; }
+    systemctl is-active --quiet "$unit" || die "Service $unit did not start."
 done
 systemctl is-enabled --quiet onyx-panel-firewall.service ||
     die "Persistent user firewall is not enabled."
@@ -74,8 +99,8 @@ nft list table ip onyx_awg >/dev/null 2>&1 ||
 [[ -x /usr/local/sbin/ONYX ]] || die "Onyx console menu was not installed."
 systemctl is-active --quiet onyx-panel-sync-tls.timer ||
     die "The Xray TLS synchronization timer did not start."
-echo "Installation complete."
-printf '%s\n' '2.1.36' > /etc/onyx-panel/version
+ui_ok "Все проверки пройдены — установка завершена."
+printf '%s\n' '2.1.37' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/version
 
 # Keep a private copy of the complete package on the server so the panel can
@@ -86,6 +111,6 @@ if [[ "$BASE" != "/opt/onyx-panel-package" ]]; then
     cp -a "$BASE/." /opt/onyx-panel-package.tmp/
     rm -rf /opt/onyx-panel-package
     mv /opt/onyx-panel-package.tmp /opt/onyx-panel-package
-    printf '%s\n' '2.1.36' > /opt/onyx-panel-package/version
+    printf '%s\n' '2.1.37' > /opt/onyx-panel-package/version
     chmod 0600 /opt/onyx-panel-package/version
 fi

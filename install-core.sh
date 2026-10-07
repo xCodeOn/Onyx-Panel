@@ -8,8 +8,32 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="2.1.36"
+VERSION="2.1.37"
 BASE="$(cd "$(dirname "$0")" && pwd)"
+
+# Visual kit: banner, colored stages, explained red errors (see install-final.sh).
+UI_LIB="${BASE}/onyx-install-ui.sh"
+if [[ -s "$UI_LIB" ]]; then
+    # shellcheck source=onyx-install-ui.sh
+    . "$UI_LIB"
+else
+    R='' B='' DIM='' C_RED='' C_GREEN='' C_AMBER='' C_ACCENT='' C_BLUE='' C_VIOLET='' C_GREY='' C_WHITE=''
+    UI_UTF8=0
+    UI_HR="------------------------------------------------------------"
+    ui_banner() { :; }
+    ui_stage() { echo; echo "== $* =="; }
+    ui_ok() { echo "  [ok] $*"; }
+    ui_info() { echo "  $*"; }
+    ui_warn() { echo "  WARNING: $*" >&2; }
+    ui_err() { echo "  ERROR: $*" >&2; }
+    ui_kv() { echo "  $1: $2"; }
+    ui_explain() { :; }
+    ui_die() { echo "ERROR: $*" >&2; exit 1; }
+    ui_trap_error() { local c="$1"; trap - ERR; echo "ERROR: command failed (code $c, line ${BASH_LINENO[0]:-?})." >&2; exit "$c"; }
+    ui_success_begin() { echo "== $* =="; }
+    ui_success_end() { echo; }
+fi
+die() { ui_die "$@"; }
 REPO_DIR="/root/tproxy-server"
 SITE_INPUT="/opt/tproxy-site"
 SITE_TARGET="/srv/tproxy-site"
@@ -24,12 +48,6 @@ MT_PORT=2398
 TPROXY_REF="52a5feb7fac38f68da5afef9cedd9b3bfc8473ca"
 TPROXY_SOURCE_BUNDLED="${BASE}/assets/tproxy-server-52a5feb.tar.gz"
 TPROXY_SOURCE_SHA256="2c56987035c7f0b9a3d40907fe9ff8889fd41d1a6dcb7bdd6e0de7784c442bfe"
-
-die() {
-    echo
-    echo "ERROR: $*" >&2
-    exit 1
-}
 
 trim() {
     local s="$1"
@@ -112,11 +130,7 @@ check_install_port() {
     die "Port ${port} is occupied by an unexpected process."
 }
 
-show_failure() {
-    echo
-    echo "============================================================"
-    echo "                    INSTALLATION FAILED"
-    echo "============================================================"
+ui_failure_dump() {
     echo
     echo "--- services ---"
     systemctl --no-pager --full status mtproxy tproxy-server caddy tproxy-firewall 2>/dev/null || true
@@ -138,12 +152,11 @@ on_error() {
     local code=$?
     trap - ERR
     rm -f /etc/onyx-panel/install-credentials 2>/dev/null || true
-    show_failure
-    exit "$code"
+    ui_trap_error "$code"
 }
 trap on_error ERR
 
-echo "Configuring Onyx Panel 2.1.36..."
+ui_stage "Конфигурация Onyx Panel"
 
 [[ $EUID -eq 0 ]] || die "Run this installer as root."
 [[ "$(uname -m)" == "x86_64" ]] || die "x86_64 is required."
@@ -175,11 +188,11 @@ if valid_domain "$EXISTING_DOMAIN"; then
 else
     while true; do
         echo
-        read -r -p "Domain (example: proxy.example.com): " DOMAIN
+        read -r -p "  ${C_ACCENT}${B}▸ Домен${R} ${C_GREY}(пример: proxy.example.com)${R}: " DOMAIN
         DOMAIN="$(trim "$DOMAIN")"
         DOMAIN="${DOMAIN,,}"
         valid_domain "$DOMAIN" && break
-        echo "Invalid domain. Example: proxy.example.com"
+        ui_err "Неверный домен. Пример: proxy.example.com"
     done
 fi
 
@@ -189,10 +202,10 @@ if valid_email "$EXISTING_EMAIL"; then
 else
     while true; do
         echo
-        read -r -p "ACME email (example: admin@example.com): " EMAIL
+        read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R} ${C_GREY}(пример: admin@example.com)${R}: " EMAIL
         EMAIL="$(trim "$EMAIL")"
         valid_email "$EMAIL" && break
-        echo "Invalid email. Example: admin@example.com"
+        ui_err "Неверный email. Пример: admin@example.com"
     done
 fi
 
@@ -203,13 +216,13 @@ if [[ -s /var/lib/onyx-panel/data.json ]] &&
     rm -f /etc/onyx-panel/install-credentials
 else
     echo
-    read -r -p "Panel administrator login [admin]: " PANEL_ADMIN
+    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора панели${R} ${C_GREY}[admin]${R}: " PANEL_ADMIN
     PANEL_ADMIN="${PANEL_ADMIN:-admin}"
     while true; do
-        read -r -s -p "Panel administrator password: " PANEL_PASS
+        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PANEL_PASS
         echo
         if [[ ${#PANEL_PASS} -lt 3 ]]; then
-            echo "Password must contain at least 3 characters."
+            ui_warn "Пароль должен быть не короче 3 символов."
             continue
         fi
         break
@@ -246,7 +259,7 @@ fi
 valid_secret "$SECRET" || die "Secret generation failed."
 
 echo
-echo "[1/10] Checking system..."
+ui_stage "Проверка системы"
 . /etc/os-release
 case "${ID:-}" in
     ubuntu)
@@ -265,7 +278,7 @@ case "${ID:-}" in
 esac
 
 echo
-echo "[2/10] Installing dependencies..."
+ui_stage "Установка зависимостей"
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=600 update
 apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
@@ -284,7 +297,7 @@ printf '%s\n' "$MTPROTO_HOST" > /etc/onyx-panel/mtproto-host
 chmod 0600 /etc/onyx-panel/mtproto-host
 
 echo
-echo "[3/10] Checking ports..."
+ui_stage "Проверка портов"
 check_install_port 80 caddy
 check_install_port 443 caddy
 if EXISTING_MTPROXY_PORT="$(find_mtproxy_port 2>/dev/null)"; then
@@ -308,7 +321,7 @@ elif [[ "$REUSE_CADDY" == "1" ]]; then
 fi
 
 echo
-echo "[4/10] Checking DNS..."
+ui_stage "Проверка DNS"
 if [[ "$REUSE_EXISTING_HTTPS" == "1" ]]; then
     DNS_IP="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')"
     [[ -n "$DNS_IP" ]] || die "Existing HTTPS works, but DNS lookup failed for $DOMAIN."
@@ -326,7 +339,7 @@ else
     echo "      $DOMAIN -> $DNS_IP"
 fi
 
-echo "[5/10] Creating public site..."
+ui_stage "Публичный сайт-обложка"
 if [[ -s "$SITE_TARGET/index.html" ]]; then
     PRESERVE_SITE=1
     echo "      Existing public site detected; preserving its HTML, CSS and JavaScript."
@@ -406,7 +419,7 @@ echo "      OK"
 fi
 
 echo
-echo "[6/10] Installing Telegram Web Proxy components..."
+ui_stage "MTProxy и релей tproxy"
 
 
 if [[ -x /opt/MTProxy/objs/bin/mtproto-proxy ]] &&
@@ -630,7 +643,7 @@ if [[ "$CADDY_MODE" == "owner" ]]; then
 else
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-printf '%s\n' '2.1.36' > /etc/onyx-panel/version
+printf '%s\n' '2.1.37' > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/primary-secret
 chmod 0600 /etc/onyx-panel/caddy-owned
 chmod 0600 /etc/onyx-panel/version
@@ -1175,7 +1188,7 @@ port_is_listening 80 || {
 }
 
 echo
-echo "[9/10] Running health checks..."
+ui_stage "Проверка здоровья сервисов"
 curl -fsS --max-time 5 http://127.0.0.1:8081/healthz >/dev/null ||
     die "tproxy-server healthz failed."
 
@@ -1215,7 +1228,7 @@ echo "      Services: mtproxy=$(systemctl is-active mtproxy 2>/dev/null || true)
 
 
 echo
-echo "[10/10] Checking persistence and ports..."
+ui_stage "Автозапуск и финальная проверка портов"
 for unit in mtproxy tproxy-server caddy; do
     systemctl is-active --quiet "$unit" || {
         echo "      $unit is not active; attempting final start..."
@@ -1248,4 +1261,4 @@ for p in "$MT_PORT" 8080 8081 80 443; do
 done
 
 echo
-echo "Core services configured successfully. Continuing to panel setup..."
+ui_ok "Прокси-сервисы настроены. Переходим к панели управления..."
