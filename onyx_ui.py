@@ -808,15 +808,88 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
 
 
 def login_ui(path, totp=False):
-    code_field = ('<label for="loginCode">Код двухфакторной аутентификации</label>'
-                  '<input id="loginCode" name="code" inputmode="numeric" pattern="[0-9]*"'
-                  ' autocomplete="one-time-code" placeholder="6 цифр из приложения">') if totp else ''
     mark = '<path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z" transform="translate(24 25) scale(1.1)"/>'
     letters = '<path d="M420 752C200 752 30 585 30 369C30 155 202 -13 419 -13C634 -13 800 154 800 369C800 582 631 752 420 752ZM418 620C555 620 662 510 662 368C662 225 558 119 418 119C278 119 168 229 168 369C168 512 276 620 418 620Z" transform="translate(163.000 90) scale(0.067 -0.067)"/><path d="M54 0H187V261C187 335 192 367 209 394C230 427 264 445 307 445C342 445 369 433 387 410C405 386 413 345 413 271V0H546V297C546 396 536 444 506 487C470 539 410 567 333 567C269 567 226 549 177 501V554H54Z" transform="translate(217.980 90) scale(0.067 -0.067)"/><path d="M105 -185H248L568 554H414L281 195L158 554H6L209 52Z" transform="translate(256.880 90) scale(0.067 -0.067)"/><path d="M1 0H161L277 190L393 0H553L356 286L525 554H375L277 387L177 554H27L197 286Z" transform="translate(294.440 90) scale(0.067 -0.067)"/>'
     subtitle = '<path d="M68 0H205V281H249C354 281 402 289 443 314C503 352 540 426 540 511C540 596 504 666 440 705C398 730 348 739 251 739H68ZM205 412V608H251C296 608 317 606 338 601C378 590 402 555 402 509C402 473 386 445 357 429C336 418 299 412 245 412Z" transform="translate(168.000 121) scale(0.016 -0.016)"/><path d="M7 0H158L240 191H503L582 0H733L423 739H315ZM290 322 369 546 448 322Z" transform="translate(182.060 121) scale(0.016 -0.016)"/><path d="M68 0H205V537L514 0H667V739H530V201L224 739H68Z" transform="translate(199.000 121) scale(0.016 -0.016)"/><path d="M68 0H465V131H205V303H454V434H205V608H465V739H68Z" transform="translate(215.940 121) scale(0.016 -0.016)"/><path d="M68 0H431V131H205V739H68Z" transform="translate(229.360 121) scale(0.016 -0.016)"/>'
     wordmark = ('<svg class="login-brand-mark" viewBox="0 0 440 160" role="img" aria-label="Onyx Panel">'
                 + mark + '<g fill="var(--text)">' + letters + '</g><g fill="var(--muted)">' + subtitle + '</g></svg>')
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>Вход · Onyx Panel</title><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}</style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form method="post" action="{esc(path)}/login"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required>{code_field}<button class="primary">Войти</button></form><small class="login-version">ONYX PANEL · {login_version()}</small></main>{COMMON_JS}</body></html>'''
+    totp_flag = 'true' if totp else 'false'
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>Вход · Onyx Panel</title><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}
+.login-step{{animation:login-fade-in .3s ease}}
+.login-step[hidden]{{display:none!important}}
+@keyframes login-fade-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
+.login-otp-cells{{display:flex;gap:9px;justify-content:center;margin:18px 0 4px}}
+.login-otp-cells input{{width:44px;height:54px;padding:0;text-align:center;font:600 22px/1 var(--font-mono);border:1px solid var(--line);border-radius:12px;background:var(--input);color:var(--text);transition:border-color .15s,box-shadow .15s}}
+.login-otp-cells input:focus{{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}}
+.login-otp-cells input.filled{{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--input))}}
+.login-otp-cells input.error-shake{{animation:login-shake .4s;border-color:var(--red)}}
+@keyframes login-shake{{0%,100%{{transform:translateX(0)}}20%,60%{{transform:translateX(-5px)}}40%,80%{{transform:translateX(5px)}}}}
+.login-step-title{{font-size:13px;color:var(--muted);text-align:center;margin-bottom:2px}}
+.login-back{{display:block;margin:14px auto 0;font-size:11px;background:transparent;border-color:transparent;color:var(--muted);cursor:pointer}}
+.login-back:hover{{color:var(--accent)}}
+@media(max-width:480px){{.login-otp-cells{{gap:6px}}.login-otp-cells input{{width:38px;height:48px;font-size:19px}}}}
+</style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div><div class="login-step" id="loginStep2" hidden><p class="login-step-title">Код двухфакторной аутентификации</p><div class="login-otp-cells" id="loginOtpCells"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 1"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 2"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 3"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 4"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 5"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 6"></div><input type="hidden" name="code" id="loginCode" autocomplete="one-time-code"><button type="submit" class="primary" id="loginVerify">Войти</button><button type="button" class="login-back" id="loginBack">← Назад</button></div></form><small class="login-version">ONYX PANEL · {login_version()}</small></main>{COMMON_JS}
+<script>(()=>{{
+const TOTP={totp_flag};
+const form=document.getElementById('loginForm'),step1=document.getElementById('loginStep1'),step2=document.getElementById('loginStep2');
+const userField=document.getElementById('loginName'),passField=document.getElementById('loginPassword'),codeField=document.getElementById('loginCode');
+const submitBtn=document.getElementById('loginSubmit'),verifyBtn=document.getElementById('loginVerify'),backBtn=document.getElementById('loginBack');
+const cells=document.querySelectorAll('#loginOtpCells input');
+let inOtp=false;
+function showStep(n){{if(n===2){{step1.hidden=true;step2.hidden=false;inOtp=true;cells[0].focus()}}else{{step2.hidden=true;step1.hidden=false;inOtp=false;cells.forEach(c=>{{c.value='';c.classList.remove('filled','error-shake')}});codeField.value='';passField.focus()}}}}
+cells.forEach((cell,i)=>{{
+  cell.addEventListener('input',()=>{{
+    cell.value=cell.value.replace(/\\D/g,'').slice(0,1);
+    if(cell.value){{cell.classList.add('filled');if(i<cells.length-1)cells[i+1].focus()}}else cell.classList.remove('filled');
+    codeField.value=Array.from(cells).map(c=>c.value).join('');
+    if(codeField.value.length===6)form.requestSubmit(form.querySelector('#loginVerify'));
+  }});
+  cell.addEventListener('keydown',e=>{{
+    if(e.key==='Backspace'&&!cell.value&&i>0){{cells[i-1].focus();cells[i-1].value='';cells[i-1].classList.remove('filled');codeField.value=Array.from(cells).map(c=>c.value).join('')}}
+    if(e.key==='ArrowLeft'&&i>0)cells[i-1].focus();
+    if(e.key==='ArrowRight'&&i<cells.length-1)cells[i+1].focus();
+  }});
+  cell.addEventListener('paste',e=>{{
+    e.preventDefault();const digits=(e.clipboardData||window.clipboardData).getData('text').replace(/\\D/g,'').slice(0,cells.length);
+    digits.split('').forEach((d,j)=>{{if(j<cells.length){{cells[j].value=d;cells[j].classList.add('filled')}}}});
+    codeField.value=Array.from(cells).map(c=>c.value).join('');
+    if(codeField.value.length===6)form.requestSubmit(verifyBtn);
+    else if(digits.length<cells.length)cells[Math.min(digits.length,cells.length-1)].focus();
+  }});
+}});
+backBtn.addEventListener('click',()=>showStep(1));
+form.addEventListener('submit',async e=>{{
+  e.preventDefault();e.stopImmediatePropagation();
+  if(TOTP&&!inOtp){{
+    if(!userField.value.trim()||!passField.value)return;
+    showStep(2);return;
+  }}
+  if(TOTP&&inOtp&&codeField.value.length!==6){{
+    cells.forEach(c=>c.classList.add('error-shake'));
+    if(window.onyxToast)onyxToast('Введите 6 цифр кода','err');
+    setTimeout(()=>cells.forEach(c=>c.classList.remove('error-shake')),400);
+    return;
+  }}
+  const btn=inOtp?verifyBtn:submitBtn;const oldText=btn.textContent;btn.disabled=true;btn.textContent='Входим…';
+  try{{
+    const r=await fetch(form.action,{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams(new FormData(form))}});
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель вернула некорректный ответ.')}}
+    if(!r.ok||!d.ok)throw Object.assign(new Error(d.message||'Ошибка входа'),{{field:d.field||''}});
+    location.href=d.redirect||(esc(path)+'/dashboard');
+  }}catch(err){{
+    btn.disabled=false;btn.textContent=oldText;
+    if(window.onyxToast)onyxToast(err.message,'err');
+    if(err.field==='code'&&TOTP){{
+      cells.forEach(c=>{{c.value='';c.classList.remove('filled');c.classList.add('error-shake')}});
+      codeField.value='';setTimeout(()=>{{cells.forEach(c=>c.classList.remove('error-shake'));cells[0].focus()}},400);
+    }}else if(err.field==='password'){{
+      if(TOTP&&inOtp)showStep(1);
+      passField.focus();passField.select();
+    }}
+  }}
+}},true);
+}})();
+</script></body></html>'''
 
 
 

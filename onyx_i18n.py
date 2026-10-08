@@ -72,6 +72,11 @@ PAIRS = {
     'Некорректный запрос.': 'Bad request.',
     'Сессия завершена. Войдите заново.': 'Session ended. Sign in again.',
     'Неверный логин или пароль': 'Invalid username or password',
+    'Неверный код 2FA': 'Invalid 2FA code',
+    'Введите 6 цифр кода': 'Enter all 6 digits of the code',
+    'Входим…': 'Signing in…',
+    'Панель вернула некорректный ответ.': 'The panel returned an invalid response.',
+    'Ошибка входа': 'Sign-in error',
     # --- navigation ---------------------------------------------------------
     'Дашборд': 'Dashboard', 'Клиенты': 'Clients', 'Ноды': 'Nodes',
     'Каскад': 'Cascade', 'каскады': 'cascades', 'Каскады': 'Cascades',

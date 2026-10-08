@@ -3671,17 +3671,29 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
         # Login does not require an authenticated session.
         if path==PANEL_PATH+"/login":
             client=client_id(self)
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def login_json(ok,message="",field="",code=200,redirect=""):
+                body={"ok":ok}
+                if message:body["message"]=message
+                if field:body["field"]=field
+                if redirect:body["redirect"]=redirect
+                self.send_json(body,code)
             if login_blocked(client):
-                body="Слишком много попыток входа. Повторите позже.".encode("utf-8")
-                self.send_response(429)
-                self.send_header("Retry-After",str(LOGIN_WINDOW))
-                self.send_header("Content-Type","text/html; charset=utf-8")
-                self.send_header("Content-Length",str(len(body)))
-                self.end_headers(); self.wfile.write(body)
+                if async_action:
+                    login_json(False,"Слишком много попыток входа. Повторите позже.","",429)
+                else:
+                    body="Слишком много попыток входа. Повторите позже.".encode("utf-8")
+                    self.send_response(429)
+                    self.send_header("Retry-After",str(LOGIN_WINDOW))
+                    self.send_header("Content-Type","text/html; charset=utf-8")
+                    self.send_header("Content-Length",str(len(body)))
+                    self.end_headers(); self.wfile.write(body)
                 return
             try: form=self.form(8192)
             except (ValueError,UnicodeDecodeError):
-                self.send_html("Некорректный запрос.",400); return
+                if async_action:login_json(False,"Некорректный запрос.","",400)
+                else:self.send_html("Некорректный запрос.",400)
+                return
             d=load()
             username=form.get("user","")
             password=form.get("password","")
@@ -3693,13 +3705,11 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 totp=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
                 if totp.get("enabled") and totp.get("secret") and not onyx_totp.verify(totp["secret"],form.get("code","")):
                     login_failed(client)
-                    self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#060910;color:#fff;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #223148;border-radius:22px;background:#0d1520}a{color:#8edcff}</style>
-<div class=b><h2>Неверный код 2FA</h2><p>Код двухфакторной аутентификации не подошёл. Попробуйте войти ещё раз.</p><a href="%s/login">Вернуться</a></div>""" % esc(PANEL_PATH),401)
+                    if async_action:
+                        login_json(False,"Неверный код 2FA","code",401)
+                    else:
+                        self.redirect("/login")
                     return
-                # A cookie-safe token: the old ':' separator was accepted by
-                # most browsers but is rejected/rewritten by some proxies.
-                # The trailing part carries the session role.
                 token=str(int(time.time()))+"-"+secrets.token_hex(16)+"-"+role
                 sid=sign(token)
                 login_succeeded(client)
@@ -3715,10 +3725,20 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                             "🔐 Вход в панель с нового устройства\nЛогин: %s (%s)\nIP: %s"%(username,role,client_id(self))),daemon=True).start()
                 except Exception:
                     pass
-                self.send_response(303)
-                self.send_header("Set-Cookie",self.session_cookie(sid,86400))
-                self.send_header("Location",PANEL_PATH+"/dashboard")
-                self.end_headers()
+                if async_action:
+                    self.send_response(200)
+                    self.send_header("Set-Cookie",self.session_cookie(sid,86400))
+                    redirect_target=(PANEL_PATH+"/dashboard") if PANEL_PATH else "/dashboard"
+                    payload=json.dumps({"ok":True,"redirect":redirect_target})
+                    self.send_header("Content-Type","application/json")
+                    self.send_header("Content-Length",str(len(payload.encode())))
+                    self.end_headers()
+                    self.wfile.write(payload.encode())
+                else:
+                    self.send_response(303)
+                    self.send_header("Set-Cookie",self.session_cookie(sid,86400))
+                    self.send_header("Location",PANEL_PATH+"/dashboard")
+                    self.end_headers()
             else:
                 login_failed(client)
                 try:
@@ -3729,9 +3749,10 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                         save(state)
                 except Exception:
                     pass
-                self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#060910;color:#fff;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #223148;border-radius:22px;background:#0d1520}a{color:#8edcff}</style>
-<div class=b><h2>Неверный логин или пароль</h2><p>Попробуйте войти ещё раз.</p><a href="%s/login">Вернуться</a></div>""" % esc(PANEL_PATH),401)
+                if async_action:
+                    login_json(False,"Неверный логин или пароль","password",401)
+                else:
+                    self.redirect("/login")
             return
 
         if path.startswith("/onyx-invite/") and path.endswith("/claim"):
