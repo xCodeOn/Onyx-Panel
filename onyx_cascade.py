@@ -146,9 +146,7 @@ def parse_link(link):
             upgrade['host'] = _first(query, 'host')
         stream['httpupgradeSettings'] = upgrade
     elif network == 'grpc':
-        service = _first(query, 'serviceName', 'path')
-        if not service:
-            raise CascadeError('В gRPC-ключе не указано имя сервиса (serviceName).')
+        service = _first(query, 'serviceName', 'path', default='')
         stream['grpcSettings'] = {'serviceName': service,
                                   'multiMode': _first(query, 'mode').lower() == 'multi'}
     elif network == 'xhttp':

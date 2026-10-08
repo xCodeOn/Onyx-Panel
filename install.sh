@@ -79,4 +79,5 @@ tar -xzf "$WORK/onyx-panel.tar.gz" -C "$WORK/package" --strip-components=1 --no-
     die "The downloaded release package is incomplete: assets are missing."
 
 echo "Onyx Panel ${LATEST}: starting installation..."
+export ONYX_PANEL_VERSION="${LATEST#v}"
 exec bash "$WORK/package/install-final.sh"

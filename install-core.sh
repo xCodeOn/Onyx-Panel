@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="2.2.0"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.3.0')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -229,8 +229,9 @@ if valid_domain "$EXISTING_DOMAIN"; then
 else
     while true; do
         echo
-        read -r -p "  ${C_ACCENT}${B}▸ Домен${R} ${C_GREY}(пример: proxy.example.com)${R}: " DOMAIN
+        read -r -p "  ${C_ACCENT}${B}▸ Домен${R} ${C_GREY}(пример: proxy.example.com)${R}: " DOMAIN </dev/tty
         DOMAIN="$(trim "$DOMAIN")"
+        DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
         DOMAIN="${DOMAIN,,}"
         valid_domain "$DOMAIN" && break
         ui_err "Неверный домен. Пример: proxy.example.com"
@@ -243,7 +244,7 @@ if valid_email "$EXISTING_EMAIL"; then
 else
     while true; do
         echo
-        read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R} ${C_GREY}(пример: admin@example.com)${R}: " EMAIL
+        read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R} ${C_GREY}(пример: admin@example.com)${R}: " EMAIL </dev/tty
         EMAIL="$(trim "$EMAIL")"
         valid_email "$EMAIL" && break
         ui_err "Неверный email. Пример: admin@example.com"
@@ -257,10 +258,10 @@ if [[ -s /var/lib/onyx-panel/data.json ]] &&
     rm -f /etc/onyx-panel/install-credentials
 else
     echo
-    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора панели${R} ${C_GREY}[admin]${R}: " PANEL_ADMIN
+    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора панели${R} ${C_GREY}[admin]${R}: " PANEL_ADMIN </dev/tty
     PANEL_ADMIN="${PANEL_ADMIN:-admin}"
     while true; do
-        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PANEL_PASS
+        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PANEL_PASS </dev/tty
         echo
         if [[ ${#PANEL_PASS} -lt 3 ]]; then
             ui_warn "Пароль должен быть не короче 3 символов."
@@ -700,7 +701,7 @@ if [[ "$CADDY_MODE" == "owner" ]]; then
 else
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-printf '%s\n' '2.2.0' > /etc/onyx-panel/version
+printf '%s\n' "$VERSION" > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/primary-secret
 chmod 0600 /etc/onyx-panel/caddy-owned
 chmod 0600 /etc/onyx-panel/version

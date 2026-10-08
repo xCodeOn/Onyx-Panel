@@ -416,9 +416,9 @@ fi
 if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     # New panel bootstrap: install-panel asks for a login and one password,
     # creates the private URL and leaves the old core proxy data in place.
-    bash "$TEMP_DIR/source/install-panel.sh"
+    ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
 else
-    ONYX_PANEL_UPDATE=1 bash "$TEMP_DIR/source/install-panel.sh"
+    ONYX_PANEL_UPDATE=1 ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
 fi
 install -o root -g root -m 0755 \
     "$TEMP_DIR/source/uninstall-onyx-panel.sh" \

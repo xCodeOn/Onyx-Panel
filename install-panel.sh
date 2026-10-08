@@ -170,7 +170,7 @@ if ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$DOMAIN" == *.* ]]; th
     [[ -t 0 ]] || die "The domain could not be recovered. Re-run with ONYX_PANEL_DOMAIN=proxy.example.com."
     ui_warn "Домен старой установки не найден автоматически."
     while true; do
-        read -r -p "  ${C_ACCENT}${B}▸ Домен Onyx Panel${R}: " DOMAIN
+        read -r -p "  ${C_ACCENT}${B}▸ Домен Onyx Panel${R}: " DOMAIN </dev/tty
         DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"; DOMAIN="${DOMAIN,,}"
         [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$DOMAIN" == *.* ]] && break
         ui_err "Некорректный домен. Пример: proxy.example.com"
@@ -356,7 +356,7 @@ if ! [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] && 
 fi
 if ! [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
     ui_warn "Email Caddy ACME не найден или неверен."
-    read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R}: " ACME_EMAIL
+    read -r -p "  ${C_ACCENT}${B}▸ Email для Let's Encrypt${R}: " ACME_EMAIL </dev/tty
     [[ "$ACME_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] ||
         die "Invalid ACME email."
 fi
@@ -547,10 +547,10 @@ elif [[ -s "$INSTALL_CREDENTIALS" ]]; then
     rm -f "$INSTALL_CREDENTIALS"
     [[ -n "$ADMIN" && -n "$PASS" ]] || die "Panel credentials are invalid."
 else
-    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора${R} ${C_GREY}[admin]${R}: " ADMIN
+    read -r -p "  ${C_ACCENT}${B}▸ Логин администратора${R} ${C_GREY}[admin]${R}: " ADMIN </dev/tty
     ADMIN="${ADMIN:-admin}"
     while true; do
-        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PASS
+        read -r -s -p "  ${C_ACCENT}${B}▸ Пароль администратора${R}: " PASS </dev/tty
         echo
         [[ ${#PASS} -ge 3 ]] || { ui_warn "Пароль должен содержать минимум 3 символа."; continue; }
         break

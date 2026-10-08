@@ -3,6 +3,10 @@ set -Eeuo pipefail
 BASE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 
+# Panel version: prefer the env var set by install.sh (from the GitHub tag),
+# fall back to the existing installed version, then to a hardcoded default.
+ONYX_VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.3.0')}"
+
 # Visual kit: banner, colored stages, explained red errors. When the kit file
 # is missing (offline update from an old package) fall back to plain output.
 UI_LIB="${BASE}/onyx-install-ui.sh"
@@ -98,7 +102,7 @@ trap cleanup_credentials EXIT
 ONYX_STAGE_STATE="$(mktemp "${TMPDIR:-/tmp}/onyx-install-stage.XXXXXX")"
 export ONYX_STAGE_STATE
 
-ui_banner "v2.2.0"
+ui_banner "v${ONYX_VERSION}"
 ui_stage "Подготовка сервера"
 
 PANEL_UPDATE=0
@@ -146,7 +150,7 @@ nft list table ip onyx_awg >/dev/null 2>&1 ||
 systemctl is-active --quiet onyx-panel-sync-tls.timer ||
     die "The Xray TLS synchronization timer did not start."
 ui_ok "Все проверки пройдены — установка завершена."
-printf '%s\n' '2.2.0' > /etc/onyx-panel/version
+printf '%s\n' "$ONYX_VERSION" > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/version
 
 # Keep a private copy of the complete package on the server so the panel can
@@ -157,6 +161,6 @@ if [[ "$BASE" != "/opt/onyx-panel-package" ]]; then
     cp -a "$BASE/." /opt/onyx-panel-package.tmp/
     rm -rf /opt/onyx-panel-package
     mv /opt/onyx-panel-package.tmp /opt/onyx-panel-package
-    printf '%s\n' '2.2.0' > /opt/onyx-panel-package/version
+    printf '%s\n' "$ONYX_VERSION" > /opt/onyx-panel-package/version
     chmod 0600 /opt/onyx-panel-package/version
 fi

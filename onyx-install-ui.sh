@@ -107,6 +107,7 @@ ui_run_with_progress() {
 
 ui_stage() {
     ui_progress_stop
+    UI_STAGE_STATE="${ONYX_STAGE_STATE:-}"
     if [[ -n "$UI_STAGE_STATE" && -s "$UI_STAGE_STATE" ]]; then
         UI_STEP_N="$(<"$UI_STAGE_STATE")"
         [[ "$UI_STEP_N" =~ ^[0-9]+$ ]] || UI_STEP_N=0
