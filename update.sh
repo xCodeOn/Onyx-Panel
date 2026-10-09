@@ -90,7 +90,7 @@ exec 9>/run/lock/onyx-panel.lock
 flock -n 9 || die "Another Onyx Panel install, update or removal is already running."
 
 echo "============================================================"
-echo "     Onyx Panel 1.8.8 — SAFE UPDATE"
+echo "     Onyx Panel ${LOCAL_VERSION} — SAFE UPDATE"
 echo "============================================================"
 echo "Users, administrator password, panel URL and site HTML will be retained."
 
@@ -156,14 +156,15 @@ BACKUP="/root/onyx-panel-update-backup-${STAMP}"
 install -d -m 0700 "$BACKUP"
 BACKUP_ITEMS=()
 for item in /opt/onyx-panel /opt/onyx-panel /opt/MTProxy /usr/local/bin/caddy /usr/local/bin/tproxy-server /usr/local/bin/amneziawg-go /usr/local/bin/awg /usr/local/bin/awg-quick /usr/local/sbin/onyx-panelctl /usr/local/sbin/onyx-panel-user-firewall /usr/local/sbin/onyx-panel-sync-tls /usr/local/sbin/onyx-panel-awg-run /usr/local/sbin/onyx-panel-awg-up /usr/local/sbin/onyx-panel-awg-down /usr/local/sbin/onyx-panel-update /usr/local/sbin/onyx-panel-uninstall /usr/local/sbin/ONYX /usr/local/sbin/onyx /etc/systemd/system/onyx-panel.service /etc/systemd/system/onyx-panel-firewall.service /etc/systemd/system/onyx-panel-traffic.service /etc/systemd/system/onyx-panel-traffic.timer /etc/systemd/system/onyx-panel-xray.service /etc/systemd/system/onyx-panel-openflux.service /etc/systemd/system/onyx-panel-awg@.service /etc/systemd/system/onyx-panel-sync-tls.service /etc/systemd/system/onyx-panel-sync-tls.timer /etc/systemd/system/onyx-panel-component-update.service /etc/systemd/system/tproxy-server.service /etc/systemd/system/mtproxy.service /etc/systemd/system/caddy.service.d/tproxy.conf /etc/caddy/Caddyfile /etc/tproxy-server /etc/mtproxy /etc/mita /etc/onyx-panel-xray /etc/sysctl.d/90-onyx-panel-awg.conf /var/lib/onyx-panel-xray /var/lib/onyx-panel-components /var/lib/onyx-panel /etc/onyx-panel /srv/tproxy-site; do
-    [[ -e "$item" ]] && BACKUP_ITEMS+=("$item")
-    [[ -e "$item" ]] && cp -a --parents "$item" "$BACKUP"
+    [[ -e "$item" ]] || continue
+    BACKUP_ITEMS+=("$item")
+    cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
 done
 shopt -s nullglob
 for item in /etc/systemd/system/onyx-user-*.service /etc/systemd/system/onyx-panel-web-update.service /etc/systemd/system/onyx-panel-metrics.service /etc/systemd/system/onyx-panel-metrics.timer; do
     [[ -e "$item" ]] || continue
     BACKUP_ITEMS+=("$item")
-    cp -a --parents "$item" "$BACKUP"
+    cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
 done
 shopt -u nullglob
 tar --numeric-owner -cpf "$BACKUP/state.tar" "${BACKUP_ITEMS[@]}"
