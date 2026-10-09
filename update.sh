@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="1.8.8"
+LOCAL_VERSION="2.4.0"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -413,6 +413,12 @@ if [[ -f "$TEMP_DIR/source/repair-landing-pages.sh" ]]; then
     bash "$TEMP_DIR/source/repair-landing-pages.sh"
 fi
 
+# Resolve the version string before install-panel.sh needs it as
+# ONYX_PANEL_VERSION. RELEASE_REF is set by this point (either from the
+# requested ref, the latest tag, or the local package fallback).
+UPDATE_VERSION="${RELEASE_REF#v}"
+[[ -n "$REPOSITORY" || -n "$RELEASE_REF" ]] || UPDATE_VERSION="$LOCAL_VERSION"
+
 if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     # New panel bootstrap: install-panel asks for a login and one password,
     # creates the private URL and leaves the old core proxy data in place.
@@ -447,8 +453,6 @@ systemctl is-active --quiet onyx-panel-sync-tls.timer ||
 if [[ ! -s /etc/onyx-panel/caddy-owned ]]; then
     printf '%s\n' 'ONYX_PANEL_V2_CADDY_SHARED' > /etc/onyx-panel/caddy-owned
 fi
-UPDATE_VERSION="${RELEASE_REF#v}"
-[[ -n "$REPOSITORY" || -n "$RELEASE_REF" ]] || UPDATE_VERSION="$LOCAL_VERSION"
 printf '%s\n' "$UPDATE_VERSION" > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/caddy-owned /etc/onyx-panel/version
 UPDATE_COMMITTED=1
