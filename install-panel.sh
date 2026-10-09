@@ -4263,6 +4263,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             return
 
         if path==PANEL_PATH+"/apply-preset":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
             try:
                 preset=get_preset(form.get("preset",""))
                 # Applying a bundled preset is an explicit publish operation.
@@ -4272,12 +4273,17 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     write_site_html(preset["html"])
                     if os.path.exists(SITE_DRAFT): os.unlink(SITE_DRAFT)
                 audit('preset-apply',form.get("preset",""),preset.get("name",""))
-                self.redirect("/settings")
+                if async_action:
+                    self.send_json({"ok":True,"message":"Заглушка применена и опубликована."})
+                else:
+                    self.redirect("/settings")
             except ValueError as exc:
-                self.send_html("Ошибка применения пресета: "+esc(exc),400)
+                if async_action: self.send_json({"ok":False,"message":"Ошибка применения пресета: "+str(exc)},400)
+                else: self.send_html("Ошибка применения пресета: "+esc(exc),400)
             except (RuntimeError,OSError) as exc:
                 print("landing preset failed:",type(exc).__name__,file=sys.stderr,flush=True)
-                self.send_html("Не удалось применить пресет. Предыдущая страница сохранена; проверьте службы через SSH.",503)
+                if async_action: self.send_json({"ok":False,"message":"Не удалось применить пресет. Предыдущая страница сохранена; проверьте службы через SSH."},503)
+                else: self.send_html("Не удалось применить пресет. Предыдущая страница сохранена; проверьте службы через SSH.",503)
             return
 
         if path==PANEL_PATH+"/service-restart":

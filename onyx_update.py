@@ -85,6 +85,22 @@ def get_status():
         try:
             if not unit_running(): data.update(phase='interrupted', message='Обновление прервано. Проверьте журнал через Onyx/SSH.')
         except (OSError, subprocess.TimeoutExpired): pass
+    # A finished update ("done") should not linger forever: once the panel
+    # has been back for a while, transition to "checked" so the Updates tab
+    # reflects the real state — "latest" or "no updates" — instead of a
+    # stale "update complete" banner.
+    if data.get('phase') == 'done':
+        finished_at = data.get('finished', 0)
+        target = str(data.get('target', '') or '')
+        cur = current_version()
+        if target.lstrip('v') == cur.lstrip('v') and time.time() - finished_at > 30:
+            data['phase'] = 'checked'
+            latest = data.get('latest', '')
+            if latest and newer(latest, cur):
+                data['message'] = f'Доступна новая версия {latest.lstrip("v")}.'
+            else:
+                data['message'] = f'Обновлений нет — установлена последняя версия v{cur.lstrip("v")}.'
+            atomic_json(STATUS, data)
     data['current'] = current_version()
     data['available'] = newer(data.get('latest', ''), data['current'])
     data['can_install'] = bool(data.get('releases'))
@@ -356,7 +372,7 @@ def run_update():
             os.chmod(log.name, 0o600)
             result = subprocess.run(['/usr/bin/bash', UPDATER], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env)
         state.update(phase='done' if result.returncode == 0 else 'failed', code=result.returncode,
-                     message='Обновление завершено. Войдите в панель заново.' if result.returncode == 0 else failure_message(ROOT / 'update.log'))
+                     message='Обновление установлено. Панель перезапускается…' if result.returncode == 0 else failure_message(ROOT / 'update.log'))
     except OSError:
         state.update(phase='failed', message='Не удалось выполнить установщик. Проверьте журнал через SSH.')
     state['finished'] = int(time.time())

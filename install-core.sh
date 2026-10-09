@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.3.0')}"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.4.0')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -390,73 +390,74 @@ else
     mkdir -p "$SITE_INPUT"
 
 cat > "$SITE_INPUT/index.html" <<'EOF'
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#05070d">
-<title>Система подключения</title>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b"><meta name="description" content="Onyx. Скоро здесь начнётся что-то особенное.">
+<title>Onyx — скоро</title>
 <style>
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{min-height:100vh;display:grid;place-items:center;overflow:hidden;color:#f5f7ff;background:#05070d}
-.bg{position:fixed;inset:0;overflow:hidden;background:
-radial-gradient(circle at 15% 20%,rgba(72,190,255,.16),transparent 30%),
-radial-gradient(circle at 85% 80%,rgba(125,92,255,.18),transparent 32%),
-linear-gradient(135deg,#04060b,#090e18 50%,#05070d)}
-.bg:before{content:"";position:absolute;inset:-45%;
-background:conic-gradient(from 90deg,transparent,rgba(75,210,255,.09),transparent 30%,rgba(139,92,246,.09),transparent 65%);
-animation:spin 18s linear infinite}
-.bg:after{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.35) 1px,transparent 1px);background-size:42px 42px;opacity:.12;animation:drift 20s linear infinite}
-.card{position:relative;width:min(680px,calc(100% - 32px));padding:44px 34px 30px;text-align:center;border:1px solid rgba(255,255,255,.11);border-radius:28px;background:rgba(10,14,24,.72);backdrop-filter:blur(22px);box-shadow:0 30px 90px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.07);animation:enter .8s cubic-bezier(.2,.8,.2,1) both}
-.logo{width:78px;height:78px;margin:0 auto 22px;border-radius:24px;display:grid;place-items:center;font-size:34px;background:linear-gradient(135deg,#56d7ff,#7568ff);box-shadow:0 0 45px rgba(86,180,255,.3);animation:float 4s ease-in-out infinite}
-h1{margin:0;font-size:clamp(30px,6vw,48px);letter-spacing:-1.8px}
-p{margin:14px auto 0;max-width:520px;color:#98a3b7;font-size:16px;line-height:1.65}
-.status{display:inline-flex;align-items:center;gap:9px;margin-top:24px;padding:10px 15px;border:1px solid rgba(255,255,255,.08);border-radius:999px;background:rgba(255,255,255,.035);color:#cdd5e5;font-size:14px}
-.dot{width:8px;height:8px;border-radius:50%;background:#63f5b0;box-shadow:0 0 15px #63f5b0;animation:pulse 1.7s infinite}
-.line{height:1px;margin:28px 0 20px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent)}
-.footer{font-size:12px;color:#596579}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes drift{to{transform:translate3d(42px,42px,0)}}
-@keyframes enter{from{opacity:0;transform:translateY(24px) scale(.97)}to{opacity:1;transform:none}}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.65}}
-@media(max-width:520px){.card{padding:34px 22px 26px;border-radius:22px}.logo{width:68px;height:68px}}
+*{box-sizing:border-box}html{background:#09090b}body{margin:0;color:#f4f1eb;font-family:Arial,Helvetica,sans-serif;min-height:100svh;overflow-x:hidden}button{font:inherit}::selection{background:#f47b42;color:#09090b}
+.scene{position:fixed;inset:0;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 50% 49%,#25140f66,transparent 62%)}canvas{width:100%;height:100%;position:absolute;inset:0}.grain{position:absolute;inset:0;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.7' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}
+.eclipse{position:absolute;left:50%;top:47%;width:min(64vw,660px);aspect-ratio:1;border-radius:50%;transform:translate(calc(-50% + var(--mx,0px)),calc(-50% + var(--my,0px)));transition:transform 1.5s ease-out;background:#09090b;box-shadow:0 0 90px #ed673113,inset 0 0 50px #25130e;isolation:isolate}.eclipse:before{content:"";position:absolute;inset:-2px;border-radius:50%;z-index:-2;background:conic-gradient(from 0deg,#ffbe78 0deg,#ed7540 20deg,#b13c151a 85deg,#28140e 170deg,#ffb168 220deg,#ffdfb4 240deg,#4b2516 290deg,#ffbe78);animation:orbit 22s linear infinite;box-shadow:0 0 24px #e9653030}.eclipse:after{content:"";position:absolute;inset:1px;border-radius:50%;z-index:-1;background:radial-gradient(ellipse at 50% 10%,#211812,#0b0b0d 45%,#09090b 80%);box-shadow:inset 0 0 24px #ff8b2510}.halo{position:absolute;inset:-23px;border:1px solid #ffffff05;border-radius:50%}.halo:after{content:"";position:absolute;inset:-65px;border:1px solid #ffffff03;border-radius:50%}
+.shell{position:relative;min-height:100svh;display:flex;flex-direction:column;padding:34px 4.4vw 24px}header,footer{display:flex;justify-content:space-between;align-items:center;gap:24px}header{animation:appear 1s both}.brand{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:700;letter-spacing:-.9px}.mark{width:23px;height:27px;display:inline-block;background:linear-gradient(130deg,#fff,#aaa);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%,50% 0,50% 24%,21% 38%,21% 62%,50% 77%,79% 62%,79% 38%,50% 24%)}.status{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#aaa6a2}.status i{height:5px;width:5px;border-radius:50%;background:#efaa70;box-shadow:0 0 12px #f79043;animation:breathe 3s ease-in-out infinite}main{flex:1;display:grid;place-items:center;text-align:center;padding:88px 0 94px}.hero{position:relative;width:100%}.eyebrow{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:#d0b39f;margin:0 0 30px;animation:rise 1s .15s both}.eyebrow:before,.eyebrow:after{content:"";display:inline-block;width:28px;height:1px;background:#a7856b66;vertical-align:middle;margin:0 15px}h1{font-size:clamp(108px,20.5vw,285px);font-weight:500;line-height:.83;letter-spacing:-.085em;margin:0 0 40px;padding-right:.08em;color:#ece9e4;text-shadow:0 5px 55px #0008;animation:rise 1.3s .25s both}h1 span{display:inline-block;background:linear-gradient(165deg,#fff 15%,#dad5cd 53%,#8a8581 100%);background-clip:text;-webkit-background-clip:text;color:transparent}h2{font-size:clamp(21px,2.35vw,32px);font-weight:400;letter-spacing:-.9px;margin:0 0 14px;animation:rise 1s .45s both}.description{font-size:14px;line-height:1.8;color:#94918f;margin:0 auto;max-width:380px;animation:rise 1s .6s both}.action{margin-top:30px;display:inline-flex;align-items:center;gap:30px;border:1px solid #ffffff24;background:#ffffff06;color:#eee7df;border-radius:50px;padding:15px 20px 15px 25px;font-size:12px;cursor:pointer;transition:background .3s,border-color .3s,transform .3s;animation:rise 1s .75s both}.action:hover{background:#f4965120;border-color:#eaaa7870;transform:translateY(-3px)}.action svg{width:16px;height:16px;transition:transform .3s}.action:hover svg{transform:rotate(45deg)}button:focus-visible{outline:2px solid #ffbe78;outline-offset:6px}.side{position:absolute;left:0;top:47%;writing-mode:vertical-rl;transform:rotate(180deg);font:9px monospace;letter-spacing:3px;color:#76706b}.coordinates{position:absolute;right:0;top:48%;color:#79716b;font:9px monospace;letter-spacing:2px;writing-mode:vertical-rl}.bottom{animation:appear 1s 1s both}footer{border-top:1px solid #ffffff13;padding-top:20px;font-size:10px;color:#77736f;letter-spacing:.4px}.footer-note{display:flex;align-items:center;gap:9px}.footer-note:before{content:"";width:4px;height:4px;background:#a28e7b;border-radius:50%}.controls{border:0;background:transparent;color:#99938e;cursor:pointer;display:flex;align-items:center;gap:8px;padding:9px 0;font-size:10px}.bars{height:12px;display:flex;align-items:center;gap:3px}.bars i{width:2px;height:9px;background:#c39c7c;animation:bars 1.3s ease-in-out infinite alternate}.bars i:nth-child(2){animation-delay:-.5s}.bars i:nth-child(3){animation-delay:-.9s}.progress-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:#ffffff05}.progress-line:after{content:"";position:absolute;width:20%;height:100%;background:linear-gradient(90deg,transparent,#d69560,transparent);animation:scan 9s linear infinite}
+dialog{color:#eee9e3;background:#131214;border:1px solid #e3ac7838;border-radius:20px;max-width:440px;width:calc(100% - 40px);padding:38px;box-shadow:0 20px 100px #0009}dialog::backdrop{background:#0009;backdrop-filter:blur(12px)}dialog[open]{animation:rise .3s both}dialog h2{animation:none;margin-top:22px;font-size:28px}dialog p{color:#a6a09b;line-height:1.8;font-size:14px}.close{position:absolute;top:14px;right:18px;background:none;border:0;color:#aaa;font-size:25px;cursor:pointer}.dialog-label{color:#d0a17d;font:10px monospace;letter-spacing:2px}.paused *,.paused *:before,.paused *:after{animation-play-state:paused!important}
+@keyframes orbit{to{transform:rotate(360deg)}}@keyframes breathe{50%{opacity:.4;box-shadow:0 0 4px #f79043}}@keyframes rise{from{opacity:0;transform:translateY(20px);filter:blur(5px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}@keyframes appear{from{opacity:0}to{opacity:1}}@keyframes bars{to{height:3px}}@keyframes scan{from{left:-20%}to{left:100%}}
+@media(min-width:1600px){.shell{padding-top:45px}main{padding:100px 0}.eclipse{width:750px}}
+@media(max-width:600px){.shell{padding:24px 23px 18px}.brand{font-size:18px}.status{font-size:8px;letter-spacing:1.3px}.eclipse{width:106vw;top:44%}main{padding:100px 0 105px}.eyebrow{font-size:8px;letter-spacing:2.8px;margin-bottom:34px}.eyebrow:before,.eyebrow:after{width:15px;margin:0 10px}h1{font-size:29vw;margin-bottom:35px}h2{font-size:23px}.description{font-size:12px;max-width:270px}.side,.coordinates{display:none}footer{font-size:9px;flex-wrap:wrap;gap:12px}.footer-note{display:none}.action{font-size:11px}.controls{font-size:9px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="bg"></div>
-<main class="card">
-  <div class="logo">⚡</div>
-  <h1>Система подключения</h1>
-  <p>Безопасный доступ активен. Соединение проверяется автоматически.</p>
-  <div class="status"><span class="dot"></span> Система работает</div>
-  <div class="line"></div>
-  <div class="footer">Защищённое соединение • Автоматическая проверка</div>
-</main>
-</body>
-</html>
+<div class="scene" aria-hidden="true"><canvas id="dust"></canvas><div class="eclipse"><div class="halo"></div></div><div class="grain"></div></div>
+<div class="shell"><header><div class="brand"><span class="mark" aria-hidden="true"></span>onyx</div><div class="status"><i></i>Скоро открытие</div></header>
+<main><div class="hero"><div class="side" aria-hidden="true">BEYOND THE ORDINARY</div><p class="eyebrow">Новое притяжение</p><h1 aria-label="Onyx"><span>Onyx</span></h1><h2>Всё начинается с тишины.</h2><p class="description">Мы создаём что-то особенное.<br>Совсем скоро здесь станет интереснее.</p><button class="action" id="more" type="button">Что дальше?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button><div class="coordinates" aria-hidden="true">A NEW CHAPTER / ONYX</div></div></main>
+<div class="bottom"><footer><span>&copy; <span id="year">2026</span> Onyx</span><span class="footer-note">На пороге чего-то нового</span><button class="controls" id="motion" type="button" aria-pressed="false"><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="motion-label">Остановить анимацию</span></button></footer></div><div class="progress-line" aria-hidden="true"></div></div>
+<dialog id="info" aria-labelledby="dialog-title"><button class="close" type="button" aria-label="Закрыть">&times;</button><span class="dialog-label">ONYX / COMING SOON</span><h2 id="dialog-title">Встречаемся здесь.</h2><p>Onyx готовится к запуску. Мы откроем сайт, когда всё будет готово. Загляните чуть позже — продолжение уже близко.</p></dialog>
+<script>
+(()=>{'use strict';
+const canvas=document.getElementById('dust'),ctx=canvas.getContext('2d'),media=matchMedia('(prefers-reduced-motion: reduce)'),motion=document.getElementById('motion'),label=document.getElementById('motion-label'),dialog=document.getElementById('info');
+let w=0,h=0,particles=[],paused=media.matches,frame=0,last=0;const pointer={x:-1000,y:-1000};
+document.getElementById('year').textContent=new Date().getFullYear();
+function resize(){w=innerWidth;h=innerHeight;const dpr=Math.min(devicePixelRatio||1,2);canvas.width=w*dpr;canvas.height=h*dpr;if(!ctx)return;ctx.setTransform(dpr,0,0,dpr,0,0);particles=Array.from({length:Math.min(95,Math.floor(w*h/14000))},()=>({x:Math.random()*w,y:Math.random()*h,r:.4+Math.random()*1.1,v:.07+Math.random()*.14,a:.1+Math.random()*.4,phase:Math.random()*6.28}));draw(0)}
+function draw(dt){if(!ctx)return;ctx.clearRect(0,0,w,h);for(const p of particles){p.y-=p.v*dt;p.x+=Math.sin(p.phase+p.y*.004)*.045*dt;if(p.y<0)p.y=h;const dx=p.x-pointer.x,dy=p.y-pointer.y,d=Math.hypot(dx,dy);const force=d<130?(1-d/130)*14:0;ctx.beginPath();ctx.fillStyle='rgba(220,178,138,'+p.a+')';ctx.arc(p.x+(d?dx/d*force:0),p.y+(d?dy/d*force:0),p.r,0,Math.PI*2);ctx.fill()}}
+function tick(t){if(paused||document.hidden){frame=0;return}draw(Math.min((t-last)/16.67,2));last=t;frame=requestAnimationFrame(tick)}
+function start(){if(!frame&&!paused&&!document.hidden){last=performance.now();frame=requestAnimationFrame(tick)}}
+function sync(){document.body.classList.toggle('paused',paused);motion.setAttribute('aria-pressed',String(paused));label.textContent=paused?'Включить анимацию':'Остановить анимацию';if(paused){cancelAnimationFrame(frame);frame=0}else start()}
+motion.addEventListener('click',()=>{paused=!paused;sync()});media.addEventListener('change',e=>{paused=e.matches;sync()});
+addEventListener('pointermove',e=>{if(paused)return;pointer.x=e.clientX;pointer.y=e.clientY;document.documentElement.style.setProperty('--mx',((e.clientX/w-.5)*12)+'px');document.documentElement.style.setProperty('--my',((e.clientY/h-.5)*12)+'px')},{passive:true});
+document.addEventListener('pointerleave',()=>{pointer.x=pointer.y=-1000});addEventListener('resize',resize);document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else start()});
+document.getElementById('more').addEventListener('click',()=>dialog.showModal());dialog.querySelector('.close').addEventListener('click',()=>dialog.close());dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close()}});
+resize();sync();
+})();
+</script></body></html>
 EOF
 
 # The relay's public-site policy deliberately blocks inline style/script tags.
 # Keep the bundled first-run page compliant too, otherwise it would render as
 # unstyled text before the owner opens the panel and selects a preset.
-python3 - "$SITE_INPUT/index.html" "$SITE_INPUT/styles.css" <<'PY'
+python3 - "$SITE_INPUT/index.html" "$SITE_INPUT/styles.css" "$SITE_INPUT/site.js" <<'PY'
 import re, sys
-index, stylesheet = sys.argv[1:]
+index, stylesheet, scriptfile = sys.argv[1:]
 s = open(index, encoding="utf-8").read()
 m = re.search(r"<style\b[^>]*>(.*?)</style\s*>", s, flags=re.I | re.S)
 if not m:
     raise SystemExit("Default public page has no style block")
 css = "/* Onyx Panel default public CSS */\n" + m.group(1).strip() + "\n"
 s = s[:m.start()] + '<link rel="stylesheet" href="/styles.css">' + s[m.end():]
+js_code = ""
+js_match = re.search(r"<script\b[^>]*>(.*?)</script\s*>", s, flags=re.I | re.S)
+if js_match:
+    js_code = "/* Onyx Panel default public JS */\n" + js_match.group(1).strip() + "\n"
+    s = s[:js_match.start()] + '<script src="/site.js" defer></script>' + s[js_match.end():]
 open(stylesheet, "w", encoding="utf-8").write(css)
+if js_code:
+    open(scriptfile, "w", encoding="utf-8").write(js_code)
 open(index, "w", encoding="utf-8").write(s)
 PY
 
 chmod 0755 "$SITE_INPUT"
-chmod 0644 "$SITE_INPUT/index.html" "$SITE_INPUT/styles.css"
+chmod 0644 "$SITE_INPUT/index.html" "$SITE_INPUT/styles.css" "$SITE_INPUT/site.js"
 echo "      OK"
 fi
 

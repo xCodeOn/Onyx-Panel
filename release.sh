@@ -75,6 +75,46 @@ else
 fi
 COMMITS="$(git log --no-decorate --format='- %s (%h)' $RANGE 2>/dev/null || true)"
 
+# Auto-add emoji to commit lines for a readable, attractive changelog.
+# Keywords in the commit message pick the emoji; lines already starting
+# with an emoji keep it.
+emoji_for() {
+    local msg="$1"
+    # Already starts with an emoji? Keep it.
+    if [[ "$msg" =~ ^[^\x00-\x7F] ]]; then return; fi
+    local lower
+    lower=$(echo "$msg" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lower" =~ (добавл|новое|новая|новый|feat|add|create|support) ]]; then echo "✨"
+    elif [[ "$lower" =~ (исправ|fix|bug|ошибк|почин|repair) ]]; then echo "🐛"
+    elif [[ "$lower" =~ (ui|интерфейс|дизайн|style|css|внешн|вид|оформл) ]]; then echo "🎨"
+    elif [[ "$lower" =~ (безопас|security|auth|вход|парол|2fa|totp) ]]; then echo "🔒"
+    elif [[ "$lower" =~ (обнов|update|version|версия|release|релиз) ]]; then echo "🔄"
+    elif [[ "$lower" =~ (произв|perf|optim|скорость|memory|памят) ]]; then echo "⚡"
+    elif [[ "$lower" =~ (док|docs|readme|document) ]]; then echo "📚"
+    elif [[ "$lower" =~ (тест|test) ]]; then echo "🧪"
+    elif [[ "$lower" =~ (конфиг|config|настройк) ]]; then echo "⚙️"
+    elif [[ "$lower" =~ (рефактор|refactor|clean|почист) ]]; then echo "🧹"
+    elif [[ "$lower" =~ (нода|node) ]]; then echo "🌐"
+    elif [[ "$lower" =~ (клиент|client|user|пользовател) ]]; then echo "👤"
+    elif [[ "$lower" =~ (backup|копия|резерв) ]]; then echo "💾"
+    elif [[ "$lower" =~ (telegram|тг|уведомл|notif) ]]; then echo "🔔"
+    elif [[ "$lower" =~ (i18n|перевод|locale|язык) ]]; then echo "🌍"
+    else echo "📝"; fi
+}
+if [[ -n "$COMMITS" ]]; then
+    EMOJI_COMMITS=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^-\ (.*)$ ]]; then
+            local_msg="${BASH_REMATCH[1]}"
+            local_emoji="$(emoji_for "$local_msg")"
+            EMOJI_COMMITS+="- ${local_emoji} ${local_msg}"$'\n'
+        else
+            EMOJI_COMMITS+="$line"$'\n'
+        fi
+    done <<< "$COMMITS"
+    COMMITS="$EMOJI_COMMITS"
+fi
+
 NOTES_TMP=$(mktemp "${TMPDIR:-/tmp}/onyx-release-notes.XXXXXX.md")
 trap 'rm -f "$NOTES_TMP"' EXIT
 if [[ -n "$NOTES_FILE" ]]; then
@@ -95,7 +135,7 @@ grep -v '^[[:space:]]*#' "$NOTES_TMP" > "$NOTES_TMP.clean" || true
 mv "$NOTES_TMP.clean" "$NOTES_TMP"
 NOTES_FINAL="$(cat "$NOTES_TMP")"
 if [[ -n "$COMMITS" ]]; then
-    [[ -n "$(tr -d '[:space:]' < "$NOTES_TMP")" ]] && printf '\n## Изменения\n\n' >> "$NOTES_TMP"
+    [[ -n "$(tr -d '[:space:]' < "$NOTES_TMP")" ]] && printf '\n## 📋 Изменения\n\n' >> "$NOTES_TMP"
     printf '%s\n' "$COMMITS" >> "$NOTES_TMP"
     NOTES_FINAL="$(cat "$NOTES_TMP")"
 fi
