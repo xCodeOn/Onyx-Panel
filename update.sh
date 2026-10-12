@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="2.4.3"
+LOCAL_VERSION="2.5.0"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -302,7 +302,7 @@ if [[ -n "$REPOSITORY" ]]; then
         apt-get -o DPkg::Lock::Timeout=600 update
         apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
     fi
-    if git ls-remote --heads "$REPOSITORY" >/dev/null 2>&1; then
+    if timeout 20 git ls-remote --heads "$REPOSITORY" >/dev/null 2>&1; then
         REMOTE_OK=1
     else
         echo "Repository unreachable — updating from the local package instead."
@@ -311,7 +311,7 @@ if [[ -n "$REPOSITORY" ]]; then
 fi
 if [[ -n "$REPOSITORY" && "$REMOTE_OK" == 1 ]]; then
     if [[ -z "$RELEASE_REF" ]]; then
-        RELEASE_REF="$(git ls-remote --tags --refs "$REPOSITORY" 'v[0-9]*' |
+        RELEASE_REF="$(timeout 20 git ls-remote --tags --refs "$REPOSITORY" 'v[0-9]*' |
             awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
     fi
     [[ "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] ||

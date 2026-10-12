@@ -37,10 +37,18 @@ else
         fi
         candidates+=("$@")
         for candidate in "${candidates[@]}"; do
-            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15                 --output "$out" "$candidate" && return 0
+            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180                 --output "$out" "$candidate" && return 0
             rm -f "$out"
         done
         return 1
+    }
+    onyx_apt_update_once() {
+        local stamp="${ONYX_APT_STAMP:-/tmp/onyx-apt-updated}"
+        if [[ -f "$stamp" ]] && [[ -z "$(find "$stamp" -mmin +1440 2>/dev/null)" ]]; then
+            return 0
+        fi
+        ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+        touch "$stamp"
     }
     onyx_git_fetch_pinned() {
         local dir="$1" repo="$2" ref="$3" mode="$4" commit="$5"
@@ -202,7 +210,7 @@ fi
 echo "      Preparing AmneziaWG 2.0 / 3.1..."
 AWG_INSTALLED_NOW=0
 if ! command -v ip >/dev/null 2>&1; then
-    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    onyx_apt_update_once
     ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends iproute2
 fi
 if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --version 2>&1 | grep -Fq "$AWG_GO_VERSION"; then
@@ -210,7 +218,7 @@ if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --ver
         install -o root -g root -m 0755 "$AWG_GO_BUNDLED" /usr/local/bin/amneziawg-go
     else
         if ! command -v git >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
-            ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+            onyx_apt_update_once
             ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git build-essential
         fi
         GO_BIN="$(find /opt -maxdepth 3 -type f -path '/opt/go*/bin/go' -print -quit 2>/dev/null || true)"
@@ -223,7 +231,7 @@ if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --ver
             tar -xzf "$AWG_GO_SOURCE_BUNDLED" -C "$AWG_GO_SOURCE" --strip-components=1 --no-same-owner
         else
             if ! command -v git >/dev/null 2>&1; then
-                ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+                onyx_apt_update_once
                 ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
             fi
             onyx_git_fetch_pinned "$AWG_GO_SOURCE" "https://github.com/amnezia-vpn/amneziawg-go.git" \
@@ -244,7 +252,7 @@ if [[ ! -x /usr/local/bin/awg ]] || ! /usr/local/bin/awg --version 2>&1 | grep -
         install -o root -g root -m 0755 "$AWG_QUICK_BUNDLED" /usr/local/bin/awg-quick
     else
         if ! command -v unzip >/dev/null 2>&1; then
-            ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+            onyx_apt_update_once
             ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends unzip
         fi
         AWG_TOOLS_ARCHIVE="$(mktemp /tmp/onyx-awg-tools.XXXXXX.zip)"
@@ -374,7 +382,7 @@ chmod 0644 /etc/systemd/system/caddy.service.d/tproxy.conf
 
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v qrencode >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v xz >/dev/null 2>&1; then
-    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    onyx_apt_update_once
     ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends qrencode unzip xz-utils
 fi
 
@@ -424,7 +432,7 @@ elif [[ ! -x "$XRAY_BIN" ]] || ! "$XRAY_BIN" version 2>/dev/null | grep -q "${XR
     echo "${XRAY_SHA256}  ${XRAY_ARCHIVE}" | sha256sum -c - >/dev/null || die "Xray checksum verification failed."
     unzip -q "$XRAY_ARCHIVE" xray -d "$XRAY_UNPACK"
     install -o root -g root -m 0755 "$XRAY_UNPACK/xray" "$XRAY_BIN"
-    rm -f "$XRAY_ARCHIVE"
+    XRAY_ARCHIVE_KEPT="$XRAY_ARCHIVE"
     rm -rf "$XRAY_UNPACK"
     printf '%s\n' "v${XRAY_VERSION}" > "${XRAY_ROOT}/version"
     chmod 0644 "${XRAY_ROOT}/version"
@@ -438,6 +446,10 @@ GEO_ZIPPED=0
 if [[ -s "${BASE}/assets/Xray-linux-64.zip" ]]; then
     echo "      Using geo databases included with this release."
     unzip -q -o "${BASE}/assets/Xray-linux-64.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
+elif [[ -n "${XRAY_ARCHIVE_KEPT:-}" && -s "$XRAY_ARCHIVE_KEPT" ]]; then
+    echo "      Using geo databases from the downloaded Xray archive."
+    unzip -q -o "$XRAY_ARCHIVE_KEPT" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
+    rm -f "$XRAY_ARCHIVE_KEPT"
 else
     onyx_fetch "$XRAY_GEO_TMP/geo.zip" \
         "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
@@ -2567,6 +2579,9 @@ def refresh_nodes_live():
         with NODES_LIVE_LOCK:
             NODES_LIVE["fetching"]=False
 
+_CLIENTS_STATE_CACHE={"ts":0.0,"lang":"","body":b""}
+
+
 def nodes_live(max_age=10):
     """Cached node snapshots; a background refresh runs at most every max_age seconds."""
     with NODES_LIVE_LOCK:
@@ -2733,14 +2748,33 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,*a): pass
     def send_html(self,s,code=200):
         s=i18n.document(s)
-        b=s.encode(); self.send_response(code); self.send_header("Content-Type","text/html; charset=utf-8"); self.send_header("Content-Length",str(len(b))); self.send_header("Cache-Control","no-store"); self.send_header("X-Frame-Options","DENY"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer")
+        b=s.encode()
+        if len(b)>2048 and "gzip" in (self.headers.get("Accept-Encoding","") or ""):
+            try:
+                import gzip as _gzip
+                zipped=_gzip.compress(b,compresslevel=6)
+                if len(zipped)<len(b): b=zipped; self._gzip_out=True
+            except Exception: self._gzip_out=False
+        else: self._gzip_out=False
+        self.send_response(code)
+        if getattr(self,"_gzip_out",False): self.send_header("Content-Encoding","gzip")
+        self.send_header("Vary","Accept-Encoding"); self.send_header("Content-Type","text/html; charset=utf-8"); self.send_header("Content-Length",str(len(b))); self.send_header("Cache-Control","no-store"); self.send_header("X-Frame-Options","DENY"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer")
         # srcdoc is inline content. Deny network frame navigations as well as
         # requests from within the sandbox, including location/meta refresh.
         self.send_header("Content-Security-Policy","default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; worker-src 'self'")
         self.end_headers(); self.wfile.write(b)
     def send_data(self,body,code=200,mime="text/plain; charset=utf-8",headers=None):
         raw=body.encode("utf-8")
+        encoding=None
+        if len(raw)>2048 and "gzip" in (self.headers.get("Accept-Encoding","") or ""):
+            try:
+                import gzip as _gzip
+                zipped=_gzip.compress(raw,compresslevel=6)
+                if len(zipped)<len(raw): raw=zipped; encoding="gzip"
+            except Exception: pass
         self.send_response(code)
+        if encoding: self.send_header("Content-Encoding",encoding)
+        self.send_header("Vary","Accept-Encoding")
         self.send_header("Content-Type",mime)
         self.send_header("Content-Length",str(len(raw)))
         self.send_header("Cache-Control","no-store, private")
@@ -2760,7 +2794,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_svg(self,b):
         self.send_response(200); self.send_header("Content-Type","image/svg+xml"); self.send_header("Cache-Control","public, max-age=604800, immutable"); self.send_header("Content-Length",str(len(b))); self.send_header("X-Content-Type-Options","nosniff"); self.end_headers(); self.wfile.write(b)
     def redirect(self,p):
-        self.send_response(303); self.send_header("Location",PANEL_PATH+p if p.startswith("/") else p); self.end_headers()
+        self.send_response(303); self.send_header("Location",PANEL_PATH+p if p.startswith("/") else p); self.send_header("Content-Length","0"); self.end_headers()
     def form(self,max_bytes=MAX_HTML_BYTES*3+8192):
         try: n=int(self.headers.get("Content-Length","0"))
         except ValueError: n=0
@@ -3118,6 +3152,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path==PANEL_PATH+'/clients-state':
+            try:
+                _cc=_CLIENTS_STATE_CACHE; _now=time.time()
+                if _cc["body"] and _now-_cc["ts"]<5.0 and _cc["lang"]==i18n.lang():
+                    self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(_cc["body"]))); self.send_header("Cache-Control","no-store, private"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer"); self.end_headers(); self.wfile.write(_cc["body"]); return
+            except Exception: pass
             profiles=[{'id':'primary','name':'Основной WEB Proxy','secret':primary(),'protocol':'web','enabled':True,'backend_port':443}]+users()
             nodes_live()
             records=client_records(subscription_registry(),profiles,traffic(),DOMAIN,proxy_link,node_summary=nodes_client_summary())
@@ -3142,7 +3181,12 @@ class Handler(BaseHTTPRequestHandler):
                     client['month_used']=onyx_limits.usage_for(client['id'],onyx_limits.load_bases(LIMITS_FILE),traffic(),ids)
                 spark=sparkline_for(client['id'],history_points)
                 if spark: client['spark']=spark
-            self.send_json({'clients':clients})
+            _payload={'clients':clients}
+            if i18n.lang()=="en": _payload=i18n.walk(_payload)
+            _raw=json.dumps(_payload,ensure_ascii=True).encode()
+            try: _CLIENTS_STATE_CACHE.update(ts=time.time(),lang=i18n.lang(),body=_raw)
+            except Exception: pass
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(_raw))); self.send_header("Cache-Control","no-store, private"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer"); self.end_headers(); self.wfile.write(_raw)
             return
 
         if path==PANEL_PATH+"/users":

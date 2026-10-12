@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.4.3')}"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.5.0')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -44,10 +44,18 @@ else
         fi
         candidates+=("$@")
         for candidate in "${candidates[@]}"; do
-            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15                 --output "$out" "$candidate" && return 0
+            curl --fail --silent --show-error --location                 --proto '=https' --proto-redir '=https' --tlsv1.2                 --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180                 --output "$out" "$candidate" && return 0
             rm -f "$out"
         done
         return 1
+    }
+    onyx_apt_update_once() {
+        local stamp="${ONYX_APT_STAMP:-/tmp/onyx-apt-updated}"
+        if [[ -f "$stamp" ]] && [[ -z "$(find "$stamp" -mmin +1440 2>/dev/null)" ]]; then
+            return 0
+        fi
+        ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+        touch "$stamp"
     }
     onyx_git_fetch_pinned() {
         local dir="$1" repo="$2" ref="$3" mode="$4" commit="$5"
@@ -278,7 +286,7 @@ echo
 echo "      Preparing primary secret..."
 command -v openssl >/dev/null 2>&1 || {
     export DEBIAN_FRONTEND=noninteractive
-    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    onyx_apt_update_once
     ui_run_with_progress "Установка openssl" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends openssl
 }
 SECRET="$(cat /etc/onyx-panel/primary-secret 2>/dev/null || true)"
@@ -322,7 +330,7 @@ esac
 echo
 ui_stage "Установка зависимостей"
 export DEBIAN_FRONTEND=noninteractive
-ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+onyx_apt_update_once
 ui_run_with_progress "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
     ca-certificates curl git openssl dnsutils nftables \
     build-essential libssl-dev util-linux zlib1g-dev

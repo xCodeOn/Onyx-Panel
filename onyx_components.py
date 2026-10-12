@@ -208,6 +208,7 @@ def catalog(force=False):
 
 
 _VERIFY_CACHE = {}
+_CURRENT_CACHE = {}
 
 
 def _asset_url(component, tag):
@@ -250,7 +251,13 @@ def verify(component, tag):
 
 def status():
     state = read_state(STATUS)
-    state["current"] = {name: _current(name) for name in SPECS}
+    now = time.time()
+    cached = _CURRENT_CACHE.get("current")
+    if cached is None or now - _CURRENT_CACHE.get("ts", 0.0) > 60.0:
+        cached = {name: _current(name) for name in SPECS}
+        _CURRENT_CACHE["current"] = cached
+        _CURRENT_CACHE["ts"] = now
+    state["current"] = cached
     return state
 
 

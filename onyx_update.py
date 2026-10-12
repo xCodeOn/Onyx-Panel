@@ -20,6 +20,10 @@ UNIT = 'onyx-panel-web-update.service'
 # атомарно через os.replace, поэтому процессов достаточно даже без файлового лока.
 _NOTES_LOCK = threading.RLock()
 _ANNOUNCE_LOCK = threading.Lock()
+_STATUS_CACHE = {"ts": 0.0, "data": None}
+_STATUS_TTL = 10.0
+_NOTES_CACHE = {}
+_NOTES_TTL = 3600.0
 # Onyx Panel ships self-contained: the updater normally reinstalls from the
 # package already unpacked on this server. Set ONYX_UPDATE_REPOSITORY to check
 # and pull releases from your own Git repository instead.
@@ -78,7 +82,9 @@ def unit_running():
     return r.stdout.strip() in ('active', 'activating', 'reloading')
 
 
-def get_status():
+def get_status(_cached=True):
+    if _cached and _STATUS_CACHE["data"] is not None and time.time() - _STATUS_CACHE["ts"] < _STATUS_TTL:
+        return dict(_STATUS_CACHE["data"])
     data = read_state(STATUS)
     # A killed/rebooted updater cannot remain "running" forever in the UI.
     if data.get('phase') in ('running', 'queued') and time.time() - data.get('started', 0) > 60:
@@ -104,6 +110,8 @@ def get_status():
     data['current'] = current_version()
     data['available'] = newer(data.get('latest', ''), data['current'])
     data['can_install'] = bool(data.get('releases'))
+    _STATUS_CACHE["ts"] = time.time()
+    _STATUS_CACHE["data"] = dict(data)
     # Объявление версии тянет GitHub и переписывает notes: не параллелим его по
     # потокам и не даём сбить выдачу статуса — сломанный announce не должен
     # ронять /update-status, поток дашборда и /notifications с 502.
@@ -208,6 +216,9 @@ def parse_notes(body):
 
 def release_notes(tag):
     """Changelog lines and the release URL from the GitHub release of `tag`."""
+    hit = _NOTES_CACHE.get(str(tag))
+    if hit and time.time() - hit[0] < _NOTES_TTL:
+        return list(hit[1]), hit[2]
     slug = repo_slug()
     if not slug: return [], ''
     try:
@@ -220,7 +231,8 @@ def release_notes(tag):
     except Exception:
         return [], ''
     link = str(data.get('html_url') or f'https://github.com/{slug}/releases/tag/{tag}')
-    return parse_notes(data.get('body')), link
+    _NOTES_CACHE[str(tag)] = (time.time(), parse_notes(data.get('body')), link)
+    return _NOTES_CACHE[str(tag)][1], link
 
 
 def announce_finished(data):
@@ -275,7 +287,8 @@ def _lock(blocking=False):
 
 def check_release():
     with _lock():
-        state = get_status()
+        _STATUS_CACHE["ts"] = 0.0
+        state = get_status(_cached=False)
         if state.get('phase') in ('running', 'queued'): return state
         if time.time() - state.get('checked', 0) < 60: return state
         if not REPO:
@@ -301,7 +314,7 @@ def check_release():
             prune_available()
             if newer(latest, current_version()): add_note('available', latest)
             atomic_json(STATUS, state)
-            return get_status()
+            return get_status(_cached=False)
         env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0'}
         try:
             r = subprocess.run(['git', 'ls-remote', '--tags', '--refs', REPO, 'v[0-9]*'], capture_output=True, text=True, timeout=20, env=env)
@@ -328,12 +341,13 @@ def check_release():
         except (OSError, subprocess.TimeoutExpired):
             raise ValueError('Не удалось проверить репозиторий. Повторите позже.')
         atomic_json(STATUS, state)
-        return get_status()
+        return get_status(_cached=False)
 
 
 def start_update(target=''):
     with _lock():
-        state = get_status()
+        _STATUS_CACHE["ts"] = 0.0
+        state = get_status(_cached=False)
         if state.get('phase') in ('running', 'queued') or unit_running():
             raise ValueError('Обновление уже выполняется.')
         releases=state.get('releases',[])
@@ -347,10 +361,12 @@ def start_update(target=''):
         state.update(phase='queued', target=target, started=int(time.time()),
                      message=action+' запускается. Панель временно отключится.')
         atomic_json(STATUS, state)
+        _STATUS_CACHE["ts"] = 0.0
         r = subprocess.run(['systemctl', 'start', '--no-block', UNIT], capture_output=True, text=True, timeout=10)
         if r.returncode:
             state.update(phase='failed', message='Не удалось запустить службу обновления.')
             atomic_json(STATUS, state)
+            _STATUS_CACHE["ts"] = 0.0
             raise ValueError(state['message'])
         return state
 

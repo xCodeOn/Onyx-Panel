@@ -296,7 +296,7 @@ onyx_fetch() {
     for candidate in "${candidates[@]}"; do
         if curl --fail --silent --show-error --location \
             --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 2 --retry-all-errors --connect-timeout 15 \
+            --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180 \
             --output "$out" "$candidate"; then
             return 0
         fi
@@ -304,6 +304,16 @@ onyx_fetch() {
     done
     ui_err "Не удалось скачать: $url — GitHub и зеркала недоступны."
     return 1
+}
+
+onyx_apt_update_once() {
+    # apt-get update at most once per day across install stages.
+    local stamp="${ONYX_APT_STAMP:-/tmp/onyx-apt-updated}"
+    if [[ -f "$stamp" ]] && [[ -z "$(find "$stamp" -mmin +1440 2>/dev/null)" ]]; then
+        return 0
+    fi
+    ui_run_with_progress "Обновление списка пакетов" apt-get -o DPkg::Lock::Timeout=600 update
+    touch "$stamp"
 }
 
 onyx_git_fetch_pinned() {
@@ -388,7 +398,7 @@ if [[ -n "$out" && -n "$url" && "$url" == *github.com/* ]]; then
     for m in ${ONYX_GH_MIRRORS:-}; do
         "$REAL_CURL" --fail --silent --show-error --location \
             --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 2 --retry-all-errors --connect-timeout 15 \
+            --retry 2 --retry-all-errors --connect-timeout 15 --max-time 180 \
             --output "$out" "${m%/}/${url}" && exit 0
     done
 fi
