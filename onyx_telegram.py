@@ -14,15 +14,24 @@ import urllib.request
 
 API = "https://api.telegram.org/bot%s/%s"
 TIMEOUT = 15
-EVENT_KEYS = ("expiry", "logins", "cascades", "backups", "openflux", "alerts", "limits")
+EVENT_KEYS = ("expiry", "logins", "cascades", "backups", "openflux", "alerts", "limits", "nodes")
+QUIET_CRITICAL = ("alerts",)
 
 
 def normalize_config(data):
     data = data if isinstance(data, dict) else {}
     events = data.get("events") if isinstance(data.get("events"), dict) else {}
+    quiet = data.get("quiet") if isinstance(data.get("quiet"), dict) else {}
+    try:
+        quiet_from, quiet_to = int(quiet.get("from", 0)), int(quiet.get("to", 0))
+    except (TypeError, ValueError):
+        quiet_from, quiet_to = 0, 0
     return {"token": str(data.get("token") or "").strip(),
             "chat": str(data.get("chat") or "").strip(),
-            "events": {key: bool(events.get(key, True)) for key in EVENT_KEYS}}
+            "events": {key: bool(events.get(key, True)) for key in EVENT_KEYS},
+            "quiet": {"enabled": bool(quiet.get("enabled", False)),
+                      "from": max(0, min(23, quiet_from)),
+                      "to": max(0, min(23, quiet_to))}}
 
 
 def configured(cfg):
@@ -66,6 +75,23 @@ def send_document(token, chat, filename, data):
     body = b"".join(parts)
     return _post(token, "sendDocument", body,
                  {"Content-Type": "multipart/form-data; boundary=" + boundary})
+
+
+def quiet_active(cfg, now_ts=None):
+    """True when quiet hours mute non-critical notifications right now."""
+    quiet = cfg.get("quiet") if isinstance(cfg, dict) else None
+    if not isinstance(quiet, dict) or not quiet.get("enabled"):
+        return False
+    try:
+        start, end = int(quiet.get("from", 0)), int(quiet.get("to", 0))
+    except (TypeError, ValueError):
+        return False
+    if start == end:
+        return False
+    hour = time.localtime(now_ts).tm_hour if now_ts else time.localtime().tm_hour
+    if start > end:
+        return hour >= start or hour < end
+    return start <= hour < end
 
 
 def notify(cfg, event, text):

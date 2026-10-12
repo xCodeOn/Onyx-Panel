@@ -1736,6 +1736,9 @@ if ! cmp -s "$SOURCE_KEY" "$DEST_KEY" 2>/dev/null; then
 fi
 if [[ "$changed" == 1 ]] && systemctl is-active --quiet onyx-panel-xray.service; then
     [[ "$MODE" == "sync" ]] || echo "Applying the renewed certificate to Hysteria2..."
+    if [[ -x /opt/onyx-panel/xray/xray && -s /etc/onyx-panel-xray/config.json ]]; then
+        /opt/onyx-panel/xray/xray run -test -config /etc/onyx-panel-xray/config.json >/dev/null 2>&1 || { echo "Xray config check failed, not restarting" >&2; exit 1; }
+    fi
     timeout 45 systemctl try-restart onyx-panel-xray.service || {
         echo "Xray did not restart within 45 seconds" >&2
         exit 1
@@ -1833,7 +1836,7 @@ from concurrent.futures import ThreadPoolExecutor
 from onyx_subscriptions import PREFIX as SUB_PREFIX
 from onyx_panel_extras import preview_document
 import onyx_i18n as i18n
-from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, spark_svg, settings_extras, card_expand, duration, limit_bar
+from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, status_page_html, spark_svg, settings_extras, card_expand, duration, limit_bar
 import onyx_metrics as server_metrics
 import onyx_update as web_updates
 import onyx_webpush as web_push
@@ -3112,6 +3115,16 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/onyx-invite/"):
             # Публичная страница приглашения: без сессии, но с проверкой токена.
             invite_public(self,path[len("/onyx-invite/"):]); return
+        if path in ("/onyx-status", "/onyx-status/"):
+            # Публичная страница статуса: жива ли панель и сколько нод онлайн.
+            try:
+                live=nodes_live()
+                peers=live.get("nodes",[]) if isinstance(live.get("nodes",[]),list) else []
+                up=sum(1 for s in peers if isinstance(s,dict) and s.get("online"))
+                self.send_html(status_page_html(up,len(peers)))
+            except Exception:
+                self.send_data("Статус временно недоступен.",503)
+            return
         if path==PANEL_PATH+"/gdrive-callback":
             code=parse_qs(urlparse(self.path).query).get("code",[""])[0]
             error=parse_qs(urlparse(self.path).query).get("error",[""])[0]
@@ -3234,7 +3247,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not uid or uid=="primary" or u.get("subscription_id"): continue
                 _limit_entry(uid,[uid])
             invites_state=[i for i in load().get("invites",[]) if isinstance(i,dict)]
-            body=users_ui(subs_state,profiles,traffic(),PANEL_PATH,DOMAIN,self.csrf(),proxy_link,openflux.profile_states(),load().get("expires",{}),node_summary=nodes_client_summary(),warp_ready=warp_api.configured(warp_state),warp_ids=set(warp_state.get("users",[])),reality_link=reality_link,limit_info=limit_info,limit_data=limit_data,sparks=sparks,invites=invites_state)
+            body=users_ui(subs_state,profiles,traffic(),PANEL_PATH,DOMAIN,self.csrf(),proxy_link,openflux.profile_states(),load().get("expires",{}),node_summary=nodes_client_summary(),warp_ready=warp_api.configured(warp_state),warp_ids=set(warp_state.get("users",[])),reality_link=reality_link,limit_info=limit_info,limit_data=limit_data,sparks=sparks,invites=invites_state,plans=load().get("plans",[]),trial=load().get("trial",{}))
             self.send_html(layout("Клиенты",body,"users",self.csrf())); return
         if path==PANEL_PATH+"/nodes":
             body=nodes_ui([node_api.public_node(n) for n in node_api.load_nodes(NODES_FILE)],
@@ -3351,11 +3364,19 @@ class Handler(BaseHTTPRequestHandler):
             # пользователи. Фрагменты собираются на сервере, чтобы JS просто
             # подставлял готовый безопасный HTML.
             live=nodes_live()
+            _up_now=int(time.time())
+            _up_points=[p for p in read_private(NODES_TRAFFIC_FILE).get("points",[]) if isinstance(p,dict) and _up_now-p.get("time",0)<86400]
+            _up_total=len(_up_points) or 1
+            _up_counts={}
+            for _p in _up_points:
+                for _n in (_p.get("nodes") or []):
+                    if isinstance(_n,dict) and _n.get("id"): _up_counts[_n["id"]]=_up_counts.get(_n["id"],0)+1
+            _uptime={k:round(v*100/_up_total) for k,v in _up_counts.items()}
             self.send_json({"ok":True,"age":live.get("age"),
                             "nodes":[{"id":s.get("id",""),"enabled":bool(s.get("enabled",True)),
                                       "online":bool(s.get("online")),"outdated":bool(s.get("outdated")),
                                       "version":str(s.get("version","") or ""),
-                                      "html":nodes_live_block(s,PANEL_PATH)}
+                                      "html":nodes_live_block(s,PANEL_PATH,_uptime.get(s.get("id","")))}
                                      for s in live.get("nodes",[])]}); return
         if path==PANEL_PATH+"/openflux-mailru-status":
             self.send_json(openflux.mailru_status()); return
@@ -3372,6 +3393,13 @@ class Handler(BaseHTTPRequestHandler):
             sub=next((s for s in subscription_registry() if s["id"]==sid),None)
             if sub is None: self.send_html("Not found",404); return
             try: self.send_png(qr_png_bytes("https://"+DOMAIN+SUB_PREFIX+sub["token"]))
+            except (OSError,subprocess.SubprocessError): self.send_json({'message':'Не удалось сформировать QR. Проверьте qrencode на сервере.'},503)
+            return
+        if path==PANEL_PATH+"/invite-qr":
+            iid=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            inv=next((i for i in invites_registry() if i.get("id")==iid),None)
+            if inv is None: self.send_html("Not found",404); return
+            try: self.send_png(qr_png_bytes("https://"+DOMAIN+"/onyx-invite/"+str(inv.get("token",""))))
             except (OSError,subprocess.SubprocessError): self.send_json({'message':'Не удалось сформировать QR. Проверьте qrencode на сервере.'},503)
             return
 
@@ -3436,7 +3464,7 @@ class Handler(BaseHTTPRequestHandler):
             api_keys=onyx_webapi.public_keys(d.get("api_keys"))
             logins=onyx_access.last_logins(d,60)
             hour_options=''.join(f'<option value="{h}" {"selected" if int(backups_cfg.get("hour",4))==h else ""}>{h:02d}:00</option>' for h in range(24))
-            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"))
+            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"),("nodes","Ноды: падения и возвраты"))
             event_checks=''.join(f'<label class="choice-card"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}><span><strong>{label}</strong></span></label>' for key,label in event_labels)
             last_backup=backups_cfg.get("last") if isinstance(backups_cfg.get("last"),dict) else {}
             backup_status=("Последний: %s — %s."%(time.strftime("%d.%m.%Y %H:%M",time.localtime(last_backup.get("ts",0))),last_backup.get("message",""))) if last_backup.get("ts") else "Копий пока не было."
@@ -3454,8 +3482,17 @@ class Handler(BaseHTTPRequestHandler):
             extra_cards2=settings_extras(PANEL_PATH,token,extra_data)
             tg_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Уведомления Telegram</h2><p>Истечение доступов, входы, каскады и автобэкапы — в ваш чат</p></div>{card_expand()}</div>
 <div class="card-body">
-<section class="panel-setting"><form id="tgForm" action="{PANEL_PATH}/telegram-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="tgToken">Токен бота</label><input id="tgToken" name="token" value="{esc(tg_cfg.get("token"))}" placeholder="123456:ABC-DEF…" spellcheck="false" autocomplete="off"></div><div><label for="tgChat">Chat ID</label><input id="tgChat" name="chat" value="{esc(tg_cfg.get("chat"))}" placeholder="123456789 или @channel" spellcheck="false" autocomplete="off"></div></div><div class="checks choice-grid">{event_checks}</div><div class="actions"><button type="submit" class="btn primary" name="action" value="save">Сохранить</button><button type="submit" class="btn" name="action" value="test">Проверить</button></div><p class="panel-setting-status" id="tgStatus" role="status"></p></form></section>
+<section class="panel-setting"><form id="tgForm" action="{PANEL_PATH}/telegram-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="tgToken">Токен бота</label><input id="tgToken" name="token" value="{esc(tg_cfg.get("token"))}" placeholder="123456:ABC-DEF…" spellcheck="false" autocomplete="off"></div><div><label for="tgChat">Chat ID</label><input id="tgChat" name="chat" value="{esc(tg_cfg.get("chat"))}" placeholder="123456789 или @channel" spellcheck="false" autocomplete="off"></div></div><div class="checks choice-grid">{event_checks}</div><div class="admin-access-grid"><div><label class="check"><input type="checkbox" name="quiet_enabled" value="1" {"checked" if tg_cfg.get("quiet",{}).get("enabled") else ""}>Тихие часы (только аварии)</label></div><div style="display:flex;gap:8px"><div><label for="quietFrom">С</label><input id="quietFrom" name="quiet_from" type="number" min="0" max="23" value="{int(tg_cfg.get("quiet",{}).get("from",23))}"></div><div><label for="quietTo">До</label><input id="quietTo" name="quiet_to" type="number" min="0" max="23" value="{int(tg_cfg.get("quiet",{}).get("to",7))}"></div></div></div><div class="actions"><button type="submit" class="btn primary" name="action" value="save">Сохранить</button><button type="submit" class="btn" name="action" value="test">Проверить</button></div><p class="panel-setting-status" id="tgStatus" role="status"></p></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Автобэкап по расписанию</b><small>Раз в сутки архив с настройками и клиентами уходит в Telegram (если настроен) и хранится локально в /var/lib/onyx-panel/backups. {esc(backup_status)}</small></div><form id="backupForm" action="{PANEL_PATH}/backups-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="backupMode">Режим</label><select id="backupMode" name="mode"><option value="off" {"selected" if backups_cfg.get("mode","off")=="off" else ""}>Выключен</option><option value="telegram" {"selected" if backups_cfg.get("mode")=="telegram" else ""}>Ежедневно</option></select></div><div><label for="backupHour">Время</label><select id="backupHour" name="hour">{hour_options}</select></div><div><label for="backupKeep">Хранить копий</label><input id="backupKeep" name="keep" type="number" min="3" max="30" value="{int(backups_cfg.get("keep",7))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить расписание</button></div><p class="panel-setting-status" id="backupStatus" role="status"></p></form></section>
+</div>
+</div>'''
+            plans_cfg=[p for p in (d.get("plans") or []) if isinstance(p,dict)]
+            trial_cfg=d.get("trial") if isinstance(d.get("trial"),dict) else {}
+            plan_rows=''.join(f'<div class="api-key-row"><b>{esc(p.get("name",""))}</b><span class="muted">{int(p.get("days",30))} дн. · {int(p.get("max_devices",0))} устр. · {" + ".join({"vless":"VLESS","hysteria":"Hysteria2"}.get(x,x) for x in p.get("protocols",[]))}{" · %d ГБ/мес"%int(p.get("limit_gb",0)) if p.get("limit_gb") else ""}</span><form method="post" action="{PANEL_PATH}/plans-save" data-confirm="Удалить тариф?"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(p.get("id",""))}"><button class="danger">Удалить</button></form></div>' for p in plans_cfg) or '<p class="muted" style="font-size:12px;margin:6px 0">Тарифов пока нет.</p>'
+            plans_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Тарифы и триал</h2><p>Готовые наборы для новых клиентов: срок, устройства и лимит в один клик</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Тарифы</b><small>Тариф подставляется в окне создания клиента и задаёт срок, устройства, протоколы и лимит.</small></div><div>{plan_rows}</div><form id="planForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="create"><div class="admin-access-grid"><div><label for="planName">Название</label><input id="planName" name="name" maxlength="80" placeholder="Например, Месяц" required></div><div><label for="planDays">Дней</label><input id="planDays" name="days" type="number" min="1" max="3650" value="30" required></div><div><label for="planDevices">Устройств</label><input id="planDevices" name="max_devices" type="number" min="0" max="20" value="2" required></div><div><label for="planLimit">Лимит, ГБ/мес (0 — без лимита)</label><input id="planLimit" name="limit_gb" type="number" min="0" max="1000000" value="0"></div></div><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label></div><div class="actions"><button type="submit" class="btn primary">Добавить тариф</button></div></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Триал для новых клиентов</b><small>Кнопка «Триал» в окне создания клиента: доступ на несколько дней с одним устройством.</small></div><form id="trialForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="trial"><div class="admin-access-grid"><div><label class="check"><input type="checkbox" name="enabled" value="1" {"checked" if trial_cfg.get("enabled") else ""}>Триал включён</label></div><div><label for="trialDays">Дней</label><input id="trialDays" name="days" type="number" min="1" max="365" value="{int(trial_cfg.get("days",3))}"></div><div><label for="trialDevices">Устройств</label><input id="trialDevices" name="max_devices" type="number" min="0" max="20" value="{int(trial_cfg.get("max_devices",1))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить триал</button></div></form></section>
 </div>
 </div>'''
             security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
@@ -3637,6 +3674,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 <div class="move-overlay" id="moveOverlay" hidden><div class="move-card"><div class="move-ring"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" id="moveRing" cx="50" cy="50" r="44"/></svg><b id="moveSecs">8</b></div><h3>Панель переезжает</h3><p id="moveText">Адрес изменён. Caddy и панель перезапускаются — сейчас откроется новый адрес входа. Войдите на нём заново.</p><code id="moveUrl"></code><a class="btn primary" id="moveLink" href="#">Перейти сейчас</a></div></div>
 </div>
 {tg_card}
+{plans_card}
 {extra_cards2['observe']}
 {extra_cards2['cloud']}
 </div>
@@ -3979,10 +4017,26 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             kind=form.get("kind","")
             if not name or len(name)>80 or any(ord(c)<32 for c in name):
                 create_error("Укажите имя длиной от 1 до 80 символов."); return
+            plan=None
+            plan_id=form.get("plan_id","")
+            if plan_id and kind=="subscription":
+                with STATE_LOCK: plan_data=load()
+                if plan_id=="trial":
+                    trial_cfg=plan_data.get("trial") if isinstance(plan_data.get("trial"),dict) else {}
+                    if trial_cfg.get("enabled"):
+                        plan={"days":int(trial_cfg.get("days",3)),"max_devices":int(trial_cfg.get("max_devices",1)),
+                              "protocols":["vless"],"limit_gb":0}
+                else:
+                    plan=next((p for p in (plan_data.get("plans") or []) if isinstance(p,dict)
+                               and p.get("id")==plan_id and p.get("enabled",True)),None)
             new_id=None
             if kind=="subscription":
-                result=ctl_subscription({"operation":"create","name":name,"max_devices":form.get("max_devices","2"),
-                                         "protocols":[p for p in ("vless","hysteria") if form.get(p)=="1"]})
+                if plan:
+                    result=ctl_subscription({"operation":"create","name":name,"max_devices":plan.get("max_devices",0),
+                                             "protocols":[p for p in ("vless","hysteria") if p in (plan.get("protocols") or [])] or ["vless"]})
+                else:
+                    result=ctl_subscription({"operation":"create","name":name,"max_devices":form.get("max_devices","2"),
+                                             "protocols":[p for p in ("vless","hysteria") if form.get(p)=="1"]})
                 if not result.get("ok"):
                     create_error(result.get("message","Ошибка создания подписки"),int(result.get("status",400))); return
                 new_id=result.get("id")
@@ -4001,8 +4055,12 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     create_error("Не удалось создать подключение. Проверьте службы через SSH и повторите попытку.",503); return
             else:
                 create_error("Неизвестный тип доступа"); return
+            plan_days=int(plan.get("days",0)) if isinstance(plan,dict) else 0
+            if new_id and plan_days>0:
+                with STATE_LOCK:
+                    d=load(); d.setdefault("expires",{})[new_id]=int(time.time())+plan_days*86400; save(d)
             expires_raw=form.get("expires","").strip()
-            if new_id and expires_raw:
+            if new_id and not plan_days and expires_raw:
                 try:
                     ts=int(time.mktime(time.strptime(expires_raw,"%Y-%m-%d")))+86399
                     if ts>time.time():
@@ -4013,7 +4071,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             if new_id:
                 limit_note=""
                 try:
-                    limit_gb=onyx_limits.validate(form.get("limit_gb","0"))
+                    limit_gb=int(plan.get("limit_gb",0)) if isinstance(plan,dict) and plan.get("limit_gb") else onyx_limits.validate(form.get("limit_gb","0"))
                     if limit_gb:
                         with STATE_LOCK:
                             d=load(); d.setdefault("traffic_limits",{})[new_id]=limit_gb; save(d)
@@ -4548,7 +4606,8 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
         if path==PANEL_PATH+"/telegram-save":
             try:
                 cfg=telegram_api.normalize_config({"token":form.get("token","").strip(),"chat":form.get("chat","").strip(),
-                     "events":{k:form.get("event_"+k)=="1" for k in telegram_api.EVENT_KEYS}})
+                     "events":{k:form.get("event_"+k)=="1" for k in telegram_api.EVENT_KEYS},
+                     "quiet":{"enabled":form.get("quiet_enabled")=="1","from":form.get("quiet_from","23"),"to":form.get("quiet_to","7")}})
                 action=form.get("action","save")
                 if cfg["token"]:
                     if action=="test":
@@ -4953,6 +5012,52 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             if cloud_notes: message="Копия сохранена ("+human_bytes(len(blob))+"). Облака: "+", ".join(cloud_notes)+"."
             self.send_json({"ok":True,"message":message}); return
 
+        if path==PANEL_PATH+"/plans-save":
+            try:
+                op=form.get("operation","")
+                with STATE_LOCK:
+                    d=load()
+                    plans=d.setdefault("plans",[])
+                    if not isinstance(plans,list): plans=[]; d["plans"]=plans
+                    trial=d.setdefault("trial",{})
+                    if not isinstance(trial,dict): trial={}; d["trial"]=trial
+                    if op=="create":
+                        name=form.get("name","").strip()
+                        if not name or len(name)>80 or any(ord(c)<32 for c in name):
+                            raise ValueError("Укажите название тарифа длиной от 1 до 80 символов.")
+                        try: days=int(form.get("days","30"))
+                        except (TypeError,ValueError): raise ValueError("Срок тарифа: число дней от 1 до 3650.")
+                        if not 1<=days<=3650: raise ValueError("Срок тарифа: число дней от 1 до 3650.")
+                        try: devices=int(form.get("max_devices","2"))
+                        except (TypeError,ValueError): raise ValueError("Устройства: число от 0 до 20.")
+                        if not 0<=devices<=20: raise ValueError("Устройства: число от 0 до 20.")
+                        protocols=[p for p in ("vless","hysteria") if form.get(p)=="1"]
+                        if not protocols: raise ValueError("Выберите хотя бы один протокол.")
+                        try: limit_gb=onyx_limits.validate(form.get("limit_gb","0"))
+                        except onyx_limits.LimitError as exc: raise ValueError(str(exc))
+                        if len(plans)>=32: raise ValueError("Слишком много тарифов (максимум 32).")
+                        plans.append({"id":secrets.token_hex(4),"name":name,"days":days,
+                                      "max_devices":devices,"protocols":protocols,"limit_gb":limit_gb,
+                                      "enabled":True,"created_at":int(time.time())})
+                        audit('plans-save',name,"%d дн. · %d устр."%(days,devices))
+                    elif op=="delete":
+                        d["plans"]=[p for p in plans if p.get("id")!=form.get("id","")]
+                        audit('plans-save',form.get("id",""),"тариф удалён")
+                    elif op=="trial":
+                        try: tdays=int(form.get("days","3"))
+                        except (TypeError,ValueError): raise ValueError("Триал: срок числом от 1 до 365 дней.")
+                        if not 1<=tdays<=365: raise ValueError("Триал: срок числом от 1 до 365 дней.")
+                        try: tdev=int(form.get("max_devices","1"))
+                        except (TypeError,ValueError): raise ValueError("Триал: устройства числом от 0 до 20.")
+                        if not 0<=tdev<=20: raise ValueError("Триал: устройства числом от 0 до 20.")
+                        trial.update({"enabled":form.get("enabled")=="1","days":tdays,"max_devices":tdev})
+                        audit('plans-save',"trial","триал: %s, %d дн."%("вкл" if trial["enabled"] else "выкл",tdays))
+                    else:
+                        raise ValueError("Неизвестная операция.")
+                    save(d)
+                self.redirect("/settings"); return
+            except ValueError as exc:
+                self.send_html(esc(str(exc)),400); return
         if path==PANEL_PATH+"/backup-cloud-save":
             targets=form.get('targets','')
             enabled={t:form.get('enable_'+t)=='1' for t in onyx_cloud.TARGETS}
@@ -5118,7 +5223,8 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                             with open("/var/lib/onyx-panel/data.json",encoding="utf-8") as f: tgt_data=json.load(f)
                         except Exception: tgt_data={}
                         for k in ("subscriptions","users","expires","site","max_devices",
-                                  "limit_disabled","failover","pending","op_error","device_secrets"):
+                                  "limit_disabled","failover","pending","op_error","device_secrets",
+                                  "plans","trial"):
                             if k in src_data: tgt_data[k]=src_data[k]
                         restore["panel/data.json"]=json.dumps(tgt_data,ensure_ascii=False).encode("utf-8")
                 dest_map={arc:(phys,0o640 if arc=="onyx-xray/config.json" else 0o600) for arc,phys,_ in BACKUP_FILES}
@@ -5162,7 +5268,12 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     timer=threading.Timer(1.5,_sync_caddy_vless); timer.daemon=True; timer.start()
                 if xray:
                     def _restart_xray():
-                        try: subprocess.run(["systemctl","restart","onyx-panel-xray.service"],capture_output=True,timeout=60)
+                        try:
+                            chk=subprocess.run([XRAY_BIN,"run","-test","-config","/etc/onyx-panel-xray/config.json"],capture_output=True,timeout=60)
+                            if chk.returncode:
+                                print("imported xray config failed check, restart skipped:",chk.stderr.decode("utf-8","replace")[-300:],file=sys.stderr,flush=True)
+                                return
+                            subprocess.run(["systemctl","restart","onyx-panel-xray.service"],capture_output=True,timeout=60)
                         except Exception: pass
                     timer=threading.Timer(1.0,_restart_xray); timer.daemon=True; timer.start()
             if cross_domain:
@@ -5499,22 +5610,30 @@ def expiry_sweep():
             if not pending: continue
             subs={s.get("id"):s for s in subscription_registry()}
             profiles={u.get("id"):u for u in users()}
+            names={s.get("id"):s.get("name",s.get("id")) for s in subscription_registry()}
+            names.update({u.get("id"):u.get("name",u.get("id")) for u in users()})
+            turned_off=[]
             for uid,ts in pending.items():
-                s=subs.get(uid)
-                if s is not None:
-                    if s.get("enabled",True):
-                        try:
-                            if ctl_subscription({"id":uid,"operation":"set-enabled","enabled":False}).get("ok"):
-                                purge_remote_profiles_async(s)
-                                print("access expired, disabled:",uid,file=sys.stderr,flush=True)
-                        except Exception:
-                            print("expiry disable failed:",uid,file=sys.stderr,flush=True)
-                else:
-                    u=profiles.get(uid)
-                    if u is not None and u.get("enabled",True):
-                        try: ctl("set-user",uid,"0")
-                        except Exception:
-                            print("expiry disable failed:",uid,file=sys.stderr,flush=True)
+                    s=subs.get(uid)
+                    if s is not None:
+                        if s.get("enabled",True):
+                            try:
+                                if ctl_subscription({"id":uid,"operation":"set-enabled","enabled":False}).get("ok"):
+                                    purge_remote_profiles_async(s)
+                                    turned_off.append(names.get(uid,uid))
+                                    print("access expired, disabled:",uid,file=sys.stderr,flush=True)
+                            except Exception:
+                                print("expiry disable failed:",uid,file=sys.stderr,flush=True)
+                    else:
+                        u=profiles.get(uid)
+                        if u is not None and u.get("enabled",True):
+                            try:
+                                ctl("set-user",uid,"0")
+                                turned_off.append(names.get(uid,uid))
+                            except Exception:
+                                print("expiry disable failed:",uid,file=sys.stderr,flush=True)
+            if turned_off:
+                threading.Thread(target=telegram_notify,args=("expiry","⛔ Доступ отключён (истёк срок):\n"+"\n".join("• "+str(n) for n in turned_off)),daemon=True).start()
                 if s is None and uid not in profiles:
                     with STATE_LOCK:
                         d=load()
@@ -5527,6 +5646,9 @@ def telegram_notify(event,text):
     """Fire-and-forget Telegram delivery; never raises into the caller."""
     try:
         with STATE_LOCK: cfg=telegram_api.normalize_config(load().get("telegram",{}))
+        if telegram_api.quiet_active(cfg) and event not in telegram_api.QUIET_CRITICAL:
+            print("telegram muted by quiet hours:",event,file=sys.stderr,flush=True)
+            return
         if telegram_api.configured(cfg): telegram_api.notify(cfg,event,text)
     except Exception as exc:
         print("telegram notify failed:",type(exc).__name__,file=sys.stderr,flush=True)
@@ -5666,6 +5788,97 @@ def failover_worker():
         except Exception as exc:
             print("failover worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
 
+def nodes_watch():
+    """Node online transitions -> bell + Telegram, once per transition."""
+    try:
+        live = nodes_live()
+    except Exception:
+        return
+    states = {}
+    for s in live.get("nodes", []):
+        nid = str(s.get("id", ""))
+        if nid:
+            states[nid] = (bool(s.get("online")),
+                           str(s.get("location") or s.get("url") or nid),
+                           str(s.get("error") or ""))
+    try:
+        with STATE_LOCK:
+            d = load()
+        marks = d.get("node_marks") if isinstance(d.get("node_marks"), dict) else {}
+        changed = False
+        for nid, (online, label, err) in states.items():
+            prev = (marks.get(nid) or {}).get("online")
+            if prev is None:
+                marks[nid] = {"online": online}
+                changed = True
+                continue
+            if prev and not online:
+                marks[nid] = {"online": False}
+                changed = True
+                bell_note("node", "down:" + nid, ["down"])
+                text = "🔴 Нода недоступна: %s" % label
+                if err:
+                    text += " — " + err[:160]
+                threading.Thread(target=telegram_notify, args=("nodes", text), daemon=True).start()
+            elif not prev and online:
+                marks[nid] = {"online": True}
+                changed = True
+                bell_note("node", "up:" + nid, ["up"])
+                threading.Thread(target=telegram_notify, args=("nodes", "🟢 Нода вернулась: %s" % label), daemon=True).start()
+        for nid in list(marks):
+            if nid not in states:
+                marks.pop(nid, None)
+                changed = True
+        if changed:
+            with STATE_LOCK:
+                d = load()
+                d["node_marks"] = marks
+                save(d)
+    except Exception as exc:
+        print("nodes watch failed:", type(exc).__name__, file=sys.stderr, flush=True)
+
+
+def cert_watch():
+    """Warn once a day when the panel domain cert expires within 14 days."""
+    try:
+        domain = str(DOMAIN or "").strip().lower()
+    except NameError:
+        return
+    if not domain:
+        return
+    today = time.strftime("%Y-%m-%d")
+    try:
+        with STATE_LOCK:
+            d = load()
+        mark = d.get("cert_mark") if isinstance(d.get("cert_mark"), dict) else {}
+        if mark.get("day") == today:
+            return
+        import datetime as _dt
+        import socket as _socket
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        with _socket.create_connection(("127.0.0.1", 443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=domain) as tls:
+                cert = tls.getpeercert()
+        exp = _dt.datetime.strptime(str(cert.get("notAfter", "")), "%b %d %H:%M:%S %Y %Z")
+        days = (exp - _dt.datetime.utcnow()).days
+        with STATE_LOCK:
+            d = load()
+            if days > 14:
+                if "cert_mark" in d:
+                    d.pop("cert_mark", None)
+                    save(d)
+                return
+            d["cert_mark"] = {"day": today, "days": days}
+            save(d)
+        bell_note("alert", "cert:" + today, ["cert"])
+        threading.Thread(target=telegram_notify,
+                         args=("alerts", "🔒 Сертификат %s истекает через %d дн." % (domain, max(days, 0))),
+                         daemon=True).start()
+    except Exception as exc:
+        print("cert watch failed:", type(exc).__name__, file=sys.stderr, flush=True)
+
+
 def bell_note(kind,version,changes):
     try: web_updates.add_note(kind,version,changes=changes)
     except Exception as exc:
@@ -5760,6 +5973,11 @@ def alerts_worker():
     time.sleep(150)
     while True:
         try:
+            # Ноды и сертификат не зависят от включения пороговых алертов.
+            try: nodes_watch()
+            except Exception: pass
+            try: cert_watch()
+            except Exception: pass
             with STATE_LOCK: d=load()
             cfg=d.get("alerts") if isinstance(d.get("alerts"),dict) else {}
             if not cfg.get("enabled"): 
@@ -5913,8 +6131,15 @@ def invite_public(handler,rest):
         sub=next((s for s in subscription_registry()
                   if s.get("enabled") and secrets.compare_digest(s["token"],query["sub"][0])),None)
         claimed_sub=sub
+    qr_b64=""
+    if claimed_sub is not None:
+        try:
+            import base64 as _b64
+            qr_b64=_b64.b64encode(qr_png_bytes("https://"+DOMAIN+"/onyx-sub/"+claimed_sub["token"])).decode("ascii")
+        except Exception:
+            qr_b64=""
     try:
-        handler.send_html(invite_page_html(invite,claimed_sub,domain=DOMAIN,path="/onyx-invite/"+token),200)
+        handler.send_html(invite_page_html(invite,claimed_sub,domain=DOMAIN,path="/onyx-invite/"+token,qr_b64=qr_b64),200)
     except Exception:
         handler.send_data("Страница временно недоступна.",503)
 
