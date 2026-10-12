@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.0')}"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.1')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -490,7 +490,14 @@ if [[ -x /usr/local/bin/tproxy-server ]] &&
     echo "      Existing tproxy-server detected; reusing it."
 fi
 
-if [[ -s "$TPROXY_SOURCE_BUNDLED" ]] &&
+TPROXY_CACHE_DIR="/var/lib/onyx-panel/tproxy-source"
+TPROXY_CACHE_SHA="$TPROXY_CACHE_DIR/.onyx-sha256"
+if [[ "$(cat "$TPROXY_CACHE_SHA" 2>/dev/null || true)" == "$TPROXY_SOURCE_SHA256" && -s "$TPROXY_CACHE_DIR/deploy/install-mtproxy.sh" ]]; then
+    echo "      Reusing pinned tproxy-server source from local cache..."
+    rm -rf "$REPO_DIR"
+    mkdir -p "$REPO_DIR"
+    cp -a "$TPROXY_CACHE_DIR/." "$REPO_DIR/"
+elif [[ -s "$TPROXY_SOURCE_BUNDLED" ]] &&
    echo "$TPROXY_SOURCE_SHA256  $TPROXY_SOURCE_BUNDLED" | sha256sum -c - >/dev/null 2>&1; then
     echo "      Extracting pinned tproxy-server release source included with this release..."
     rm -rf "$REPO_DIR"
@@ -514,6 +521,13 @@ else
             grep -Fq 'https://core.telegram.org/getProxyConfig' "$REPO_DIR/deploy/install-mtproxy.sh" ||
             die "Pinned tproxy-server source verification failed."
     fi
+fi
+if [[ "$(cat "$TPROXY_CACHE_SHA" 2>/dev/null || true)" != "$TPROXY_SOURCE_SHA256" || ! -s "$TPROXY_CACHE_DIR/deploy/install-mtproxy.sh" ]]; then
+    rm -rf "$TPROXY_CACHE_DIR"
+    mkdir -p "$TPROXY_CACHE_DIR"
+    cp -a "$REPO_DIR/." "$TPROXY_CACHE_DIR/"
+    printf '%s\n' "$TPROXY_SOURCE_SHA256" > "$TPROXY_CACHE_SHA"
+    chmod 0600 "$TPROXY_CACHE_SHA"
 fi
 cd "$REPO_DIR"
 
