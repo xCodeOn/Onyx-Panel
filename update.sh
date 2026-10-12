@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="2.6.2"
+LOCAL_VERSION="2.6.3"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -52,6 +52,9 @@ else
         return 1
     }
 fi
+# Phase timer: every stage logs its wall-clock cost (see update.log).
+ONYX_PHASE_T0=$(date +%s)
+onyx_phase() { echo "[$(date +%H:%M:%S)] [+$(( $(date +%s) - ONYX_PHASE_T0 ))s] $*"; }
 # The local package is the offline fallback. It must be complete only when the
 # repository cannot provide the files; a reachable repository is the source of
 # truth, and a stale local package must not block the update (the successful
@@ -169,6 +172,7 @@ done
 shopt -u nullglob
 tar --numeric-owner -cpf "$BACKUP/state.tar" "${BACKUP_ITEMS[@]}"
 echo "Backup created: $BACKUP"
+onyx_phase "бэкап готов"
 
 HAD_FIREWALL_SERVICE=0
 [[ -e /etc/systemd/system/onyx-panel-firewall.service ]] && HAD_FIREWALL_SERVICE=1
@@ -360,6 +364,7 @@ else
     cp -a "$LOCAL_SOURCE/." "$TEMP_DIR/source/"
 fi
 [[ -f "$TEMP_DIR/source/install-panel.sh" ]] || die "Update package is incomplete."
+onyx_phase "файлы обновления готовы"
 chmod 0700 "$TEMP_DIR/source/install-panel.sh" "$TEMP_DIR/source/install-final.sh" "$TEMP_DIR/source/install-core.sh"
 
 if [[ "$MIGRATING_LEGACY" == 1 ]]; then
@@ -411,7 +416,9 @@ fi
 # Configuration, users, secrets and public-site files are not replaced.
 if [[ -f "$TEMP_DIR/source/repair-landing-pages.sh" ]]; then
     chmod 0700 "$TEMP_DIR/source/repair-landing-pages.sh"
+    onyx_phase "релей: старт проверки"
     bash "$TEMP_DIR/source/repair-landing-pages.sh"
+    onyx_phase "релей: готово"
 fi
 
 # Resolve the version string before install-panel.sh needs it as
@@ -424,8 +431,11 @@ if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     # New panel bootstrap: install-panel asks for a login and one password,
     # creates the private URL and leaves the old core proxy data in place.
     ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
+    onyx_phase "панель установлена (миграция)"
 else
+    onyx_phase "установка панели: старт"
     ONYX_PANEL_UPDATE=1 ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
+    onyx_phase "панель установлена"
 fi
 install -o root -g root -m 0755 \
     "$TEMP_DIR/source/uninstall-onyx-panel.sh" \
@@ -456,6 +466,7 @@ if [[ ! -s /etc/onyx-panel/caddy-owned ]]; then
 fi
 printf '%s\n' "$UPDATE_VERSION" > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/caddy-owned /etc/onyx-panel/version
+onyx_phase "проверки пройдены"
 UPDATE_COMMITTED=1
 
 # Обновления копят каталоги /root/onyx-panel-update-backup-*: после успеха
