@@ -3492,7 +3492,7 @@ class Handler(BaseHTTPRequestHandler):
             plans_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Тарифы и триал</h2><p>Готовые наборы для новых клиентов: срок, устройства и лимит в один клик</p></div>{card_expand()}</div>
 <div class="card-body">
 <section class="panel-setting"><div class="panel-setting-info"><b>Тарифы</b><small>Тариф подставляется в окне создания клиента и задаёт срок, устройства, протоколы и лимит.</small></div><div>{plan_rows}</div><form id="planForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="create"><div class="admin-access-grid"><div><label for="planName">Название</label><input id="planName" name="name" maxlength="80" placeholder="Например, Месяц" required></div><div><label for="planDays">Дней</label><input id="planDays" name="days" type="number" min="1" max="3650" value="30" required></div><div><label for="planDevices">Устройств</label><input id="planDevices" name="max_devices" type="number" min="0" max="20" value="2" required></div><div><label for="planLimit">Лимит, ГБ/мес (0 — без лимита)</label><input id="planLimit" name="limit_gb" type="number" min="0" max="1000000" value="0"></div></div><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label></div><div class="actions"><button type="submit" class="btn primary">Добавить тариф</button></div></form></section>
-<section class="panel-setting"><div class="panel-setting-info"><b>Триал для новых клиентов</b><small>Кнопка «Триал» в окне создания клиента: доступ на несколько дней с одним устройством.</small></div><form id="trialForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="trial"><div class="admin-access-grid"><div><label class="check"><input type="checkbox" name="enabled" value="1" {"checked" if trial_cfg.get("enabled") else ""}>Триал включён</label></div><div><label for="trialDays">Дней</label><input id="trialDays" name="days" type="number" min="1" max="365" value="{int(trial_cfg.get("days",3))}"></div><div><label for="trialDevices">Устройств</label><input id="trialDevices" name="max_devices" type="number" min="0" max="20" value="{int(trial_cfg.get("max_devices",1))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить триал</button></div></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Триал для новых клиентов</b><small>Кнопка «Триал» в окне создания клиента: доступ на несколько дней с одним устройством.</small></div><form id="trialForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="trial"><label class="check trial-check"><input type="checkbox" name="enabled" value="1" {"checked" if trial_cfg.get("enabled") else ""}>Триал включён</label><div class="admin-access-grid"><div><label for="trialDays">Дней</label><input id="trialDays" name="days" type="number" min="1" max="365" value="{int(trial_cfg.get("days",3))}"></div><div><label for="trialDevices">Устройств</label><input id="trialDevices" name="max_devices" type="number" min="0" max="20" value="{int(trial_cfg.get("max_devices",1))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить триал</button></div></form></section>
 </div>
 </div>'''
             security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
@@ -3676,7 +3676,6 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 {tg_card}
 {plans_card}
 {extra_cards2['observe']}
-{extra_cards2['cloud']}
 </div>
 <div class="settings-col">
 <div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
@@ -3684,6 +3683,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 <form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
 </div>
 </div>
+{extra_cards2['cloud']}
 {security_card}
 {extra_cards2['ports']}
 </div>
