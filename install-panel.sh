@@ -1924,6 +1924,11 @@ ROLE_LOCAL=threading.local()
 # Cascade background jobs serialize on this lock: the manager holds its own
 # exclusive lock during the Xray restart, so parallel jobs would just queue.
 APPLY_LOCK=threading.Lock()
+# Coalesced cascade applies: toggle/users/delete clicks within one window
+# share a single Xray restart instead of queueing a full apply each.
+_CASCADE_APPLY_WINDOW=2.5
+_CASCADE_APPLY={"timer":None,"batch":[]}
+_CASCADE_APPLY_LOCK=threading.Lock()
 LOGIN_LOCK=threading.RLock()
 LOGIN_FAILURES=defaultdict(deque)
 LOGIN_FAILURES_GLOBAL=deque()
@@ -2359,25 +2364,41 @@ def cascade_touch(uid=None,check=None,pending=None,op_error=None,speed=None):
         cascade_api.save_cascades(CASCADES_FILE,cascades)
 
 def cascade_apply_bg(uid,snapshot):
-    """Apply cascade routing in the background; roll the file back on failure.
+    """Queue a cascade apply; rapid calls share one delayed run.
 
-    Every cascade operation answers immediately and runs the Xray restart
-    here: a synchronous apply took 15-25 s and proxies cut the connection
-    before the panel could answer, which surfaced as random errors.
+    File mutations are already on disk when this is called, so any single
+    apply covers the whole batch: the timer only decides WHEN it runs.
+    On failure the file rolls back to the earliest pre-batch snapshot and
+    every queued cascade gets the error mark.
     """
-    def worker():
-        with APPLY_LOCK:
-            try:
-                ctl("cascade-apply")
+    with _CASCADE_APPLY_LOCK:
+        _CASCADE_APPLY["batch"].append((uid,snapshot))
+        if _CASCADE_APPLY["timer"] is not None:
+            return
+        timer=threading.Timer(_CASCADE_APPLY_WINDOW,_cascade_apply_flush)
+        timer.daemon=True
+        _CASCADE_APPLY["timer"]=timer
+        timer.start()
+
+def _cascade_apply_flush():
+    with _CASCADE_APPLY_LOCK:
+        batch=_CASCADE_APPLY["batch"]
+        _CASCADE_APPLY["batch"]=[]
+        _CASCADE_APPLY["timer"]=None
+    if not batch: return
+    with APPLY_LOCK:
+        try:
+            ctl("cascade-apply")
+            for uid,_ in batch:
                 cascade_touch(uid,pending=False,op_error="")
-            except Exception as exc:
-                detail=cascade_detail(exc)
-                print("cascade apply failed:",detail[-500:],file=sys.stderr,flush=True)
-                if snapshot is not None:
-                    try: cascade_api.save_cascades(CASCADES_FILE,json.loads(snapshot))
-                    except Exception: pass
+        except Exception as exc:
+            detail=cascade_detail(exc)
+            print("cascade apply failed:",detail[-500:],file=sys.stderr,flush=True)
+            if batch[0][1] is not None:
+                try: cascade_api.save_cascades(CASCADES_FILE,json.loads(batch[0][1]))
+                except Exception: pass
+            for uid,_ in batch:
                 cascade_touch(uid,pending=False,op_error=detail)
-    threading.Thread(target=worker,daemon=True).start()
 
 def cascade_ping_bg(uid):
     def worker():
