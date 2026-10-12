@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="2.5.2"
+LOCAL_VERSION="2.5.3"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -457,6 +457,16 @@ fi
 printf '%s\n' "$UPDATE_VERSION" > /etc/onyx-panel/version
 chmod 0600 /etc/onyx-panel/caddy-owned /etc/onyx-panel/version
 UPDATE_COMMITTED=1
+
+# Обновления копят каталоги /root/onyx-panel-update-backup-*: после успеха
+# оставляем только два самых свежих, остальное лишь занимает место.
+if [[ -d /root ]]; then
+    mapfile -t _onyx_old_backups < <(ls -dt /root/onyx-panel-update-backup-* 2>/dev/null || true)
+    if ((${#_onyx_old_backups[@]} > 2)); then
+        rm -rf -- "${_onyx_old_backups[@]:2}"
+    fi
+    unset _onyx_old_backups
+fi
 
 # Refresh the private offline package so future local-fallback updates,
 # reinstalls and rollbacks use exactly the version installed right now.
