@@ -8,7 +8,7 @@ from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 import onyx_i18n as i18n
 
-VERSION = '2.4.1'
+VERSION = '2.4.2'
 
 
 def login_version():
@@ -343,7 +343,7 @@ QR_CSS='''
 @media(max-width:600px){.connection-dialog{width:calc(100vw - 24px);max-height:92dvh}.connection-header{padding:19px 19px 16px}.connection-body{grid-template-columns:1fr;gap:18px;padding:0 20px 20px}.qr-visual{grid-row:2}.qr-canvas{margin:0 auto;width:216px;height:216px}.connection-info{text-align:center}.connection-info h3{font-size:22px}.connection-meta{justify-content:center;margin-bottom:12px}.connection-protocol{margin:7px 0 10px}.connect-steps{text-align:left;max-width:285px;margin:0 auto;gap:7px}.connection-footer{padding:16px 20px}.connection-footer>.actions{display:grid;justify-content:stretch}.connection-footer .primary{width:100%}.connection-footer small{max-width:none}.connection-status{text-align:center}}
 '''
 CSS += QR_CSS
-CSS += '''.login-modal-icon{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:26px}.login-modal-icon.success{background:rgba(34,197,94,.16);background:color-mix(in srgb,#22c55e 18%,transparent);color:#22c55e;border:2px solid rgba(34,197,94,.4);border-color:color-mix(in srgb,#22c55e 40%,transparent)}.login-modal-icon.error{background:rgba(239,68,68,.16);background:color-mix(in srgb,#ef4444 18%,transparent);color:#ef4444;border:2px solid rgba(239,68,68,.4);border-color:color-mix(in srgb,#ef4444 40%,transparent)}.login-modal-icon .checkmark{width:28px;height:28px;stroke:currentColor;stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:40;stroke-dashoffset:40;animation:login-check .4s .15s ease forwards}.login-modal-icon .cross{width:28px;height:28px;stroke:currentColor;stroke-width:3;fill:none;stroke-linecap:round;stroke-dasharray:30;stroke-dashoffset:30;animation:login-cross .3s .15s ease forwards}@keyframes login-check{to{stroke-dashoffset:0}}@keyframes login-cross{to{stroke-dashoffset:0}}.login-modal-icon.spin{border:3px solid var(--line);border-top-color:var(--accent);background:transparent;animation:login-spin .7s linear infinite;transform-origin:center}@keyframes login-spin{to{transform:rotate(360deg)}}.apply-preset-modal{width:min(400px,calc(100vw - 28px));padding:28px 26px 24px;text-align:center;border-radius:22px}.apply-preset-modal::backdrop{background:rgba(4,9,13,.62);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}.apply-preset-head h2{font-size:17px;margin:0;text-align:center}.apply-preset-body{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px 0 4px}.apply-preset-text{font-size:12.5px;color:var(--muted);margin:0;line-height:1.6;max-width:300px;text-align:center}'''
+CSS += '''.login-modal-card .move-ring{width:88px;height:88px;margin:0 auto}.login-modal-card.upd-done .move-ring .fg{stroke:var(--green)}.login-modal-card.upd-done .move-ring b{color:var(--green)}.login-modal-card.upd-err .move-ring .fg{stroke:var(--red)}.login-modal-card.upd-err .move-ring b{color:var(--red)}'''
 CSS += '''.preset>.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));width:100%;gap:7px;margin-top:auto}.preset>.actions form{min-width:0}.preset>.actions button{margin:0;padding:9px 7px}'''
 CSS += '''.preset-create-dialog{width:min(920px,calc(100vw - 28px))}.preset-create-dialog .code-editor{min-height:300px;max-height:46dvh}.preset-create-dialog .editor-bar{margin-top:0}@media(max-width:700px){.preset-create-dialog .form-grid{grid-template-columns:1fr}.preset-create-dialog .code-editor{min-height:240px}}'''
 CSS += '''.preset[data-preset-card]{display:block;padding:0;aspect-ratio:16/10;overflow:hidden;isolation:isolate}
@@ -833,19 +833,10 @@ def login_ui(path, totp=False):
 .login-modal.show{{opacity:1;visibility:visible}}
 .login-modal-card{{display:flex;flex-direction:column;align-items:center;gap:14px;padding:36px 40px;border:1px solid var(--line);border-radius:20px;background:var(--surface);box-shadow:0 24px 70px rgba(0,0,0,.5);transform:scale(.9);transform-origin:center;transition:transform .3s cubic-bezier(.2,.8,.2,1)}}
 .login-modal.show .login-modal-card{{transform:scale(1)}}
-.login-modal-icon{{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:26px}}
-.login-modal-icon.success{{background:rgba(34,197,94,.16);background:color-mix(in srgb,#22c55e 18%,transparent);color:#22c55e;border:2px solid rgba(34,197,94,.4);border-color:color-mix(in srgb,#22c55e 40%,transparent)}}
-.login-modal-icon.error{{background:rgba(239,68,68,.16);background:color-mix(in srgb,#ef4444 18%,transparent);color:#ef4444;border:2px solid rgba(239,68,68,.4);border-color:color-mix(in srgb,#ef4444 40%,transparent)}}
-.login-modal-icon .checkmark{{width:28px;height:28px;stroke:currentColor;stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:40;stroke-dashoffset:40;animation:login-check .4s .15s ease forwards}}
-.login-modal-icon .cross{{width:28px;height:28px;stroke:currentColor;stroke-width:3;fill:none;stroke-linecap:round;stroke-dasharray:30;stroke-dashoffset:30;animation:login-cross .3s .15s ease forwards}}
-@keyframes login-check{{to{{stroke-dashoffset:0}}}}
-@keyframes login-cross{{to{{stroke-dashoffset:0}}}}
 .login-modal-title{{font-size:17px;font-weight:600;margin:0}}
 .login-modal-text{{font-size:13px;color:var(--muted);margin:0;text-align:center;max-width:260px}}
-.login-modal-icon.spin{{border:3px solid var(--line);border-top-color:var(--accent);background:transparent;animation:login-spin .7s linear infinite;transform-origin:center}}
-@keyframes login-spin{{to{{transform:rotate(360deg)}}}}
 </style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div><div class="login-step" id="loginStep2" hidden><p class="login-step-title">Код двухфакторной аутентификации</p><div class="login-otp-cells" id="loginOtpCells"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 1"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 2"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 3"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 4"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 5"><input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра 6"></div><input type="hidden" name="code" id="loginCode" autocomplete="one-time-code"><button type="submit" class="primary" id="loginVerify">Войти</button><button type="button" class="login-back" id="loginBack">← Назад</button></div></form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
-<div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card"><div id="loginModalIcon" class="login-modal-icon spin"></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
+<div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card" id="loginModalCard"><div class="move-ring spin" id="loginModalRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="loginModalMark">…</b></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
 {COMMON_JS}
 <script>(()=>{{
 const TOTP={totp_flag};
@@ -889,13 +880,14 @@ form.addEventListener('submit',async e=>{{
     return;
   }}
   const btn=inOtp?verifyBtn:submitBtn;const oldText=btn.textContent;btn.disabled=true;btn.textContent='Входим…';
-  const modal=document.getElementById('loginModal'),modalIcon=document.getElementById('loginModalIcon'),modalTitle=document.getElementById('loginModalTitle'),modalText=document.getElementById('loginModalText');
+  const modal=document.getElementById('loginModal'),modalCard=document.getElementById('loginModalCard'),modalRing=document.getElementById('loginModalRing'),modalMark=document.getElementById('loginModalMark'),modalTitle=document.getElementById('loginModalTitle'),modalText=document.getElementById('loginModalText');
   function showModal(state,title,text){{
-    modalIcon.className='login-modal-icon '+state;
-    void modalIcon.offsetWidth;
-    if(state==='success')modalIcon.innerHTML='<svg class="checkmark" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
-    else if(state==='error')modalIcon.innerHTML='<svg class="cross" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-    else modalIcon.innerHTML='';
+    modalCard.classList.remove('upd-done','upd-err');
+    modalRing.classList.remove('spin');
+    void modalRing.offsetWidth;
+    if(state==='success'){{modalCard.classList.add('upd-done');modalMark.textContent='✓';}}
+    else if(state==='error'){{modalCard.classList.add('upd-err');modalMark.textContent='!';}}
+    else{{modalRing.classList.add('spin');modalMark.textContent='…';}}
     modalTitle.textContent=title;modalText.textContent=text;
     void modal.offsetWidth;
     modal.classList.add('show');modal.setAttribute('aria-hidden','false');
@@ -903,7 +895,7 @@ form.addEventListener('submit',async e=>{{
   }}
   function hideModal(){{
     modal.classList.remove('show');modal.setAttribute('aria-hidden','true');
-    setTimeout(()=>{{modalIcon.className='login-modal-icon spin';modalIcon.innerHTML='';modalTitle.textContent='Входим…';modalText.textContent='Проверяем данные';}},300);
+    setTimeout(()=>{{modalCard.classList.remove('upd-done','upd-err');modalRing.classList.add('spin');modalMark.textContent='…';modalTitle.textContent='Входим…';modalText.textContent='Проверяем данные';}},300);
   }}
   try{{
     showModal('spin','Входим…','Проверяем данные');
@@ -2135,18 +2127,23 @@ def editor_ui(source, path, csrf, presets, has_draft):
     return f'''<div class="card editor-presets-card"><div class="card-title"><div><h2>Заглушка главной страницы</h2><p>Выберите готовую страницу, создайте свою или отредактируйте существующую</p></div><div class="actions"><button type="button" class="primary" id="openCustomPreset">{icon("plus")}Создать заглушку</button>{'<span class="pill">Черновик не опубликован</span>' if has_draft else ''}</div></div><div class="preset-grid">{cards}</div><p class="muted" style="font-size:12px;margin-bottom:0">«Применить» сразу публикует заглушку на сайте. Кнопка <b>Редактировать</b> открывает редактирование своей заглушки, <b>Предпросмотр</b> — предпросмотр без публикации.</p></div>
 <dialog id="customPresetDialog" class="create-dialog preset-create-dialog"><div class="dialog-head"><div><h2 id="customPresetTitle">Своя заглушка</h2><small>После сохранения она появится среди остальных заглушек</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="customPresetForm" method="post" action="{esc(path)}/custom-preset"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="create" id="customPresetOp"><input type="hidden" name="preset" value="" id="customPresetId"><div class="form-grid"><div><label for="customPresetName">Название</label><input id="customPresetName" name="name" maxlength="80" required placeholder="Например, Скоро открытие"></div><div><label for="customPresetDescription">Краткое описание</label><input id="customPresetDescription" name="description" maxlength="180" placeholder="Что увидит посетитель"></div></div><label for="customPresetHtml">HTML заглушки</label><div class="editor-columns"><div class="editor-col"><div class="editor-bar"><span>index.html</span><i>до 1 МБ</i></div><textarea class="code-editor" id="customPresetHtml" name="html" spellcheck="false" required placeholder="<!doctype html>…"></textarea></div><div class="editor-col"><div class="preset-live-bar"><span>Предпросмотр</span><i>обновляется при вводе</i></div><iframe id="customPresetLive" class="preset-live-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Живой предпросмотр заглушки"></iframe></div></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="customPresetSave">Сохранить</button></div></form></dialog>
 <dialog id="previewDialog" class="preview-dialog"><div class="preview-top"><strong>Предпросмотр заглушки</strong><div class="actions"><div class="range"><button type="button" class="selected" id="previewDesktop">Компьютер</button><button type="button" id="previewPhone">Телефон</button></div><button type="button" data-close-dialog aria-label="Закрыть предпросмотр">×</button></div></div><div id="previewStage" class="preview-stage"><iframe id="landingPreview" title="Изолированный предпросмотр заглушки" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe></div><p class="preview-caption">Изолированный предпросмотр · рабочий сайт не изменён</p></dialog>
-<dialog id="applyPresetResult" class="apply-preset-modal"><div class="apply-preset-head"><h2 id="applyPresetResultTitle">Применяем заглушку…</h2></div><div id="applyPresetResultBody" class="apply-preset-body"><div id="applyPresetResultIcon" class="login-modal-icon spin"></div><p id="applyPresetResultText" class="apply-preset-text">Публикуем на сайте…</p></div></dialog>
+<div class="move-overlay" id="applyPresetResult" hidden><div class="move-card" id="applyPresetCard"><div class="move-ring spin" id="applyPresetRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="applyPresetMark">…</b></div><h3 id="applyPresetResultTitle">Применяем заглушку…</h3><p id="applyPresetResultText">Публикуем на сайте…</p></div></div>
 <script>(()=>{{const presets={presets_json};const cp=document.getElementById('customPresetDialog'),cpf=document.getElementById('customPresetForm'),cpOp=document.getElementById('customPresetOp'),cpId=document.getElementById('customPresetId'),cpName=document.getElementById('customPresetName'),cpDesc=document.getElementById('customPresetDescription'),cpHtml=document.getElementById('customPresetHtml'),cpTitle=document.getElementById('customPresetTitle'),cpSave=document.getElementById('customPresetSave');document.getElementById('openCustomPreset').addEventListener('click',()=>{{cpOp.value='create';cpId.value='';cpTitle.textContent='Своя заглушка';cpSave.textContent='Создать заглушку';cpName.value='';cpDesc.value='';cpHtml.value='';cp.showModal();setTimeout(()=>cpName.focus(),30)}});document.querySelectorAll('[data-edit-preset]').forEach(b=>b.addEventListener('click',()=>{{const p=presets[b.dataset.editPreset];if(!p)return;cpOp.value='save';cpId.value=b.dataset.editPreset;cpTitle.textContent='Редактирование заглушки';cpSave.textContent='Сохранить изменения';cpName.value=p.name;cpDesc.value=p.description;cpHtml.value=p.html;cp.showModal();setTimeout(()=>cpName.focus(),30)}}));cpf.addEventListener('submit',e=>{{if(!cpName.value.trim()||!cpHtml.value.trim()){{e.preventDefault();return}}cpSave.disabled=true;cpSave.textContent='Сохраняем…'}});const pd=document.getElementById('previewDialog'),pf=document.getElementById('landingPreview');document.querySelectorAll('[data-preview-preset]').forEach(b=>b.addEventListener('click',async()=>{{const p=presets[b.dataset.previewPreset];if(!p||!p.html)return;b.disabled=true;try{{const r=await fetch('{esc(path)}/preview-html',{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}',html:p.html}})}});if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');if(!r.ok){{let msg='Ошибка предпросмотра ('+r.status+').';try{{msg=(await r.json()).message||msg}}catch(_){{}}throw new Error(msg)}}let d;try{{d=await r.json()}}catch(e){{throw new Error('Панель вернула некорректный ответ.')}}if(!d.document)throw new Error('Ошибка предпросмотра.');pf.srcdoc=d.document;pd.showModal()}}catch(err){{alert(err.message)}}finally{{b.disabled=false}}}}));['Desktop','Phone'].forEach(mode=>document.getElementById('preview'+mode).addEventListener('click',()=>{{document.getElementById('previewStage').classList.toggle('phone',mode==='Phone');['Desktop','Phone'].forEach(m=>document.getElementById('preview'+m).classList.toggle('selected',m===mode))}}));pd.addEventListener('close',()=>pf.removeAttribute('srcdoc'))}});
-const applyDialog=document.getElementById('applyPresetResult'),applyIcon=document.getElementById('applyPresetResultIcon'),applyTitle=document.getElementById('applyPresetResultTitle'),applyText=document.getElementById('applyPresetResultText');
+const applyOverlay=document.getElementById('applyPresetResult'),applyCard=document.getElementById('applyPresetCard'),applyRing=document.getElementById('applyPresetRing'),applyMark=document.getElementById('applyPresetMark'),applyTitle=document.getElementById('applyPresetResultTitle'),applyText=document.getElementById('applyPresetResultText');
 function applyShow(state,title,text){{
-  applyIcon.className='login-modal-icon '+state;
-  void applyIcon.offsetWidth;
-  if(state==='success')applyIcon.innerHTML='<svg class="checkmark" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
-  else if(state==='error')applyIcon.innerHTML='<svg class="cross" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-  else applyIcon.innerHTML='';
+  applyCard.classList.remove('spin','upd-done','upd-err');
+  applyRing.classList.remove('spin');
+  void applyRing.offsetWidth;
+  if(state==='success'){{applyCard.classList.add('upd-done');applyMark.textContent='✓';}}
+  else if(state==='error'){{applyCard.classList.add('upd-err');applyMark.textContent='!';}}
+  else{{applyCard.classList.add('spin');applyRing.classList.add('spin');applyMark.textContent='…';}}
   applyTitle.textContent=title;applyText.textContent=text;
-  if(!applyDialog.open)applyDialog.showModal();
-  void applyDialog.offsetWidth;
+  applyOverlay.hidden=false;
+  requestAnimationFrame(()=>applyOverlay.classList.add('show'));
+}}
+function applyHide(){{
+  applyOverlay.classList.remove('show');
+  setTimeout(()=>{{applyOverlay.hidden=true;}},250);
 }}
 document.querySelectorAll('form[action*="/apply-preset"]').forEach(f=>f.addEventListener('submit',async e=>{{
   e.preventDefault();e.stopImmediatePropagation();
@@ -2158,15 +2155,15 @@ document.querySelectorAll('form[action*="/apply-preset"]').forEach(f=>f.addEvent
     let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель вернула некорректный ответ.')}}
     if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось применить заглушку.');
     applyShow('success','Заглушка применена',d.message||'Страница опубликована на сайте.');
-    if(applyDialog._t)clearTimeout(applyDialog._t);applyDialog._t=setTimeout(()=>{{if(applyDialog.open)applyDialog.close()}},1500);
+    if(applyOverlay._t)clearTimeout(applyOverlay._t);applyOverlay._t=setTimeout(()=>{{applyHide()}},1500);
   }}catch(err){{
     applyShow('error','Ошибка',err.message||'Не удалось применить заглушку.');
-    if(applyDialog._t)clearTimeout(applyDialog._t);applyDialog._t=setTimeout(()=>{{if(applyDialog.open)applyDialog.close()}},2600);
+    if(applyOverlay._t)clearTimeout(applyOverlay._t);applyOverlay._t=setTimeout(()=>{{applyHide()}},2600);
   }}finally{{
     if(btn){{btn.disabled=false;btn.textContent='Применить'}}
   }}
 }}));
-applyDialog.addEventListener('click',e=>{{if(e.target===applyDialog&&!applyIcon.classList.contains('spin'))applyDialog.close()}});
+applyOverlay.addEventListener('click',e=>{{if(e.target===applyOverlay&&!applyCard.classList.contains('spin'))applyHide()}});
 </script>''' + PRESET_THUMBS_JS.replace('@@PRESETS@@',presets_json) + PRESET_LIVE_JS
 
 
