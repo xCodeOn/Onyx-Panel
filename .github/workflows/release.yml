@@ -27,7 +27,15 @@ jobs:
       - name: Detect version
         id: version
         run: |
+          # Two accepted shapes of the VERSION line in install-core.sh:
+          #   VERSION="2.3.1"                                             (literal)
+          #   VERSION="${ONYX_PANEL_VERSION:-$(cat .../version || echo '2.6.7')}"  (env fallback)
+          # The second shape existed since v2.3.1, which silently broke this
+          # step — pull the digits out of either the literal or the fallback.
           VERSION="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' install-core.sh | head -n1)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            VERSION="$(grep -oE "echo '[0-9]+\.[0-9]+\.[0-9]+'" install-core.sh | head -n1 | sed "s/echo '//;s/'//")"
+          fi
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
             echo "::error::Cannot parse VERSION from install-core.sh, got: '$VERSION'"
             exit 1
