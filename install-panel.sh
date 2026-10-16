@@ -84,7 +84,7 @@ SERVICE_FILE="/etc/systemd/system/onyx-panel.service"
 FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
 # Panel version shipped by this installer; the release workflow greps for
-# this literal to keep installers in sync (Onyx Panel 2.6.7).
+# this literal to keep installers in sync (Onyx Panel 2.6.8).
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
 FAVICON_SOURCE="${BASE}/onyx-favicon.png"
@@ -96,6 +96,9 @@ MTPROTO_HOST="$(cat /etc/onyx-panel/mtproto-host 2>/dev/null || true)"
 MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 PANEL_PATH="/panel-$(openssl rand -hex 16)"
 UPDATING="${ONYX_PANEL_UPDATE:-0}"
+# Set by update.sh when component pins are unchanged: keep the proxies
+# running, skip the geo refresh and reload Caddy instead of restarting it.
+FAST="${ONYX_PANEL_FAST:-0}"
 MANIFEST="/etc/onyx-panel/manifest"
 PRIMARY_SECRET="/etc/onyx-panel/primary-secret"
 USERS_FILE="/etc/onyx-panel/users.json"
@@ -442,28 +445,33 @@ fi
 
 # The routing tab builds geoip:/geosite: rules, so the geo databases must sit
 # next to the binary. The binary block above is skipped when the version is
-# already current, hence this unconditional refresh.
-XRAY_GEO_TMP="$(mktemp -d /tmp/onyx-panel-geo.XXXXXX)"
-GEO_ZIPPED=0
-if [[ -s "${BASE}/assets/Xray-linux-64.zip" ]]; then
-    echo "      Using geo databases included with this release."
-    unzip -q -o "${BASE}/assets/Xray-linux-64.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
-elif [[ -n "${XRAY_ARCHIVE_KEPT:-}" && -s "$XRAY_ARCHIVE_KEPT" ]]; then
-    echo "      Using geo databases from the downloaded Xray archive."
-    unzip -q -o "$XRAY_ARCHIVE_KEPT" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
-    rm -f "$XRAY_ARCHIVE_KEPT"
+# already current, hence this unconditional refresh — except on the fast
+# panel-only path, where the databases are already verified to be in place.
+if [[ "$FAST" == 1 && -s "${XRAY_ROOT}/geoip.dat" && -s "${XRAY_ROOT}/geosite.dat" ]]; then
+    echo "      Geo databases already in place — refresh skipped (fast update)."
 else
-    onyx_fetch "$XRAY_GEO_TMP/geo.zip" \
-        "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
-    && unzip -q -o "$XRAY_GEO_TMP/geo.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
-    rm -f "$XRAY_GEO_TMP/geo.zip"
+    XRAY_GEO_TMP="$(mktemp -d /tmp/onyx-panel-geo.XXXXXX)"
+    GEO_ZIPPED=0
+    if [[ -s "${BASE}/assets/Xray-linux-64.zip" ]]; then
+        echo "      Using geo databases included with this release."
+        unzip -q -o "${BASE}/assets/Xray-linux-64.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
+    elif [[ -n "${XRAY_ARCHIVE_KEPT:-}" && -s "$XRAY_ARCHIVE_KEPT" ]]; then
+        echo "      Using geo databases from the downloaded Xray archive."
+        unzip -q -o "$XRAY_ARCHIVE_KEPT" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
+        rm -f "$XRAY_ARCHIVE_KEPT"
+    else
+        onyx_fetch "$XRAY_GEO_TMP/geo.zip" \
+            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
+        && unzip -q -o "$XRAY_GEO_TMP/geo.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
+        rm -f "$XRAY_GEO_TMP/geo.zip"
+    fi
+    if [[ "$GEO_ZIPPED" == 1 ]]; then
+        install -o root -g root -m 0644 "$XRAY_GEO_TMP/geoip.dat" "$XRAY_GEO_TMP/geosite.dat" "$XRAY_ROOT/"
+    else
+        echo "      WARNING: geo databases unavailable; routing presets using geoip:/geosite: will not load." >&2
+    fi
+    rm -rf "$XRAY_GEO_TMP"
 fi
-if [[ "$GEO_ZIPPED" == 1 ]]; then
-    install -o root -g root -m 0644 "$XRAY_GEO_TMP/geoip.dat" "$XRAY_GEO_TMP/geosite.dat" "$XRAY_ROOT/"
-else
-    echo "      WARNING: geo databases unavailable; routing presets using geoip:/geosite: will not load." >&2
-fi
-rm -rf "$XRAY_GEO_TMP"
 
 echo "      Preparing OpenFlux ${OPENFLUX_VERSION}..."
 if ! id onyx-openflux >/dev/null 2>&1; then
@@ -6692,7 +6700,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.7')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.8')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
@@ -7013,11 +7021,26 @@ if ! caddy validate --config "$CADDYFILE" --adapter caddyfile; then
 fi
 
 systemctl daemon-reload
-echo "      Activating Caddy..."
-if ! systemctl restart caddy.service; then
-    systemctl --no-pager --full status caddy.service >&2 || true
-    journalctl -u caddy.service -n 60 --no-pager >&2 || true
-    die "Caddy failed to start."
+if [[ "$FAST" == 1 ]]; then
+    echo "      Reloading Caddy (fast update)..."
+    # The canonical Caddyfile intentionally has `admin off`; SIGUSR1 is
+    # Caddy's supported config reload signal in this mode, and unlike a
+    # restart it keeps established client connections.
+    if ! systemctl kill --signal=SIGUSR1 --kill-who=main caddy.service >/dev/null 2>&1 ||
+       ! systemctl is-active --quiet caddy.service; then
+        systemctl restart caddy.service || {
+            systemctl --no-pager --full status caddy.service >&2 || true
+            journalctl -u caddy.service -n 60 --no-pager >&2 || true
+            die "Caddy failed to reload."
+        }
+    fi
+else
+    echo "      Activating Caddy..."
+    if ! systemctl restart caddy.service; then
+        systemctl --no-pager --full status caddy.service >&2 || true
+        journalctl -u caddy.service -n 60 --no-pager >&2 || true
+        die "Caddy failed to start."
+    fi
 fi
 systemctl enable onyx-panel-firewall.service
 systemctl restart onyx-panel-firewall.service
@@ -7055,9 +7078,16 @@ find /srv/tproxy-site -type d -exec chmod 0750 {} +
 find /srv/tproxy-site -type f -exec chmod 0640 {} +
 
 ui_stage "Запуск сервиса"
-systemctl restart caddy.service
-systemctl restart tproxy-server.service
-systemctl restart mtproxy.service
+if [[ "$FAST" == 1 ]]; then
+    # Component pins are unchanged, so the proxy configs are untouched:
+    # restarting tproxy-server/mtproxy would only drop live connections.
+    # Caddy was already reloaded above via SIGUSR1.
+    echo "      Proxy services left running (fast update)."
+else
+    systemctl restart caddy.service
+    systemctl restart tproxy-server.service
+    systemctl restart mtproxy.service
+fi
 
 # Re-publish the retained author source through the current CSP-safe renderer.
 # This automatically repairs pages saved by the affected release where the

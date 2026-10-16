@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="2.6.7"
+LOCAL_VERSION="2.6.8"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -147,32 +147,14 @@ else
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-# Pause the HTTP writer before taking a snapshot of subscription slots/keys.
-# Proxy services keep running. Recover the panel if snapshot/download fails.
-PANEL_WAS_RUNNING=0
-if systemctl is-active --quiet onyx-panel.service; then
-    PANEL_WAS_RUNNING=1
-    systemctl stop onyx-panel.service
-fi
-trap 'if [[ "$PANEL_WAS_RUNNING" == 1 ]]; then systemctl start onyx-panel.service || true; fi' EXIT
 BACKUP="/root/onyx-panel-update-backup-${STAMP}"
-install -d -m 0700 "$BACKUP"
-BACKUP_ITEMS=()
-for item in /opt/onyx-panel /opt/onyx-panel /opt/MTProxy /usr/local/bin/caddy /usr/local/bin/tproxy-server /usr/local/bin/amneziawg-go /usr/local/bin/awg /usr/local/bin/awg-quick /usr/local/sbin/onyx-panelctl /usr/local/sbin/onyx-panel-user-firewall /usr/local/sbin/onyx-panel-sync-tls /usr/local/sbin/onyx-panel-awg-run /usr/local/sbin/onyx-panel-awg-up /usr/local/sbin/onyx-panel-awg-down /usr/local/sbin/onyx-panel-update /usr/local/sbin/onyx-panel-uninstall /usr/local/sbin/ONYX /usr/local/sbin/onyx /etc/systemd/system/onyx-panel.service /etc/systemd/system/onyx-panel-firewall.service /etc/systemd/system/onyx-panel-traffic.service /etc/systemd/system/onyx-panel-traffic.timer /etc/systemd/system/onyx-panel-xray.service /etc/systemd/system/onyx-panel-openflux.service /etc/systemd/system/onyx-panel-awg@.service /etc/systemd/system/onyx-panel-sync-tls.service /etc/systemd/system/onyx-panel-sync-tls.timer /etc/systemd/system/onyx-panel-component-update.service /etc/systemd/system/tproxy-server.service /etc/systemd/system/mtproxy.service /etc/systemd/system/caddy.service.d/tproxy.conf /etc/caddy/Caddyfile /etc/tproxy-server /etc/mtproxy /etc/mita /etc/onyx-panel-xray /etc/sysctl.d/90-onyx-panel-awg.conf /var/lib/onyx-panel-xray /var/lib/onyx-panel-components /var/lib/onyx-panel /etc/onyx-panel /srv/tproxy-site; do
-    [[ -e "$item" ]] || continue
-    BACKUP_ITEMS+=("$item")
-    cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
-done
-shopt -s nullglob
-for item in /etc/systemd/system/onyx-user-*.service /etc/systemd/system/onyx-panel-web-update.service /etc/systemd/system/onyx-panel-metrics.service /etc/systemd/system/onyx-panel-metrics.timer; do
-    [[ -e "$item" ]] || continue
-    BACKUP_ITEMS+=("$item")
-    cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
-done
-shopt -u nullglob
-tar --numeric-owner -cpf "$BACKUP/state.tar" "${BACKUP_ITEMS[@]}"
-echo "Backup created: $BACKUP"
-onyx_phase "бэкап готов"
+# The panel is stopped and the snapshot is taken only after the release files
+# are already on disk (see the stop/backup block below), so network waits do
+# not extend the downtime window. rollback_update() undoes the stop itself
+# when the failure happens before SNAPSHOT_DONE flips to 1.
+PANEL_WAS_RUNNING=0
+SNAPSHOT_DONE=0
+FAST_UPDATE=0
 
 HAD_FIREWALL_SERVICE=0
 [[ -e /etc/systemd/system/onyx-panel-firewall.service ]] && HAD_FIREWALL_SERVICE=1
@@ -212,6 +194,14 @@ UPDATE_COMMITTED=0
 rollback_update() {
     local code="$1"
     [[ "$UPDATE_COMMITTED" == 1 || "$code" == 0 ]] && return 0
+    if [[ "$SNAPSHOT_DONE" != 1 ]]; then
+        # The failure happened before the snapshot (e.g. while downloading):
+        # nothing on disk was modified, so the only thing to undo is a stop.
+        if [[ "$PANEL_WAS_RUNNING" == 1 ]]; then
+            systemctl start onyx-panel.service 2>/dev/null || true
+        fi
+        return 0
+    fi
     echo "Update failed; restoring the previous working state..." >&2
     systemctl stop onyx-panel.service onyx-panel-firewall.service onyx-panel-traffic.timer onyx-panel-traffic.service onyx-panel-metrics.timer onyx-panel-metrics.service onyx-panel-xray.service onyx-panel-openflux.service onyx-panel-sync-tls.timer 2>/dev/null || true
     for unit in $(systemctl list-units --all 'onyx-panel-awg@*.service' --no-legend 2>/dev/null | awk '{print $1}'); do systemctl stop "$unit" 2>/dev/null || true; done
@@ -341,7 +331,7 @@ trap finish EXIT
 
 echo "Preparing Onyx Panel update files..."
 if [[ -n "$REPOSITORY" && "$REMOTE_OK" == 1 ]]; then
-    if ! git clone --depth 1 --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
+    if ! timeout 90 git clone --depth 1 --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
         ui_warn "git clone не сработал — качаю tarball ${RELEASE_REF} через зеркала..."
         REPO_PATH="${REPOSITORY#*github.com/}"
         REPO_PATH="${REPO_PATH%.git}"
@@ -366,6 +356,117 @@ fi
 [[ -f "$TEMP_DIR/source/install-panel.sh" ]] || die "Update package is incomplete."
 onyx_phase "файлы обновления готовы"
 chmod 0700 "$TEMP_DIR/source/install-panel.sh" "$TEMP_DIR/source/install-final.sh" "$TEMP_DIR/source/install-core.sh"
+
+# ── Fast panel-only path ────────────────────────────────────────────────
+# A release that changes no component pins against the installed package
+# only rewrites panel files. When every pin matches and the installed state
+# is healthy, the panel keeps serving during the download, the snapshot
+# below only covers panel-scoped files, and ONYX_PANEL_FAST=1 tells
+# install-panel.sh to skip the geo refresh and the proxy restarts. Any
+# doubt — legacy migration, missing installed package, changed pins,
+# incomplete or unhealthy components — falls back to the full path.
+FAST_UPDATE=0
+if [[ "$MIGRATING_LEGACY" != 1 && -s /opt/onyx-panel-package/install-panel.sh ]]; then
+    pin_of() { sed -n "s/^$2=\"\([^\"]*\)\"/\1/p" "$1" 2>/dev/null | head -n1 || true; }
+    OLD_IP="/opt/onyx-panel-package/install-panel.sh"
+    NEW_IP="$TEMP_DIR/source/install-panel.sh"
+    SAME_PINS=1
+    for pin_name in XRAY_VERSION OPENFLUX_VERSION AWG_GO_VERSION AWG_TOOLS_VERSION; do
+        old_pin="$(pin_of "$OLD_IP" "$pin_name")"
+        new_pin="$(pin_of "$NEW_IP" "$pin_name")"
+        if [[ -z "$new_pin" || "$old_pin" != "$new_pin" ]]; then
+            echo "Fast path declined: $pin_name ${old_pin:-none} -> ${new_pin:-none}."
+            SAME_PINS=0
+            break
+        fi
+    done
+    if [[ "$SAME_PINS" == 1 ]]; then
+        old_relay="$(sed -n 's/^TPROXY_REF="\([0-9a-f]*\)".*/\1/p' /opt/onyx-panel-package/repair-landing-pages.sh 2>/dev/null | head -n1 || true)"
+        new_relay="$(sed -n 's/^TPROXY_REF="\([0-9a-f]*\)".*/\1/p' "$TEMP_DIR/source/repair-landing-pages.sh" 2>/dev/null | head -n1 || true)"
+        if [[ -z "$new_relay" || "$old_relay" != "$new_relay" ]]; then
+            echo "Fast path declined: relay pin ${old_relay:-none} -> ${new_relay:-none}."
+            SAME_PINS=0
+        fi
+    fi
+    if [[ "$SAME_PINS" == 1 ]]; then
+        # The fast path skips the geo refresh and the proxy restarts, so the
+        # installed state must already be what install-panel.sh would produce.
+        if [[ ! -x /opt/onyx-panel/xray/xray ||
+              ! -s /opt/onyx-panel/xray/geoip.dat ||
+              ! -s /opt/onyx-panel/xray/geosite.dat ||
+              ! -x /opt/onyx-panel/openflux/openflux ||
+              ! -s /opt/onyx-panel/openflux/version ||
+              ! -x /usr/local/bin/amneziawg-go ||
+              ! -x /usr/local/bin/awg ||
+              ! -x /usr/local/bin/awg-quick ||
+              ! -x /opt/MTProxy/objs/bin/mtproto-proxy ||
+              ! -x /usr/local/bin/tproxy-server ]]; then
+            echo "Fast path declined: installed component state is incomplete."
+            SAME_PINS=0
+        fi
+    fi
+    if [[ "$SAME_PINS" == 1 ]]; then
+        # The relay is not rebuilt on the fast path — it must already answer.
+        if ! systemctl is-active --quiet tproxy-server.service ||
+           [[ "$(curl -fsS --max-time 3 http://127.0.0.1:8081/healthz 2>/dev/null || true)" != "ok" ]] ||
+           [[ "$(curl -fsS --max-time 3 http://127.0.0.1:8081/readyz 2>/dev/null || true)" != "ready" ]]; then
+            echo "Fast path declined: relay is not healthy."
+            SAME_PINS=0
+        fi
+    fi
+    [[ "$SAME_PINS" == 1 ]] && FAST_UPDATE=1
+fi
+if [[ "$FAST_UPDATE" == 1 ]]; then
+    echo "Component pins unchanged — fast panel-only update."
+else
+    echo "Full update path."
+fi
+
+# Downtime window starts here: the release files are already on disk, so the
+# panel is only down for the snapshot and the file swap. rollback_update()
+# restarts the panel when anything fails before SNAPSHOT_DONE=1 and restores
+# state.tar afterwards.
+PANEL_WAS_RUNNING=0
+if systemctl is-active --quiet onyx-panel.service; then
+    PANEL_WAS_RUNNING=1
+    systemctl stop onyx-panel.service
+fi
+install -d -m 0700 "$BACKUP"
+BACKUP_ITEMS=()
+if [[ "$FAST_UPDATE" == 1 ]]; then
+    # Light panel-scoped snapshot. The fast path never touches the proxies,
+    # the component binaries or the geo databases, so those stay out; the
+    # rollback reads state.tar only, hence no duplicate file copies.
+    for item in /opt/onyx-panel /var/lib/onyx-panel /etc/onyx-panel /etc/onyx-panel-xray /srv/tproxy-site /etc/caddy/Caddyfile /etc/systemd/system/caddy.service.d/tproxy.conf /etc/systemd/system/onyx-panel.service /etc/systemd/system/onyx-panel-firewall.service /etc/systemd/system/onyx-panel-traffic.service /etc/systemd/system/onyx-panel-traffic.timer /etc/systemd/system/onyx-panel-metrics.service /etc/systemd/system/onyx-panel-metrics.timer /etc/systemd/system/onyx-panel-sync-tls.service /etc/systemd/system/onyx-panel-sync-tls.timer /etc/systemd/system/onyx-panel-openflux.service /etc/systemd/system/onyx-panel-web-update.service /etc/systemd/system/onyx-panel-component-update.service /etc/systemd/system/onyx-panel-awg@.service /etc/systemd/system/onyx-panel-xray.service /etc/sysctl.d/90-onyx-panel-awg.conf /usr/local/sbin/onyx-panelctl /usr/local/sbin/onyx-panel-user-firewall /usr/local/sbin/onyx-panel-sync-tls /usr/local/sbin/onyx-panel-awg-run /usr/local/sbin/onyx-panel-awg-up /usr/local/sbin/onyx-panel-awg-down /usr/local/sbin/onyx-panel-update /usr/local/sbin/onyx-panel-uninstall /usr/local/sbin/ONYX /usr/local/sbin/onyx; do
+        [[ -e "$item" ]] || continue
+        BACKUP_ITEMS+=("$item")
+    done
+    shopt -s nullglob
+    for item in /etc/systemd/system/onyx-user-*.service; do
+        [[ -e "$item" ]] || continue
+        BACKUP_ITEMS+=("$item")
+    done
+    shopt -u nullglob
+    tar --numeric-owner --exclude='/opt/onyx-panel/xray' --exclude='/opt/onyx-panel/openflux' \
+        -cpf "$BACKUP/state.tar" "${BACKUP_ITEMS[@]}"
+else
+    for item in /opt/onyx-panel /opt/onyx-panel /opt/MTProxy /usr/local/bin/caddy /usr/local/bin/tproxy-server /usr/local/bin/amneziawg-go /usr/local/bin/awg /usr/local/bin/awg-quick /usr/local/sbin/onyx-panelctl /usr/local/sbin/onyx-panel-user-firewall /usr/local/sbin/onyx-panel-sync-tls /usr/local/sbin/onyx-panel-awg-run /usr/local/sbin/onyx-panel-awg-up /usr/local/sbin/onyx-panel-awg-down /usr/local/sbin/onyx-panel-update /usr/local/sbin/onyx-panel-uninstall /usr/local/sbin/ONYX /usr/local/sbin/onyx /etc/systemd/system/onyx-panel.service /etc/systemd/system/onyx-panel-firewall.service /etc/systemd/system/onyx-panel-traffic.service /etc/systemd/system/onyx-panel-traffic.timer /etc/systemd/system/onyx-panel-xray.service /etc/systemd/system/onyx-panel-openflux.service /etc/systemd/system/onyx-panel-awg@.service /etc/systemd/system/onyx-panel-sync-tls.service /etc/systemd/system/onyx-panel-sync-tls.timer /etc/systemd/system/onyx-panel-component-update.service /etc/systemd/system/tproxy-server.service /etc/systemd/system/mtproxy.service /etc/systemd/system/caddy.service.d/tproxy.conf /etc/caddy/Caddyfile /etc/tproxy-server /etc/mtproxy /etc/mita /etc/onyx-panel-xray /etc/sysctl.d/90-onyx-panel-awg.conf /var/lib/onyx-panel-xray /var/lib/onyx-panel-components /var/lib/onyx-panel /etc/onyx-panel /srv/tproxy-site; do
+        [[ -e "$item" ]] || continue
+        BACKUP_ITEMS+=("$item")
+        cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
+    done
+    shopt -s nullglob
+    for item in /etc/systemd/system/onyx-user-*.service /etc/systemd/system/onyx-panel-web-update.service /etc/systemd/system/onyx-panel-metrics.service /etc/systemd/system/onyx-panel-metrics.timer; do
+        [[ -e "$item" ]] || continue
+        BACKUP_ITEMS+=("$item")
+        cp -a --parents "$item" "$BACKUP" 2>/dev/null || true
+    done
+    shopt -u nullglob
+    tar --numeric-owner -cpf "$BACKUP/state.tar" "${BACKUP_ITEMS[@]}"
+fi
+echo "Backup created: $BACKUP"
+SNAPSHOT_DONE=1
+onyx_phase "бэкап готов"
 
 if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     DOMAIN="$(sed -n 's/^Environment=TPROXY_HOSTNAME=//p' /etc/systemd/system/caddy.service.d/tproxy.conf 2>/dev/null | head -n1 || true)"
@@ -434,7 +535,7 @@ if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     onyx_phase "панель установлена (миграция)"
 else
     onyx_phase "установка панели: старт"
-    ONYX_PANEL_UPDATE=1 ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
+    ONYX_PANEL_UPDATE=1 ONYX_PANEL_FAST="$FAST_UPDATE" ONYX_PANEL_VERSION="$UPDATE_VERSION" bash "$TEMP_DIR/source/install-panel.sh"
     onyx_phase "панель установлена"
 fi
 install -o root -g root -m 0755 \
