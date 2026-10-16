@@ -122,6 +122,10 @@ def get_status(_cached=True):
             print('update announce:', type(exc).__name__, file=sys.stderr, flush=True)
         finally:
             _ANNOUNCE_LOCK.release()
+        # announce может проставить data['announced'] — отдаём вызывающим уже
+        # свежий статус, иначе первый poll после завершения не увидит маркер.
+        _STATUS_CACHE["ts"] = time.time()
+        _STATUS_CACHE["data"] = dict(data)
     return data
 
 
@@ -258,10 +262,15 @@ def announce_finished(data):
     # и добавляет запись в колокольчик, иначе список событий выглядит пустым.
     current = current_version()
     announced = data.get('announced')
-    if current and announced is not None and announced != current \
-            and data.get('phase') not in ('running', 'queued'):
+    # announced также отсутствует на «свежей» done-статистике, которую get_status
+    # только что перевёл в checked: фаз-флип пишет файл раньше announce — без
+    # этой ветки запись changelog не создаётся вовсе.
+    fresh_done = announced is None and data.get('target') and data.get('phase') not in ('running', 'queued')
+    if (current and announced is not None and announced != current
+            and data.get('phase') not in ('running', 'queued')) or fresh_done:
         note_version = 'v' + current.lstrip('v')
         if read_state(STATUS).get('announced') == note_version:
+            data['announced'] = note_version
             return
         try:
             changes, link = release_notes(note_version)

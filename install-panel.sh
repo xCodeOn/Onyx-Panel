@@ -83,6 +83,8 @@ DATA_FILE="${DATA_DIR}/data.json"
 SERVICE_FILE="/etc/systemd/system/onyx-panel.service"
 FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
+# Panel version shipped by this installer; the release workflow greps for
+# this literal to keep installers in sync (Onyx Panel 2.6.7).
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
 FAVICON_SOURCE="${BASE}/onyx-favicon.png"
@@ -1910,7 +1912,51 @@ SUB_REQUESTS={}
 # Presets are deliberately standalone at authoring time: no CDN and no icon
 # font. On publication the panel moves executable CSS/JS into immutable local
 # files because the public relay uses a strict Content-Security-Policy.
-PRESETS=[]
+# The bundled "standard" soft-start stub leads the list: the custom-preset
+# handlers reject any operation on ids without the "custom-" prefix, so it can
+# never be edited or removed — only applied or previewed.
+STANDARD_STUB="""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b"><meta name="description" content="Onyx. Скоро здесь начнётся что-то особенное.">
+<title>Onyx — скоро</title>
+<style>
+*{box-sizing:border-box}html{background:#09090b}body{margin:0;color:#f4f1eb;font-family:Arial,Helvetica,sans-serif;min-height:100svh;overflow-x:hidden}button{font:inherit}::selection{background:#f47b42;color:#09090b}
+.scene{position:fixed;inset:0;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 50% 49%,#25140f66,transparent 62%)}canvas{width:100%;height:100%;position:absolute;inset:0}.grain{position:absolute;inset:0;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.7' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}
+.eclipse{position:absolute;left:50%;top:47%;width:min(64vw,660px);aspect-ratio:1;border-radius:50%;transform:translate(calc(-50% + var(--mx,0px)),calc(-50% + var(--my,0px)));transition:transform 1.5s ease-out;background:#09090b;box-shadow:0 0 90px #ed673113,inset 0 0 50px #25130e;isolation:isolate}.eclipse:before{content:"";position:absolute;inset:-2px;border-radius:50%;z-index:-2;background:conic-gradient(from 0deg,#ffbe78 0deg,#ed7540 20deg,#b13c151a 85deg,#28140e 170deg,#ffb168 220deg,#ffdfb4 240deg,#4b2516 290deg,#ffbe78);animation:orbit 22s linear infinite;box-shadow:0 0 24px #e9653030}.eclipse:after{content:"";position:absolute;inset:1px;border-radius:50%;z-index:-1;background:radial-gradient(ellipse at 50% 10%,#211812,#0b0b0d 45%,#09090b 80%);box-shadow:inset 0 0 24px #ff8b2510}.halo{position:absolute;inset:-23px;border:1px solid #ffffff05;border-radius:50%}.halo:after{content:"";position:absolute;inset:-65px;border:1px solid #ffffff03;border-radius:50%}
+.shell{position:relative;min-height:100svh;display:flex;flex-direction:column;padding:34px 4.4vw 24px}header,footer{display:flex;justify-content:space-between;align-items:center;gap:24px}header{animation:appear 1s both}.brand{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:700;letter-spacing:-.9px}.mark{width:23px;height:27px;display:inline-block;background:linear-gradient(130deg,#fff,#aaa);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%,50% 0,50% 24%,21% 38%,21% 62%,50% 77%,79% 62%,79% 38%,50% 24%)}.status{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#aaa6a2}.status i{height:5px;width:5px;border-radius:50%;background:#efaa70;box-shadow:0 0 12px #f79043;animation:breathe 3s ease-in-out infinite}main{flex:1;display:grid;place-items:center;text-align:center;padding:88px 0 94px}.hero{position:relative;width:100%}.eyebrow{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:#d0b39f;margin:0 0 30px;animation:rise 1s .15s both}.eyebrow:before,.eyebrow:after{content:"";display:inline-block;width:28px;height:1px;background:#a7856b66;vertical-align:middle;margin:0 15px}h1{font-size:clamp(108px,20.5vw,285px);font-weight:500;line-height:.83;letter-spacing:-.085em;margin:0 0 40px;padding-right:.08em;color:#ece9e4;text-shadow:0 5px 55px #0008;animation:rise 1.3s .25s both}h1 span{display:inline-block;background:linear-gradient(165deg,#fff 15%,#dad5cd 53%,#8a8581 100%);background-clip:text;-webkit-background-clip:text;color:transparent}h2{font-size:clamp(21px,2.35vw,32px);font-weight:400;letter-spacing:-.9px;margin:0 0 14px;animation:rise 1s .45s both}.description{font-size:14px;line-height:1.8;color:#94918f;margin:0 auto;max-width:380px;animation:rise 1s .6s both}.action{margin-top:30px;display:inline-flex;align-items:center;gap:30px;border:1px solid #ffffff24;background:#ffffff06;color:#eee7df;border-radius:50px;padding:15px 20px 15px 25px;font-size:12px;cursor:pointer;transition:background .3s,border-color .3s,transform .3s;animation:rise 1s .75s both}.action:hover{background:#f4965120;border-color:#eaaa7870;transform:translateY(-3px)}.action svg{width:16px;height:16px;transition:transform .3s}.action:hover svg{transform:rotate(45deg)}button:focus-visible{outline:2px solid #ffbe78;outline-offset:6px}.side{position:absolute;left:0;top:47%;writing-mode:vertical-rl;transform:rotate(180deg);font:9px monospace;letter-spacing:3px;color:#76706b}.coordinates{position:absolute;right:0;top:48%;color:#79716b;font:9px monospace;letter-spacing:2px;writing-mode:vertical-rl}.bottom{animation:appear 1s 1s both}footer{border-top:1px solid #ffffff13;padding-top:20px;font-size:10px;color:#77736f;letter-spacing:.4px}.footer-note{display:flex;align-items:center;gap:9px}.footer-note:before{content:"";width:4px;height:4px;background:#a28e7b;border-radius:50%}.controls{border:0;background:transparent;color:#99938e;cursor:pointer;display:flex;align-items:center;gap:8px;padding:9px 0;font-size:10px}.bars{height:12px;display:flex;align-items:center;gap:3px}.bars i{width:2px;height:9px;background:#c39c7c;animation:bars 1.3s ease-in-out infinite alternate}.bars i:nth-child(2){animation-delay:-.5s}.bars i:nth-child(3){animation-delay:-.9s}.progress-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:#ffffff05}.progress-line:after{content:"";position:absolute;width:20%;height:100%;background:linear-gradient(90deg,transparent,#d69560,transparent);animation:scan 9s linear infinite}
+dialog{color:#eee9e3;background:#131214;border:1px solid #e3ac7838;border-radius:20px;max-width:440px;width:calc(100% - 40px);padding:38px;box-shadow:0 20px 100px #0009}dialog::backdrop{background:#0009;backdrop-filter:blur(12px)}dialog[open]{animation:rise .3s both}dialog h2{animation:none;margin-top:22px;font-size:28px}dialog p{color:#a6a09b;line-height:1.8;font-size:14px}.close{position:absolute;top:14px;right:18px;background:none;border:0;color:#aaa;font-size:25px;cursor:pointer}.dialog-label{color:#d0a17d;font:10px monospace;letter-spacing:2px}.paused *,.paused *:before,.paused *:after{animation-play-state:paused!important}
+@keyframes orbit{to{transform:rotate(360deg)}}@keyframes breathe{50%{opacity:.4;box-shadow:0 0 4px #f79043}}@keyframes rise{from{opacity:0;transform:translateY(20px);filter:blur(5px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}@keyframes appear{from{opacity:0}to{opacity:1}}@keyframes bars{to{height:3px}}@keyframes scan{from{left:-20%}to{left:100%}}
+@media(min-width:1600px){.shell{padding-top:45px}main{padding:100px 0}.eclipse{width:750px}}
+@media(max-width:600px){.shell{padding:24px 23px 18px}.brand{font-size:18px}.status{font-size:8px;letter-spacing:1.3px}.eclipse{width:106vw;top:44%}main{padding:100px 0 105px}.eyebrow{font-size:8px;letter-spacing:2.8px;margin-bottom:34px}.eyebrow:before,.eyebrow:after{width:15px;margin:0 10px}h1{font-size:29vw;margin-bottom:35px}h2{font-size:23px}.description{font-size:12px;max-width:270px}.side,.coordinates{display:none}footer{font-size:9px;flex-wrap:wrap;gap:12px}.footer-note{display:none}.action{font-size:11px}.controls{font-size:9px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="scene" aria-hidden="true"><canvas id="dust"></canvas><div class="eclipse"><div class="halo"></div></div><div class="grain"></div></div>
+<div class="shell"><header><div class="brand"><span class="mark" aria-hidden="true"></span>onyx</div><div class="status"><i></i>Скоро открытие</div></header>
+<main><div class="hero"><div class="side" aria-hidden="true">BEYOND THE ORDINARY</div><p class="eyebrow">Новое притяжение</p><h1 aria-label="Onyx"><span>Onyx</span></h1><h2>Всё начинается с тишины.</h2><p class="description">Мы создаём что-то особенное.<br>Совсем скоро здесь станет интереснее.</p><button class="action" id="more" type="button">Что дальше?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button><div class="coordinates" aria-hidden="true">A NEW CHAPTER / ONYX</div></div></main>
+<div class="bottom"><footer><span>&copy; <span id="year">2026</span> Onyx</span><span class="footer-note">На пороге чего-то нового</span><button class="controls" id="motion" type="button" aria-pressed="false"><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="motion-label">Остановить анимацию</span></button></footer></div><div class="progress-line" aria-hidden="true"></div></div>
+<dialog id="info" aria-labelledby="dialog-title"><button class="close" type="button" aria-label="Закрыть">&times;</button><span class="dialog-label">ONYX / COMING SOON</span><h2 id="dialog-title">Встречаемся здесь.</h2><p>Onyx готовится к запуску. Мы откроем сайт, когда всё будет готово. Загляните чуть позже — продолжение уже близко.</p></dialog>
+<script>
+(()=>{'use strict';
+const canvas=document.getElementById('dust'),ctx=canvas.getContext('2d'),media=matchMedia('(prefers-reduced-motion: reduce)'),motion=document.getElementById('motion'),label=document.getElementById('motion-label'),dialog=document.getElementById('info');
+let w=0,h=0,particles=[],paused=media.matches,frame=0,last=0;const pointer={x:-1000,y:-1000};
+document.getElementById('year').textContent=new Date().getFullYear();
+function resize(){w=innerWidth;h=innerHeight;const dpr=Math.min(devicePixelRatio||1,2);canvas.width=w*dpr;canvas.height=h*dpr;if(!ctx)return;ctx.setTransform(dpr,0,0,dpr,0,0);particles=Array.from({length:Math.min(95,Math.floor(w*h/14000))},()=>({x:Math.random()*w,y:Math.random()*h,r:.4+Math.random()*1.1,v:.07+Math.random()*.14,a:.1+Math.random()*.4,phase:Math.random()*6.28}));draw(0)}
+function draw(dt){if(!ctx)return;ctx.clearRect(0,0,w,h);for(const p of particles){p.y-=p.v*dt;p.x+=Math.sin(p.phase+p.y*.004)*.045*dt;if(p.y<0)p.y=h;const dx=p.x-pointer.x,dy=p.y-pointer.y,d=Math.hypot(dx,dy);const force=d<130?(1-d/130)*14:0;ctx.beginPath();ctx.fillStyle='rgba(220,178,138,'+p.a+')';ctx.arc(p.x+(d?dx/d*force:0),p.y+(d?dy/d*force:0),p.r,0,Math.PI*2);ctx.fill()}}
+function tick(t){if(paused||document.hidden){frame=0;return}draw(Math.min((t-last)/16.67,2));last=t;frame=requestAnimationFrame(tick)}
+function start(){if(!frame&&!paused&&!document.hidden){last=performance.now();frame=requestAnimationFrame(tick)}}
+function sync(){document.body.classList.toggle('paused',paused);motion.setAttribute('aria-pressed',String(paused));label.textContent=paused?'Включить анимацию':'Остановить анимацию';if(paused){cancelAnimationFrame(frame);frame=0}else start()}
+motion.addEventListener('click',()=>{paused=!paused;sync()});media.addEventListener('change',e=>{paused=e.matches;sync()});
+addEventListener('pointermove',e=>{if(paused)return;pointer.x=e.clientX;pointer.y=e.clientY;document.documentElement.style.setProperty('--mx',((e.clientX/w-.5)*12)+'px');document.documentElement.style.setProperty('--my',((e.clientY/h-.5)*12)+'px')},{passive:true});
+document.addEventListener('pointerleave',()=>{pointer.x=pointer.y=-1000});addEventListener('resize',resize);document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else start()});
+document.getElementById('more').addEventListener('click',()=>dialog.showModal());dialog.querySelector('.close').addEventListener('click',()=>dialog.close());dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close()}});
+resize();sync();
+})();
+</script></body></html>"""
+PRESETS=[{"id":"standard","name":"Стандартная заглушка","description":"Стартовая страница Onyx — то, что видно сразу после установки. Всегда доступна: изменить или удалить нельзя, можно применить заново.","html":STANDARD_STUB}]
 os.makedirs(os.path.dirname(DATA),exist_ok=True)
 if not os.path.exists(KEY):
     with open(KEY,"wb") as f: f.write(secrets.token_bytes(32))
@@ -3504,6 +3550,7 @@ class Handler(BaseHTTPRequestHandler):
 </div>
 </div>'''
             security_dialogs=f'''<dialog id="totpDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Включение 2FA</h2><p class="totp-hint">Отсканируйте QR в приложении-аутентификаторе</p><img id="totpQr" alt="QR-код TOTP" hidden><p class="totp-secret-line">Секрет: <code id="totpSecret"></code></p><p class="totp-otp-label">Введите код из приложения</p><div class="totp-cells" id="totpCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpCode"><p class="totp-status" id="totpDialogStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="primary" id="totpConfirm">Включить</button></div></dialog>
+<dialog id="totpDisableDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Выключение 2FA</h2><p class="totp-hint">Введите текущий код из приложения-аутентификатора, чтобы подтвердить выключение</p><div class="totp-otp-label">Код из приложения</div><div class="totp-cells" id="totpDisableCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpDisableCode"><p class="totp-status" id="totpDisableStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="btn danger" id="totpDisableConfirm">Выключить</button></div></dialog>
 <dialog id="apiKeyDialog" class="create-dialog"><div class="dialog-head"><div><h2>Ключ создан</h2><small>Токен показывается только один раз — сохраните его</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><textarea class="code-editor" id="apiKeyToken" readonly style="min-height:74px"></textarea><div class="actions create-actions"><button type="button" class="btn" id="apiKeyCopy">Скопировать</button><button type="button" class="btn primary" data-close-dialog>Готово</button></div></div></dialog>'''
             panel_js='''<script>
 (()=>{async function submit(form,status,done){
@@ -3646,11 +3693,20 @@ try{const res=await post(PATH+"/totp-enable",{csrf:CSRF,code:document.getElement
 s.className="panel-setting-status ok";s.textContent=res.message;document.getElementById("totpDialog").close();setTimeout(()=>location.reload(),900)}
 catch(err){s.className="panel-setting-status err";s.textContent=err.message}});
 const totpDisableBtn=document.getElementById("totpDisableBtn");
-if(totpDisableBtn)totpDisableBtn.addEventListener("click",async()=>{
-const s=document.getElementById("totpStatus");const code=prompt("Введите текущий код из приложения, чтобы выключить 2FA:");if(code===null)return;
-s.className="panel-setting-status";s.textContent="Выключаю…";
-try{const res=await post(PATH+"/totp-disable",{csrf:CSRF,code:code.trim()});s.className="panel-setting-status ok";s.textContent=res.message;setTimeout(()=>location.reload(),900)}
-catch(err){s.className="panel-setting-status err";s.textContent=err.message}});
+if(totpDisableBtn){const dcells=Array.from(document.querySelectorAll("#totpDisableCells input")),dHidden=document.getElementById("totpDisableCode"),dStatus=document.getElementById("totpDisableStatus"),dDialog=document.getElementById("totpDisableDialog"),dConfirm=document.getElementById("totpDisableConfirm");
+const dSync=()=>{dHidden.value=dcells.map(c=>c.value).join("")};
+dcells.forEach((cell,i)=>{cell.addEventListener("input",()=>{cell.value=cell.value.replace(/\\D/g,"").slice(0,1);if(cell.value&&i<dcells.length-1)dcells[i+1].focus();dSync()});cell.addEventListener("keydown",e=>{if(e.key==="Backspace"&&!cell.value&&i>0){dcells[i-1].focus();dcells[i-1].value="";dSync();e.preventDefault()}});cell.addEventListener("paste",e=>{const digits=(e.clipboardData||window.clipboardData).getData("text").replace(/\\D/g,"");if(!digits)return;e.preventDefault();digits.split("").slice(0,dcells.length).forEach((d,j)=>dcells[j].value=d);dcells[Math.min(digits.length,dcells.length-1)].focus();dSync()})});
+totpDisableBtn.addEventListener("click",()=>{dStatus.textContent="";dStatus.className="totp-status";dcells.forEach(c=>c.value="");dHidden.value="";dDialog.showModal();setTimeout(()=>dcells[0].focus(),30)});
+dConfirm.addEventListener("click",async()=>{
+if(dHidden.value.trim().length!==6){dStatus.className="totp-status err";dStatus.textContent="Введите 6 цифр из приложения.";return}
+const s=document.getElementById("totpStatus");dConfirm.disabled=true;dConfirm.textContent="Выключаем…";dStatus.className="totp-status";dStatus.textContent="Выключаю…";dDialog.classList.add("working");
+try{const res=await post(PATH+"/totp-disable",{csrf:CSRF,code:dHidden.value.trim()});
+dDialog.classList.remove("working");dDialog.classList.add("done");
+dStatus.className="panel-setting-status ok";dStatus.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"2FA выключена.");
+setTimeout(()=>{dDialog.close();location.reload()},900)}
+catch(err){dStatus.className="totp-status err";dStatus.textContent=err.message}
+finally{dConfirm.disabled=false;dConfirm.textContent="Выключить"}});
+dDialog.addEventListener("close",()=>dDialog.classList.remove("working","done"));}
 const apiKeyForm=document.getElementById("apiKeyForm"),apiKeyDialog=document.getElementById("apiKeyDialog");
 if(apiKeyForm){const s=document.getElementById("apiKeyStatus");
 apiKeyForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Создаю…";
@@ -3811,7 +3867,10 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                     if async_action:
                         login_json(False,"Неверный код 2FA","code",401)
                     else:
-                        self.redirect("/login")
+                        # JS-only sign-in page sends X-Onyx-Async; a plain form
+                        # post is a non-JS client — honest 401 page instead of a
+                        # silent redirect.
+                        self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#071116;color:#e9f4f6;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #24404b;border-radius:22px;background:#0f2028}a{color:#8edcff}</style><div class=b><h2>Неверный код 2FA</h2><p>Код двухфакторной аутентификации не подошёл. Попробуйте войти ещё раз.</p><a href="%s/login">Вернуться ко входу</a></div>""" % esc(PANEL_PATH),401)
                     return
                 token=str(int(time.time()))+"-"+secrets.token_hex(16)+"-"+role
                 sid=sign(token)
@@ -3855,7 +3914,10 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 if async_action:
                     login_json(False,"Неверный логин или пароль","password",401)
                 else:
-                    self.redirect("/login")
+                    # JS-only sign-in page sends X-Onyx-Async; a plain form post is
+                    # a non-JS client — return the honest 401 error page instead of
+                    # silently redirecting it back to the empty form.
+                    self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#071116;color:#e9f4f6;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #24404b;border-radius:22px;background:#0f2028}a{color:#8edcff}</style><div class=b><h2>Неверный логин или пароль</h2><p>Проверьте данные и попробуйте ещё раз.</p><a href="%s/login">Вернуться ко входу</a></div>""" % esc(PANEL_PATH),401)
             return
 
         if path.startswith("/onyx-invite/") and path.endswith("/claim"):
@@ -6630,7 +6692,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '1.0.0')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.7')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
