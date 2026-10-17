@@ -84,7 +84,7 @@ SERVICE_FILE="/etc/systemd/system/onyx-panel.service"
 FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
 # Panel version shipped by this installer; the release workflow greps for
-# this literal to keep installers in sync (Onyx Panel 2.7.0).
+# this literal to keep installers in sync (Onyx Panel 2.7.1).
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
 FAVICON_SOURCE="${BASE}/onyx-favicon.png"
@@ -3923,19 +3923,19 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
 </div>
 {tg_card}
 {plans_card}
-{extra_cards2['observe']}
-</div>
-<div class="settings-col">
-{bypass_card}
-<div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
-<div class="card-body">
-<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
-</div>
-</div>
-{extra_cards2['cloud']}
-{security_card}
-{extra_cards2['ports']}
-</div>
+	{extra_cards2['observe']}
+	{extra_cards2['ports']}
+	</div>
+	<div class="settings-col">
+	{bypass_card}
+	<div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
+	<div class="card-body">
+	<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
+	</div>
+	</div>
+	{security_card}
+	{extra_cards2['cloud']}
+	</div>
 </div>
 {editor_card}
 {editor_rest}
@@ -7090,7 +7090,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.7.0')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.7.1')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"

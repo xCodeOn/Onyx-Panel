@@ -3158,6 +3158,26 @@ SETTINGS_EXTRA_CSS = '''
 .choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:16px 0}
 @media(max-width:640px){.choice-grid{grid-template-columns:1fr}}
 @media(max-width:1100px){.settings-flow{grid-template-columns:1fr}}
+/* Uniform card headers: the description always reserves two lines, so every
+   header — and every collapsed card — is the same height whether its subtitle
+   wraps to one line or two. */
+.settings-flow .card>.card-title>div:first-child>p{min-height:42px;min-height:2lh}
+.settings-flow .card>.card-title>div:first-child{flex:1 1 auto;min-width:0}
+.settings-flow .card>.card-title .actions{margin-left:auto}
+/* Mobile: single column, wide tables scroll horizontally instead of crushing
+   their columns, and inline form rows stack. */
+@media(max-width:700px){
+  /* Narrow screens wrap more subtitles to three lines — reserve three so the
+     cards stay uniform here too. */
+  .settings-flow .card>.card-title>div:first-child>p{min-height:63px;min-height:3lh}
+  .settings-flow .card>.card-title{align-items:flex-start}
+  .settings-flow .card>.card-title .actions{flex-wrap:wrap;justify-content:flex-end}
+  .fw-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .limit-field{flex-wrap:wrap}
+  .limit-field input{max-width:none;flex:1 1 100%}
+  .limit-field select{flex:1 1 auto}
+  .limit-field .btn{flex:1 1 100%;justify-content:center}
+}
 .panel-setting+.panel-setting{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}
 .audit-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .audit-filter select{font-size:11px;width:auto;max-width:230px;padding:8px 28px 8px 10px}
