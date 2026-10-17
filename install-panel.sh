@@ -84,7 +84,7 @@ SERVICE_FILE="/etc/systemd/system/onyx-panel.service"
 FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
 # Panel version shipped by this installer; the release workflow greps for
-# this literal to keep installers in sync (Onyx Panel 2.7.1).
+# this literal to keep installers in sync (Onyx Panel 2.7.2).
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
 FAVICON_SOURCE="${BASE}/onyx-favicon.png"
@@ -7090,7 +7090,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.7.1')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.7.2')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
