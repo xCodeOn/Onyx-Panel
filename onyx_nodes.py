@@ -8,6 +8,7 @@ import re
 import secrets
 import socket
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -368,3 +369,53 @@ def node_status(node, timeout=6):
     """Lightweight availability probe: version, domain and location."""
     data = request(node, 'GET', API_PREFIX + '/status', timeout=timeout)
     return data if isinstance(data, dict) else {}
+
+
+BENCH_SAMPLES = 4
+
+
+def _ttfb(url, timeout):
+    """One HTTPS round trip; milliseconds until the first response byte."""
+    started = time.monotonic()
+    request_ = urllib.request.Request(url, method='HEAD',
+                                      headers={'User-Agent': 'Onyx-Controller/2.7'})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(request_, timeout=timeout) as response:
+        response.read(1)
+    return (time.monotonic() - started) * 1000
+
+
+def aggregate(samples):
+    """Median/min/max of the successful samples; None when nothing answered."""
+    values = sorted(value for value in samples if value is not None)
+    if not values:
+        return None
+    return {'median_ms': int(values[len(values) // 2]),
+            'min_ms': int(values[0]), 'max_ms': int(values[-1]),
+            'samples': len(values)}
+
+
+def benchmark(node, samples=BENCH_SAMPLES, timeout=8):
+    """Multi-sample HTTPS TTFB against the node's own domain.
+
+    The median of several round trips is far more honest than one ping: it
+    filters retransmits and anycast jitter, and the panel stores the result
+    on the node record so the Nodes tab can sort by real latency.
+    """
+    base = normalize_url(node.get('url'))
+    parsed = urllib.parse.urlsplit(base)
+    resolve_public(parsed.hostname)
+    target = 'https://' + parsed.hostname + '/'
+    measured = []
+    for _ in range(max(1, min(10, int(samples)))):
+        try:
+            measured.append(_ttfb(target, timeout))
+        except Exception:
+            measured.append(None)
+    stats = aggregate(measured)
+    return {'ok': stats is not None, 'at': int(time.time()),
+            'median_ms': stats['median_ms'] if stats else 0,
+            'min_ms': stats['min_ms'] if stats else 0,
+            'max_ms': stats['max_ms'] if stats else 0,
+            'samples': stats['samples'] if stats else 0,
+            'message': '' if stats else 'Нода не ответила на HTTPS-замер.'}

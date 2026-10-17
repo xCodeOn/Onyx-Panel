@@ -20,7 +20,8 @@ ACTIONS = (
     "api-key-create", "api-key-delete", "telegram-save", "alerts-save",
     "backups-save", "backup-run", "backup-cloud-save", "import", "export",
     "site-html", "preset-apply", "openflux", "component-update", "panel-update",
-    "firewall-port", "diagnostics",
+    "firewall-port", "diagnostics", "security-save", "security-preset",
+    "promo-create", "promo-delete", "unbound-toggle",
 )
 
 

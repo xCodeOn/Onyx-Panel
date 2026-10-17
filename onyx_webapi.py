@@ -10,7 +10,7 @@ import hmac
 import secrets
 import time
 
-PROTOCOLS = ("web", "vless", "hysteria", "mtproto", "awg20", "awg31")
+PROTOCOLS = ("web", "vless", "hysteria", "tuic", "mtproto", "awg20", "awg31")
 MAX_KEYS = 20
 
 

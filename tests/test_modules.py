@@ -9,6 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import onyx_totp, onyx_webapi, onyx_access, onyx_failover, onyx_cascade, onyx_telegram
+import onyx_bypass
 
 # ---- TOTP: RFC 6238 reference secret, cross-checked against a local HMAC ref
 secret = base64.b32encode(b'12345678901234567890').decode().rstrip('=')
@@ -325,7 +326,7 @@ _ns = {'onyx_routing': _types.SimpleNamespace(load=lambda p: {}, xray_additions=
                                                               'private_key': 'P' * 42 + 'A=', 'public_key': 'Q' * 42 + 'A=',
                                                               'short_ids': ['abcd1234']},
                                               inbound=lambda s, u: onyx_reality.inbound(s, u)),
-       'onyx_cascade': _types.SimpleNamespace(load_cascades=lambda p: [], xray_additions=lambda c, u: ([], [])),
+       'onyx_cascade': _types.SimpleNamespace(load_cascades=lambda p: [], xray_additions=lambda c, u, least_ping=False: ([], []), xray_balancer=lambda c, least_ping=False: {}),
        'onyx_awg': _types.SimpleNamespace(PROTOCOLS=('awg20', 'awg31')),
        'XRAY_PATH_FILE': os.path.join(ROOT, 'tests', 'xray-path-stub'), 'XRAY_VLESS_PORT': 10000,
        'HYSTERIA_PORT': 8443, 'XRAY_CERT': os.path.join(ROOT, 'tests', 'cert-stub'),
@@ -334,9 +335,15 @@ _ns = {'onyx_routing': _types.SimpleNamespace(load=lambda p: {}, xray_additions=
        'XRAY_API': '127.0.0.1:10085', 'XRAY_BIN': '/bin/true', 'XRAY_SERVICE': 'onyx-panel-xray',
        'ROUTING_FILE': '/tmp/none1', 'WARP_FILE': '/tmp/none2', 'REALITY_FILE': '/tmp/none3',
        'CASCADES_FILE': '/tmp/none4', 'FIREWALL_SCRIPT': '/tmp/fw-stub.sh',
+       'onyx_bypass': onyx_bypass, 'onyx_firewall': _types.SimpleNamespace(reconcile=lambda **kw: None),
+       'TUIC_PORT': 9443, 'UNBOUND_MARKER': '/tmp/none-unbound-marker', 'PANEL_DATA': '/tmp/none-panel-data',
+       'collect_traffic': lambda d: None,
        'run': lambda *a, **k: _types.SimpleNamespace(returncode=0, stdout='OK', stderr=''),
        'os': _OsShim(), 're': re, 'json': json, 'time': time, 'sys': sys,
        'grp': _types.SimpleNamespace(getgrnam=lambda name: _types.SimpleNamespace(gr_gid=0))}
+# _panel_bypass is module-level in the manager, not inside sync_xray, so the
+# single-function extract misses it; provide the real definition.
+exec(compile(_ast.Module(body=[next(n for n in _tree.body if isinstance(n, _ast.FunctionDef) and n.name == '_panel_bypass')], type_ignores=[]), '_panel_bypass', 'exec'), _ns)
 
 def _extract_fn(name):
     fn = next(n for n in _tree.body if isinstance(n, _ast.FunctionDef) and n.name == name)

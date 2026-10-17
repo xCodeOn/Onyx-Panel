@@ -148,12 +148,16 @@ def inbound(state, users):
             'sniffing': {'enabled': True, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': True}}
 
 
-def link(state, secret, name='Proxy', host=''):
-    """vless:// client link for this Reality inbound; '' while disabled."""
+def link(state, secret, name='Proxy', host='', fp='chrome'):
+    """vless:// client link for this Reality inbound; '' while disabled.
+
+    fp is the client's TLS fingerprint; the panel passes the per-user rotated
+    one from onyx_bypass.fp_for so links always match what the client sends.
+    """
     if not enabled(state):
         return ''
     query = urlencode({'encryption': 'none', 'security': 'reality', 'flow': 'xtls-rprx-vision',
-                       'pbk': state.get('public_key', ''), 'fp': 'chrome',
+                       'pbk': state.get('public_key', ''), 'fp': str(fp or 'chrome'),
                        'sni': state['server_names'][0], 'sid': state['short_ids'][0],
                        'spx': '/', 'type': 'tcp'})
     from urllib.parse import quote

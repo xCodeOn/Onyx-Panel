@@ -84,7 +84,7 @@ SERVICE_FILE="/etc/systemd/system/onyx-panel.service"
 FIREWALL_SERVICE_FILE="/etc/systemd/system/onyx-panel-firewall.service"
 APP_FILE="${APP_DIR}/panel.py"
 # Panel version shipped by this installer; the release workflow greps for
-# this literal to keep installers in sync (Onyx Panel 2.6.8).
+# this literal to keep installers in sync (Onyx Panel 2.7.0).
 LOGO_SOURCE="${BASE}/onyx-logo.png"
 LOGO_FILE="${APP_DIR}/onyx-logo.png"
 FAVICON_SOURCE="${BASE}/onyx-favicon.png"
@@ -196,7 +196,7 @@ MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
     [[ -s "$BASE/assets/${PWA_ICON}.png" ]] || die "PWA icon is missing: assets/${PWA_ICON}.png"
 done
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
 FLAG_ARCHIVE="$BASE/onyx-panel/flags.tar.gz"
@@ -315,6 +315,14 @@ else: raise SystemExit("AWG interface did not appear")
 subprocess.run(["/usr/local/bin/awg","setconf",iface,base+".conf"],check=True)
 subprocess.run(["/usr/sbin/ip","address","replace",address,"dev",iface],check=True)
 subprocess.run(["/usr/sbin/ip","link","set","mtu",str(mtu),"up","dev",iface],check=True)
+# Per-profile speed cap: the panel writes <uid>.speed (kbit, 0 = no limit)
+# and runs the same tc command immediately on change; here it re-applies at boot.
+try:
+    with open(base+".speed",encoding="ascii") as handle: kbit=int(handle.read().strip() or 0)
+except Exception: kbit=0
+if kbit>0:
+    burst=max(16384,kbit*1000//125//10)
+    subprocess.run(["/sbin/tc","qdisc","replace","dev",iface,"root","tbf","rate","%dbit"%(kbit*1000),"burst",str(burst),"latency","50ms"],check=False)
 AWGUP
 chmod 0755 /usr/local/sbin/onyx-panel-awg-run /usr/local/sbin/onyx-panel-awg-up
 cat > /etc/systemd/system/onyx-panel-awg@.service <<'EOF'
@@ -386,10 +394,52 @@ EOF
 chmod 0644 /etc/systemd/system/caddy.service.d/tproxy.conf
 
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v qrencode >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v xz >/dev/null 2>&1; then
+if ! command -v qrencode >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v xz >/dev/null 2>&1 || ! command -v unbound >/dev/null 2>&1; then
     onyx_apt_update_once
-    ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends qrencode unzip xz-utils
+    ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends qrencode unzip xz-utils unbound unbound-anchor
 fi
+
+# Unbound — локальный DoT/DoH-резолвер для обхода DNS-отравления провайдером.
+# Служба ставится, но включается только по маркеру /etc/onyx-panel/unbound.enabled
+# (панельная вкладка «Обход и защита»); до тех пор Xray резолвит системным
+# резолвером, как раньше. Преднастроенный root-hints и кэш в tmpfs.
+if ! grep -q '^# Onyx Panel unbound' /etc/unbound/unbound.conf 2>/dev/null; then
+    cat >> /etc/unbound/unbound.conf <<'UNBOUND_EOF'
+
+# Onyx Panel unbound
+server:
+    interface: 127.0.0.1
+    interface: ::1
+    port: 53
+    do-ip4: yes
+    do-ip6: yes
+    do-udp: yes
+    do-tcp: yes
+    prefer-ip6: no
+    access-control: 127.0.0.0/8 allow
+    access-control: ::1 allow
+    hide-identity: yes
+    hide-version: yes
+    qname-minimisation: yes
+    minimal-responses: yes
+    prefetch: yes
+    cache-max-ttl: 3600
+    num-threads: 2
+    so-reuseport: yes
+    rrset-cache-size: 64m
+    msg-cache-size: 64m
+    local-zone: "." transparent
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+    forward-addr: 1.0.0.1@853#cloudflare-dns.com
+    forward-addr: 9.9.9.9@853#dns.quad9.net
+    forward-addr: 149.112.112.112@853#dns.quad9.net
+UNBOUND_EOF
+fi
+systemctl enable unbound >/dev/null 2>&1 || true
+systemctl restart unbound >/dev/null 2>&1 || true
 
 install -d -m 0755 "$APP_DIR" /etc/onyx-panel
 install -d -m 0700 "$DATA_DIR"
@@ -581,7 +631,7 @@ fi
 
 ui_stage "Менеджер onyx-panelctl"
 
-for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py; do
+for module in onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
     install -o root -g root -m 0644 "$BASE/$module" "$APP_DIR/$module"
 done
@@ -638,6 +688,7 @@ import onyx_cascade
 import onyx_routing
 import onyx_warp
 import onyx_reality
+import onyx_bypass
 
 USERS="/etc/onyx-panel/users.json"
 PROFILES="/etc/tproxy-server/profiles.json"
@@ -658,6 +709,9 @@ XRAY_TLS_SYNC="/usr/local/sbin/onyx-panel-sync-tls"
 XRAY_VLESS_PORT=10000
 XRAY_API="127.0.0.1:10085"
 HYSTERIA_PORT=8443
+TUIC_PORT=9443
+PANEL_DATA="/var/lib/onyx-panel/data.json"
+UNBOUND_MARKER="/etc/onyx-panel/unbound.enabled"
 CADDYFILE="/etc/caddy/Caddyfile"
 TRAFFIC_FILE="/var/lib/onyx-panel/traffic.json"
 TRAFFIC_LOCK="/var/lib/onyx-panel/traffic.lock"
@@ -690,7 +744,7 @@ def load():
             # records keep working with their stable VLESS/Hysteria2 profiles.
             d["users"]=[u for u in d["users"] if u.get("protocol","web") not in ("mieru","naive")]
             for sub in d["subscriptions"]:
-                supported=[p for p in sub.get("protocols",[]) if p in ("vless","hysteria")]
+                supported=[p for p in sub.get("protocols",[]) if p in ("vless","hysteria","tuic")]
                 sub["protocols"]=supported or ["vless","hysteria"]
             d["users"]=[u for u in d["users"] if not (u.get("subscription_id") and u.get("protocol")=="web")]
             for u in d["users"]:
@@ -705,6 +759,10 @@ def load():
                         u.pop(key,None)
                 elif protocol=="hysteria":
                     u["backend_port"]=HYSTERIA_PORT
+                    for key in ("udp_idle_timeout","masquerade"):
+                        u.pop(key,None)
+                elif protocol=="tuic":
+                    u["backend_port"]=TUIC_PORT
                     for key in ("udp_idle_timeout","masquerade"):
                         u.pop(key,None)
             return d
@@ -801,6 +859,15 @@ WantedBy=multi-user.target
     os.chmod(tmp,0o644)
     os.replace(tmp,path)
 
+def _panel_bypass():
+    # Bypass section lives in the panel's data.json (settings tab), while the
+    # manager only owns users.json — read it read-only for firewall/xray needs.
+    try:
+        with open(PANEL_DATA,encoding="utf-8") as f: raw=json.load(f)
+        return onyx_bypass.normalize(raw.get("bypass") if isinstance(raw,dict) else {})
+    except Exception:
+        return onyx_bypass.normalize({})
+
 def sync_firewall(d):
     # Preserve the last counters before recreating the nftables table.
     try: collect_traffic(d)
@@ -809,6 +876,8 @@ def sync_firewall(d):
     mtproto_ports=[int(u["backend_port"]) for u in d["users"] if u.get("enabled",True) and u.get("protocol","web")=="mtproto"]
     stats=[int(u["stats_port"]) for u in d["users"] if u.get("enabled",True) and u.get("protocol","web") in ("web","mtproto") and u.get("stats_port")]
     hysteria_enabled=any(u.get("enabled",True) and u.get("protocol")=="hysteria" for u in d["users"])
+    tuic_enabled=any(u.get("enabled",True) and u.get("protocol")=="tuic" for u in d["users"])
+    bypass=_panel_bypass()
     awg_users=[u for u in d["users"] if u.get("enabled",True) and u.get("protocol") in onyx_awg.PROTOCOLS]
     lines=[
         "#!/usr/bin/env bash",
@@ -817,6 +886,12 @@ def sync_firewall(d):
         "nft add table inet onyx_panel",
         "nft 'add chain inet onyx_panel input { type filter hook input priority -20; policy accept; }'",
         "nft 'add chain inet onyx_panel output { type filter hook output priority -20; policy accept; }'",
+        # Honeypot defense bans live in dynamic sets with a 24h timeout; the
+        # drop rules must precede every accept so banned hosts stay blocked.
+        "nft 'add set inet onyx_panel ban4 { type ipv4_addr; flags dynamic,timeout; timeout 24h; }'",
+        "nft 'add set inet onyx_panel ban6 { type ipv6_addr; flags dynamic,timeout; timeout 24h; }'",
+        "nft 'add rule inet onyx_panel input ip saddr @ban4 counter drop'",
+        "nft 'add rule inet onyx_panel input ip6 saddr @ban6 counter drop'",
         "nft 'add rule inet onyx_panel output oifname \"lo\" tcp dport 2398 counter comment \"onyx:primary:up\"'",
         "nft 'add rule inet onyx_panel input iifname \"lo\" tcp sport 2398 counter comment \"onyx:primary:down\"'"
     ]
@@ -840,6 +915,14 @@ def sync_firewall(d):
         lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" tcp dport { %s } counter drop'" % ",".join(map(str,sorted(stats))))
     if hysteria_enabled:
         lines.append("nft 'add rule inet onyx_panel input udp dport %d counter accept'" % HYSTERIA_PORT)
+    if tuic_enabled:
+        lines.append("nft 'add rule inet onyx_panel input udp dport %d counter accept'" % TUIC_PORT)
+    # Hopping ports are extra public TCP listeners that clone the Reality
+    # inbound; without an accept rule the panel would open them in Xray only.
+    reality_state=onyx_reality.load(REALITY_FILE)
+    hop_ports=[int(p) for p in bypass["hopping_ports"] if reality_state.get("enabled") or not reality_state]
+    for hop in hop_ports:
+        lines.append("nft 'add rule inet onyx_panel input tcp dport %d counter accept'" % hop)
     for u in awg_users:
         uid=u["id"]; port=int(u["backend_port"])
         lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" udp dport %d counter accept comment \"onyx:%s:up\"'"%(port,uid))
@@ -866,11 +949,10 @@ def sync_firewall(d):
     route=run("ip","-4","route","show","default").stdout or ""
     match=re.search(r"\bdev\s+([A-Za-z0-9_.:-]+)",route)
     external_if=match.group(1) if match else ""
-    reality_state=onyx_reality.load(REALITY_FILE)
     reality_tcp={int(reality_state["port"])} if reality_state.get("enabled") else set()
     onyx_firewall.reconcile(
-        tcp={80,443,*mtproto_ports,*reality_tcp},
-        udp=({HYSTERIA_PORT} if hysteria_enabled else set()) | {int(u["backend_port"]) for u in awg_users},
+        tcp={80,443,*mtproto_ports,*reality_tcp,*hop_ports},
+        udp=({HYSTERIA_PORT} if hysteria_enabled else set()) | ({TUIC_PORT} if tuic_enabled else set()) | {int(u["backend_port"]) for u in awg_users},
         routes={(u["awg_interface"],external_if) for u in awg_users if external_if},
     )
 
@@ -902,8 +984,10 @@ def sync_xray(d):
         xray_path=f.read().strip()
     if not re.fullmatch(r"/vless-[a-f0-9]{24}",xray_path):
         raise RuntimeError("Invalid stored VLESS path")
+    bypass=_panel_bypass()
     vless=[]
     hysteria=[]
+    tuic=[]
     for u in d["users"]:
         if not u.get("enabled",True):
             continue
@@ -912,12 +996,24 @@ def sync_xray(d):
             vless.append({"id":u["secret"],"email":"panel:"+u["id"],"level":0})
         elif protocol=="hysteria":
             hysteria.append({"auth":u["secret"],"email":"panel:"+u["id"],"level":0})
+        elif protocol=="tuic":
+            tuic.append({"id":u["secret"],"password":u["secret"],"email":"panel:"+u["id"],"level":0})
     inbounds=[]
     # Reality-вход: тот же набор vless-пользователей с flow vision; пока выключен
     # или клиентов нет — конфиг не меняется.
     reality_state=onyx_reality.load(REALITY_FILE)
     reality_inbound=onyx_reality.inbound(reality_state,d.get("users",[]))
-    if reality_inbound: inbounds.append(reality_inbound)
+    if reality_inbound:
+        if bypass["ipv6"]:
+            reality_inbound["listen"]="::"
+        inbounds.append(reality_inbound)
+        # Hopping: клони основной Reality-вход на каждый дополнительный порт —
+        # клиенты прыгают между портами, DPI не может приклеиться к одному.
+        for hop in bypass["hopping_ports"]:
+            clone=json.loads(json.dumps(reality_inbound))
+            clone["tag"]="vless-reality-"+str(hop)
+            clone["port"]=hop
+            inbounds.append(clone)
     if vless:
         inbounds.append({
             "tag":"vless-xhttp",
@@ -938,7 +1034,7 @@ def sync_xray(d):
             raise RuntimeError("TLS certificate for Hysteria 2 is not ready")
         inbounds.append({
             "tag":"hysteria2",
-            "listen":"0.0.0.0",
+            "listen":"::" if bypass["ipv6"] else "0.0.0.0",
             "port":HYSTERIA_PORT,
             "protocol":"hysteria",
             "settings":{"version":2,"clients":hysteria},
@@ -954,6 +1050,27 @@ def sync_xray(d):
             },
             "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
         })
+    if tuic:
+        if not (os.path.isfile(XRAY_CERT) and os.path.isfile(XRAY_KEY)):
+            raise RuntimeError("TLS certificate for TUIC is not ready")
+        inbounds.append({
+            "tag":"tuic5",
+            "listen":"::" if bypass["ipv6"] else "0.0.0.0",
+            "port":TUIC_PORT,
+            "protocol":"tuic",
+            "settings":{"version":5,"congestion_control":"bbr","auth_mode":"uuid",
+                        "zero_rtt_handshake":False,"clients":tuic},
+            "streamSettings":{
+                "network":"tcp",
+                "security":"tls",
+                "tlsSettings":{
+                    "alpn":["h3"],
+                    "minVersion":"1.3",
+                    "certificates":[{"certificateFile":XRAY_CERT,"keyFile":XRAY_KEY}]
+                }
+            },
+            "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+        })
     config={
         "log":{"loglevel":"warning"},
         "api":{"tag":"api","listen":XRAY_API,"services":["StatsService"]},
@@ -965,6 +1082,10 @@ def sync_xray(d):
         "inbounds":inbounds,
         "outbounds":[{"tag":"direct","protocol":"freedom"}]
     }
+    # Unbound DoT: пока /etc/onyx-panel/unbound.enabled существует, Xray резолвит
+    # через локальный 127.0.0.1 — иначе через системный резолвер.
+    if os.path.exists(UNBOUND_MARKER):
+        config["dns"]={"servers":["127.0.0.1"]}
     # Routing-tab rules (direct IPs/domains, IPv4, torrent block) always come
     # BEFORE cascade rules: the first matching rule wins, so matched traffic
     # leaves the panel directly even with an active cascade. Cascade outbounds
@@ -975,17 +1096,22 @@ def sync_xray(d):
     # (торренты и прямые списки сильнее WARP) и до каскадов (warp-клиенты
     # каскад не видят). Пустой список клиентов = конфиг без warp вообще.
     warp_enabled=[u["id"] for u in d.get("users",[])
-                  if u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria")
+                  if u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria","tuic")
                   and str(u.get("id","")) in set(onyx_warp.load(WARP_FILE).get("users",[]))]
     warp_outbounds,warp_rules=onyx_warp.xray_additions(onyx_warp.load(WARP_FILE),warp_enabled)
     cascade_outbounds,cascade_rules=onyx_cascade.xray_additions(
-        onyx_cascade.load_cascades(CASCADES_FILE),d.get("users",[]))
+        onyx_cascade.load_cascades(CASCADES_FILE),d.get("users",[]),bypass["least_ping"])
     extra_outbounds=routing_outbounds+warp_outbounds+cascade_outbounds
     extra_rules=routing_rules+warp_rules+cascade_rules
     if extra_outbounds:
         config["outbounds"]+=extra_outbounds
     if extra_rules:
         config["routing"]={"rules":extra_rules}
+    # leastPing: observatory + balancer поверх каскадов; без активных каскадов
+    # или при выключенной опции возвращается None и конфиг не меняется.
+    balancer=onyx_cascade.xray_balancer(onyx_cascade.load_cascades(CASCADES_FILE),bypass["least_ping"])
+    if balancer:
+        config.update(balancer)
     # Xray selects the configuration parser from the final extension.  A name
     # such as config.json.tmp is rejected before JSON parsing, so keep .json
     # as the temporary file's last suffix.
@@ -1093,7 +1219,7 @@ def _collect_traffic_unlocked(d=None):
             unit="mtproxy.service"
         elif protocol=="web":
             unit="onyx-user-"+uid+".service"
-        elif protocol in ("vless","hysteria"):
+        elif protocol in ("vless","hysteria","tuic"):
             unit=XRAY_SERVICE
         elif protocol=="mtproto":
             unit="onyx-user-"+uid+".service"
@@ -1143,7 +1269,7 @@ def apply(d,restart=True,previous=None):
         return force or any((old_by_id.get(uid) or new_by_id.get(uid) or {}).get("protocol","web") in protocols for uid in changed_ids)
     direct_changed=protocol_changed("web","mtproto")
     web_changed=protocol_changed("web")
-    xray_changed=protocol_changed("vless","hysteria")
+    xray_changed=protocol_changed("vless","hysteria","tuic")
     awg_changed=protocol_changed(*onyx_awg.PROTOCOLS)
     try:
         for u in d["users"]:
@@ -1205,7 +1331,7 @@ def add(protocol,name,requested_port=None,device_count=1):
     # orphan units before choosing ports for the next user.
     remove_old_units(d)
     run("systemctl","daemon-reload",check=True)
-    if protocol not in ("web","mtproto","vless","hysteria","awg20","awg31"):
+    if protocol not in ("web","mtproto","vless","hysteria","tuic","awg20","awg31"):
         raise RuntimeError("Unknown proxy protocol")
     if sum(not u.get("subscription_id") for u in d["users"])>=MAX_USERS:
         raise RuntimeError("Maximum panel users reached")
@@ -1230,6 +1356,11 @@ def add(protocol,name,requested_port=None,device_count=1):
         tls=run(XRAY_TLS_SYNC)
         if tls.returncode:
             raise RuntimeError("Hysteria 2 TLS certificate is not ready: "+(tls.stderr or tls.stdout)[-1500:])
+    elif protocol=="tuic":
+        u.update({"secret":str(uuid.uuid4()),"backend_port":TUIC_PORT})
+        tls=run(XRAY_TLS_SYNC)
+        if tls.returncode:
+            raise RuntimeError("TUIC TLS certificate is not ready: "+(tls.stderr or tls.stdout)[-1500:])
     elif protocol in onyx_awg.PROTOCOLS:
         u.update(onyx_awg.new_user(protocol,d["users"],u["id"]))
     d["users"].append(u)
@@ -1868,6 +1999,10 @@ import onyx_limits
 import onyx_cloud
 import onyx_firewall
 import onyx_subscriptions
+import onyx_bypass as bypass_api
+import onyx_censor
+import onyx_defense
+import onyx_promo
 
 HOST="127.0.0.1"
 PORT=8090
@@ -1882,6 +2017,8 @@ USERS="/etc/onyx-panel/users.json"
 TRAFFIC="/var/lib/onyx-panel/traffic.json"
 XRAY_PATH_FILE="/etc/onyx-panel/xray-path"
 HYSTERIA_PORT=8443
+TUIC_PORT=9443
+UNBOUND_MARKER="/etc/onyx-panel/unbound.enabled"
 MANAGER="/usr/local/sbin/onyx-panelctl"
 QR="/usr/bin/qrencode"
 LOGO="/opt/onyx-panel/onyx-logo.png"
@@ -2759,29 +2896,35 @@ def xray_path():
     with open(XRAY_PATH_FILE,encoding="utf-8") as f: value=f.read().strip()
     if not re.fullmatch(r"/vless-[a-f0-9]{24}",value): raise RuntimeError("Некорректный путь VLESS")
     return value
-def proxy_link(protocol,secret,port=443,name="Proxy",username=""):
+def proxy_link(protocol,secret,port=443,name="Proxy",username="",uid=""):
     if protocol=="mtproto": return mtproto_link(secret,port)
     if protocol=="web": return web_link(secret)
-    protocol_label={"vless":"VLESS","hysteria":"Hysteria2","awg20":"AWG 2.0","awg31":"AWG 3.1"}.get(protocol,protocol)
+    protocol_label={"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC 5","awg20":"AWG 2.0","awg31":"AWG 3.1"}.get(protocol,protocol)
     if not (name.startswith("🌐") or (name and 0x1F1E6 <= ord(name[0]) <= 0x1F1FF)):
         name=node_api.location_prefix(node_api.load_location(LOCATION_FILE))+" · "+protocol_label
     label=quote(name or "Proxy",safe="")
+    bypass_state=bypass_api.normalize(load().get("bypass",{}))
     if protocol=="vless":
-        query=urlencode({"encryption":"none","security":"tls","sni":DOMAIN,"fp":"chrome","type":"xhttp","host":DOMAIN,"path":xray_path(),"mode":"auto","alpn":"h2"})
+        fp=bypass_api.fp_for(uid or secret,bypass_state)
+        query=urlencode({"encryption":"none","security":"tls","sni":DOMAIN,"fp":fp,"type":"xhttp","host":DOMAIN,"path":xray_path(),"mode":"auto","alpn":"h2"})
         return "vless://"+quote(secret,safe="-")+"@"+DOMAIN+":443?"+query+"#"+label
     if protocol=="hysteria":
         query=urlencode({"sni":DOMAIN,"alpn":"h3"})
         return "hysteria2://"+quote(secret,safe="-")+"@"+DOMAIN+":"+str(HYSTERIA_PORT)+"/?"+query+"#"+label
+    if protocol=="tuic":
+        query=urlencode({"sni":DOMAIN,"alpn":"h3","congestion_control":"bbr","udp_relay_mode":"native"})
+        return "tuic://"+quote(secret,safe="-")+":"+quote(secret,safe="-")+"@"+DOMAIN+":"+str(TUIC_PORT)+"?"+query+"#"+label
     if protocol in awg.PROTOCOLS:
         user=next((u for u in users() if u.get("protocol")==protocol and secrets.compare_digest(str(u.get("secret","")),str(secret))),None)
         if user is None: raise RuntimeError("Профиль AWG не найден")
         return awg.client_config(user,DOMAIN,name)
     raise RuntimeError("Неизвестный протокол")
-def reality_link(secret,name="Proxy"):
+def reality_link(secret,name="Proxy",uid=""):
     """vless:// Reality-ссылка; пустая строка, пока Reality выключен."""
     r=reality_api.load(REALITY_FILE)
     if not r.get("enabled"): return ""
-    return reality_api.link(r,secret,name,host=DOMAIN)
+    fp=bypass_api.fp_for(uid or secret,bypass_api.normalize(load().get("bypass",{})))
+    return reality_api.link(r,secret,name,host=DOMAIN,fp=fp)
 
 def qr_png_bytes(link):
     return subprocess.run([QR,"-o","-","-t","PNG","-s","6","-m","2",link],
@@ -2797,7 +2940,7 @@ def web_api_clients():
         if not uid: continue
         info=traffic_info(uid,tr)
         link=""
-        try: link=proxy_link(u.get("protocol","web"),u.get("secret",""),int(u.get("backend_port",443)),u.get("name",""),u.get("username",""))
+        try: link=proxy_link(u.get("protocol","web"),u.get("secret",""),int(u.get("backend_port",443)),u.get("name",""),u.get("username",""),uid)
         except Exception: pass
         out.append({"id":uid,"name":u.get("name",""),"protocol":u.get("protocol","web"),
                     "enabled":bool(u.get("enabled",True)),"up":info["up"],"down":info["down"],
@@ -2946,7 +3089,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok":True,"clients":web_api_clients()}); return
         if route.startswith("clients/") and route.endswith("/link"):
             user=web_api_find(route[8:-5])
-            link=proxy_link(user.get("protocol","web"),user.get("secret",""),int(user.get("backend_port",443)),user.get("name",""),user.get("username",""))
+            link=proxy_link(user.get("protocol","web"),user.get("secret",""),int(user.get("backend_port",443)),user.get("name",""),user.get("username",""),str(user.get("id","")))
             self.send_json({"ok":True,"link":link}); return
         self.send_json({"ok":False,"message":"Not found"},404)
     def web_api_post(self,route):
@@ -2988,7 +3131,7 @@ class Handler(BaseHTTPRequestHandler):
                 for user in users():
                     if user.get("subscription_id"): continue
                     result.append({"id":user["id"],"name":user["name"],"protocol":user["protocol"],
-                        "enabled":user.get("enabled",True),"link":proxy_link(user["protocol"],user["secret"],user.get("backend_port",443),user["name"],user.get("username",""))})
+                        "enabled":user.get("enabled",True),"link":proxy_link(user["protocol"],user["secret"],user.get("backend_port",443),user["name"],user.get("username",""),user["id"])})
                 self.send_json({"ok":True,"profiles":result}); return
             if path==node_api.API_PREFIX+"/metrics":
                 # Per-profile counters for the controller dashboard. Only the
@@ -3542,11 +3685,27 @@ class Handler(BaseHTTPRequestHandler):
 </div>'''
             plans_cfg=[p for p in (d.get("plans") or []) if isinstance(p,dict)]
             trial_cfg=d.get("trial") if isinstance(d.get("trial"),dict) else {}
-            plan_rows=''.join(f'<div class="api-key-row"><b>{esc(p.get("name",""))}</b><span class="muted">{int(p.get("days",30))} дн. · {int(p.get("max_devices",0))} устр. · {" + ".join({"vless":"VLESS","hysteria":"Hysteria2"}.get(x,x) for x in p.get("protocols",[]))}{" · %d ГБ/мес"%int(p.get("limit_gb",0)) if p.get("limit_gb") else ""}</span><form method="post" action="{PANEL_PATH}/plans-save" data-confirm="Удалить тариф?"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(p.get("id",""))}"><button class="danger">Удалить</button></form></div>' for p in plans_cfg) or '<p class="muted" style="font-size:12px;margin:6px 0">Тарифов пока нет.</p>'
+            plan_rows=''.join(f'<div class="api-key-row"><b>{esc(p.get("name",""))}</b><span class="muted">{int(p.get("days",30))} дн. · {int(p.get("max_devices",0))} устр. · {" + ".join({"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC 5"}.get(x,x) for x in p.get("protocols",[]))}{" · %d ГБ/мес"%int(p.get("limit_gb",0)) if p.get("limit_gb") else ""}</span><form method="post" action="{PANEL_PATH}/plans-save" data-confirm="Удалить тариф?"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(p.get("id",""))}"><button class="danger">Удалить</button></form></div>' for p in plans_cfg) or '<p class="muted" style="font-size:12px;margin:6px 0">Тарифов пока нет.</p>'
             plans_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Тарифы и триал</h2><p>Готовые наборы для новых клиентов: срок, устройства и лимит в один клик</p></div>{card_expand()}</div>
 <div class="card-body">
-<section class="panel-setting"><div class="panel-setting-info"><b>Тарифы</b><small>Тариф подставляется в окне создания клиента и задаёт срок, устройства, протоколы и лимит.</small></div><div>{plan_rows}</div><form id="planForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="create"><div class="admin-access-grid"><div><label for="planName">Название</label><input id="planName" name="name" maxlength="80" placeholder="Например, Месяц" required></div><div><label for="planDays">Дней</label><input id="planDays" name="days" type="number" min="1" max="3650" value="30" required></div><div><label for="planDevices">Устройств</label><input id="planDevices" name="max_devices" type="number" min="0" max="20" value="2" required></div><div><label for="planLimit">Лимит, ГБ/мес (0 — без лимита)</label><input id="planLimit" name="limit_gb" type="number" min="0" max="1000000" value="0"></div></div><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label></div><div class="actions"><button type="submit" class="btn primary">Добавить тариф</button></div></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Тарифы</b><small>Тариф подставляется в окне создания клиента и задаёт срок, устройства, протоколы и лимит.</small></div><div>{plan_rows}</div><form id="planForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="create"><div class="admin-access-grid"><div><label for="planName">Название</label><input id="planName" name="name" maxlength="80" placeholder="Например, Месяц" required></div><div><label for="planDays">Дней</label><input id="planDays" name="days" type="number" min="1" max="3650" value="30" required></div><div><label for="planDevices">Устройств</label><input id="planDevices" name="max_devices" type="number" min="0" max="20" value="2" required></div><div><label for="planLimit">Лимит, ГБ/мес (0 — без лимита)</label><input id="planLimit" name="limit_gb" type="number" min="0" max="1000000" value="0"></div></div><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label><label class="check"><input type="checkbox" name="tuic" value="1">TUIC 5</label></div><div class="actions"><button type="submit" class="btn primary">Добавить тариф</button></div></form></section>
 <section class="panel-setting"><div class="panel-setting-info"><b>Триал для новых клиентов</b><small>Кнопка «Триал» в окне создания клиента: доступ на несколько дней с одним устройством.</small></div><form id="trialForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="trial"><label class="check trial-check"><input type="checkbox" name="enabled" value="1" {"checked" if trial_cfg.get("enabled") else ""}>Триал включён</label><div class="admin-access-grid"><div><label for="trialDays">Дней</label><input id="trialDays" name="days" type="number" min="1" max="365" value="{int(trial_cfg.get("days",3))}"></div><div><label for="trialDevices">Устройств</label><input id="trialDevices" name="max_devices" type="number" min="0" max="20" value="{int(trial_cfg.get("max_devices",1))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить триал</button></div></form></section>
+</div>
+</div>'''
+            bypass_cfg=bypass_api.normalize(d.get("bypass",{}))
+            censor_cfg=onyx_censor.normalize_state(d.get("censor") if isinstance(d.get("censor"),dict) else {})
+            promo_cfg=onyx_promo.normalize(d.get("promo") if isinstance(d.get("promo"),dict) else {})
+            promo_rows=''.join(f'<div class="api-key-row"><b>{esc(c.get("code",""))}</b><span class="muted">+{int(c.get("bonus_days",0))} дн. · {"без лимита" if not c.get("max_uses") else "%d/%d"%(c.get("used",0),c.get("max_uses"))}</span><form method="post" action="{PANEL_PATH}/promo-delete"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="code" value="{esc(c.get("code",""))}"><button class="danger">Удалить</button></form></div>' for c in promo_cfg.get("codes",[])) or '<p class="muted" style="font-size:12px;margin:6px 0">Промокодов пока нет.</p>'
+            censor_rows=''.join(f'<tr><td>{esc(t.get("label","") or t.get("host",""))}</td><td>{esc(t.get("port",""))}</td><td>{"🟢 доступен" if t.get("status")=="up" else ("⛔ заблокирован" if t.get("status")=="blocked" else "—")}</td></tr>' for t in censor_cfg.get("targets",[])) or '<tr><td colspan="3" class="muted">Проверка запускается каждые 6 часов автоматически</td></tr>'
+            unbound_on=os.path.exists(UNBOUND_MARKER)
+            fp_pool=','.join(bypass_cfg["fp_pool"])
+            hop_ports=','.join(str(p) for p in bypass_cfg["hopping_ports"])
+            bypass_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Обход ТСПУ и защита</h2><p>Фрагментация TLS, ротация отпечатков, hopping портов, leastPing, TUIC, монитор блокировок</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Пресеты</b><small>«Стандарт» — фрагментация + ротация отпечатков; «Максимум» — плюс leastPing по каскадам (нужно 2+ активных каскада).</small></div><div class="actions"><button type="button" class="btn" data-preset="off">Выключить всё</button><button type="button" class="btn" data-preset="standard">Стандарт</button><button type="button" class="btn primary" data-preset="max">Максимум</button></div><p class="panel-setting-status" id="presetStatus" role="status"></p></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Настройки обхода</b><small>Фрагментация ClientHello режет TLS-запрос на части ещё до провайдера. Ротация отпечатков меняет fp в ссылках раз в месяц.</small></div><form id="bypassForm" action="{PANEL_PATH}/security-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="fragLevel">Фрагментация ClientHello</label><select id="fragLevel" name="fragment"><option value="off" {"selected" if bypass_cfg["fragment"]=="off" else ""}>Выключена</option><option value="light" {"selected" if bypass_cfg["fragment"]=="light" else ""}>Лёгкая (1-3 пакета)</option><option value="strong" {"selected" if bypass_cfg["fragment"]=="strong" else ""}>Сильная (2-4 пакета)</option></select></div><div><label for="fpPool">Пул отпечатков (через запятую)</label><input id="fpPool" name="fp_pool" value="{esc(fp_pool)}" placeholder="chrome,firefox,safari" spellcheck="false"></div></div><div class="admin-access-grid"><div><label for="hopPorts">Порты hopping (до 6, через запятую)</label><input id="hopPorts" name="hopping_ports" value="{esc(hop_ports)}" placeholder="2053,2083,2087" spellcheck="false"></div><div></div></div><div class="checks choice-grid"><label class="choice-card"><input type="checkbox" name="fp_rotation" value="1" {"checked" if bypass_cfg["fp_rotation"] else ""}><span><strong>Ротация отпечатков</strong><small>fp меняется в подписке</small></span></label><label class="choice-card"><input type="checkbox" name="least_ping" value="1" {"checked" if bypass_cfg["least_ping"] else ""}><span><strong>leastPing</strong><small>выбор каскада по задержке</small></span></label><label class="choice-card"><input type="checkbox" name="ipv6" value="1" {"checked" if bypass_cfg["ipv6"] else ""}><span><strong>IPv6-слушатели</strong><small>reality/hysteria/tuic на ::</small></span></label><label class="choice-card"><input type="checkbox" name="honeypot" value="1" {"checked" if bypass_cfg["honeypot"] else ""}><span><strong>Ханипот</strong><small>ban-set для сканеров (24ч)</small></span></label><label class="choice-card"><input type="checkbox" name="unbound" value="1" {"checked" if unbound_on else ""}><span><strong>DoT-резолвер</strong><small>unbound, обход DNS-отравления</small></span></label></div><div class="actions"><button type="submit" class="btn primary">Сохранить обход</button></div><p class="panel-setting-status" id="bypassStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Монитор блокировок</b><small>Панель сама проверяет TCP/TLS-доступность своих портов каждые 6 часов и сообщает в Telegram при изменении.</small></div><table class="login-log"><thead><tr><th>Цель</th><th>Порт</th><th>Статус</th></tr></thead><tbody>{censor_rows}</tbody></table></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Промокоды и рефералы</b><small>Промокод даёт бонусные дни при активации. Реферальный код выдаётся каждому клиенту в его странице подписки.</small></div><div>{promo_rows}</div><form id="promoForm" action="{PANEL_PATH}/promo-create"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="promoCode">Код</label><input id="promoCode" name="code" maxlength="32" placeholder="ЛЕТО2026" autocomplete="off"></div><div><label for="promoBonus">Бонус, дней</label><input id="promoBonus" name="bonus_days" type="number" min="1" max="3650" value="7"></div><div><label for="promoUses">Лимит активаций (0 — без лимита)</label><input id="promoUses" name="max_uses" type="number" min="0" max="100000" value="0"></div></div><div class="actions"><button type="submit" class="btn primary">Создать промокод</button></div><p class="panel-setting-status" id="promoStatus" role="status"></p></form></section>
 </div>
 </div>'''
             security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
@@ -3724,6 +3883,31 @@ document.getElementById("apiKeyToken").value=res.token||"";apiKeyDialog.showModa
 catch(err){s.className="panel-setting-status err";s.textContent=err.message}});}
 const copyBtn=document.getElementById("apiKeyCopy");
 if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById("apiKeyToken");t.select();try{navigator.clipboard.writeText(t.value)}catch(e){document.execCommand("copy")}});
+
+// --- Обход ТСПУ и защита ---
+const bypassPost=async(url,data)=>{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(data)});let j;try{j=await r.json()}catch(e){throw new Error("Панель недоступна. Обновите страницу.")}if(!r.ok||!j.ok)throw new Error(j.message||"Операция не выполнена.");return j};
+const bypassForm=document.getElementById("bypassForm");
+if(bypassForm){const s=document.getElementById("bypassStatus");
+bypassForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Применяю…";
+const fd=new FormData(bypassForm),payload={};fd.forEach((v,k)=>payload[k]=v);["fp_rotation","least_ping","ipv6","honeypot","unbound"].forEach(k=>{if(!(k in payload))payload[k]=""});
+try{const r=await fetch(bypassForm.getAttribute("action"),{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(payload)});
+let j;try{j=await r.json()}catch(err){throw new Error("Панель недоступна. Обновите страницу.")}
+if(!r.ok||!j.ok)throw new Error(j.message||"Не удалось сохранить.");
+s.className="panel-setting-status ok";s.textContent=j.message||"Сохранено. Xray применяет в фоне…";if(window.onyxToast)onyxToast(j.message||"Сохранено.");setTimeout(()=>location.reload(),1400)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}});}
+document.querySelectorAll("[data-preset]").forEach(btn=>{btn.addEventListener("click",async()=>{
+const s=document.getElementById("presetStatus");s.className="panel-setting-status";s.textContent="Применяю пресет…";
+document.querySelectorAll("[data-preset]").forEach(b=>b.disabled=true);
+try{const res=await bypassPost("{PANEL_PATH}/security-preset",{csrf:"{token}",level:btn.dataset.preset});
+s.className="panel-setting-status ok";s.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Пресет применён.");setTimeout(()=>location.reload(),700)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}
+finally{document.querySelectorAll("[data-preset]").forEach(b=>b.disabled=false)}});});
+const promoForm=document.getElementById("promoForm");
+if(promoForm){const s=document.getElementById("promoStatus");
+promoForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Создаю…";
+try{const fd=new FormData(promoForm),payload={};fd.forEach((v,k)=>payload[k]=v);
+const res=await bypassPost(promoForm.getAttribute("action"),payload);if(window.onyxToast)onyxToast(res.message||"Промокод создан.");setTimeout(()=>location.reload(),500)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}});}
 })();
 </script>'''
             body=f'''<div class="page-head"><div><span class="eyebrow">ONYX PANEL / STUDIO</span><h1>Настройки</h1><p>Оформление сайта и доступ к панели</p></div></div>
@@ -3742,6 +3926,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
 {extra_cards2['observe']}
 </div>
 <div class="settings-col">
+{bypass_card}
 <div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
 <div class="card-body">
 <form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
@@ -3773,7 +3958,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 if path==node_api.API_PREFIX+"/federation/sync":
                     result=ctl_manager_json("federation-sync",request)
                     profiles=[{"id":u["id"],"protocol":u["protocol"],
-                        "link":proxy_link(u["protocol"],u["secret"],u.get("backend_port",443),u.get("name",request.get("name","")),u.get("username",""))}
+                        "link":proxy_link(u["protocol"],u["secret"],u.get("backend_port",443),u.get("name",request.get("name","")),u.get("username",""),u["id"])}
                         for u in result.get("profiles",[])]
                     self.send_json({"ok":True,"profiles":profiles}); return
                 if path==node_api.API_PREFIX+"/federation/delete":
@@ -3799,7 +3984,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                         "port":request.get("port"),"devices":request.get("devices",1)})
                         if protocol=="mtproto" else ctl("add",protocol,name))
                     self.send_json({"ok":True,"profile":{"id":user["id"],"name":user["name"],"protocol":protocol,
-                        "link":proxy_link(protocol,user["secret"],user.get("backend_port",443),name,user.get("username",""))}},201); return
+                        "link":proxy_link(protocol,user["secret"],user.get("backend_port",443),name,user.get("username",""),user["id"])}},201); return
                 if path==node_api.API_PREFIX+"/profiles/delete":
                     uid=str(request.get("id",""))
                     if not re.fullmatch(r"[a-f0-9]{16}",uid): self.send_json({"ok":False,"message":"Invalid profile id"},400); return
@@ -4103,14 +4288,14 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             if kind=="subscription":
                 if plan:
                     result=ctl_subscription({"operation":"create","name":name,"max_devices":plan.get("max_devices",0),
-                                             "protocols":[p for p in ("vless","hysteria") if p in (plan.get("protocols") or [])] or ["vless"]})
+                                             "protocols":[p for p in ("vless","hysteria","tuic") if p in (plan.get("protocols") or [])] or ["vless"]})
                 else:
                     result=ctl_subscription({"operation":"create","name":name,"max_devices":form.get("max_devices","2"),
-                                             "protocols":[p for p in ("vless","hysteria") if form.get(p)=="1"]})
+                                             "protocols":[p for p in ("vless","hysteria","tuic") if form.get(p)=="1"]})
                 if not result.get("ok"):
                     create_error(result.get("message","Ошибка создания подписки"),int(result.get("status",400))); return
                 new_id=result.get("id")
-            elif kind in ("web","mtproto","vless","hysteria","awg20","awg31"):
+            elif kind in ("web","mtproto","vless","hysteria","tuic","awg20","awg31"):
                 try:
                     if kind=="mtproto":
                         created=ctl_manager_json("add-json",{"protocol":kind,"name":name,
@@ -4316,7 +4501,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             profile=next((u for u in users() if u.get('id')==uid and u.get('protocol')=='vless' and u.get('enabled',True)),None)
             if profile is None:
                 self.send_json({'message':'Живая проверка доступна для включённых VLESS-подключений.'},400); return
-            link=proxy_link('vless',profile.get('secret',''),int(profile.get('backend_port',443)),profile.get('name',''),profile.get('username',''))
+            link=proxy_link('vless',profile.get('secret',''),int(profile.get('backend_port',443)),profile.get('name',''),profile.get('username',''),uid)
             existing=client_check_state().get(uid,{})
             if existing.get('status')=='running':
                 self.send_json({'ok':True,'check':existing}); return
@@ -4787,6 +4972,94 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 obs["user"]=user; d["observer"]=obs; save(d)
             audit('observer-save',user,"наблюдатель сохранён")
             self.send_json({"ok":True,"message":"Наблюдатель сохранён: только чтение, без изменений настроек."}); return
+        if path==PANEL_PATH+"/security-save":
+            try:
+                with APPLY_LOCK:
+                    with STATE_LOCK:
+                        d=load()
+                        state=bypass_api.apply_form(d.get("bypass",{}),form)
+                        unbound_on=form.get("unbound","")=="1"
+                        d["bypass"]=state; save(d)
+                if unbound_on:
+                    try:
+                        with open(UNBOUND_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                    except OSError: pass
+                else:
+                    try: os.unlink(UNBOUND_MARKER)
+                    except FileNotFoundError: pass
+                # leastPing и hopping меняют Xray-конфиг; fp-ротация — ссылки.
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+            except bypass_api.BypassError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            audit('security-save',"",("fragment=%s least_ping=%s hop=%s ipv6=%s honeypot=%s unbound=%s"%(
+                state["fragment"],state["least_ping"],",".join(map(str,state["hopping_ports"])),
+                state["ipv6"],state["honeypot"],unbound_on)))
+            self.send_json({"ok":True,"message":"Настройки обхода и защиты сохранены. Xray применяет изменения…"}); return
+        if path==PANEL_PATH+"/security-preset":
+            level=form.get("level","off")
+            try:
+                preset=bypass_api.preset_apply(level)
+            except bypass_api.BypassError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            with APPLY_LOCK:
+                with STATE_LOCK:
+                    d=load(); state=dict(d.get("bypass") or {}); state.update(preset)
+                    d["bypass"]=bypass_api.normalize(state); save(d)
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+            audit('security-preset',"",level)
+            self.send_json({"ok":True,"message":"Пресет «%s» применён."%level}); return
+        if path==PANEL_PATH+"/promo-create":
+            code=form.get("code","").strip()
+            try:
+                bonus=int(form.get("bonus_days","0")); max_uses=int(form.get("max_uses","0")); expires=int(form.get("expires_ts","0") or 0)
+            except ValueError:
+                self.send_json({"ok":False,"message":"Бонус и лимиты должны быть числами."},400); return
+            with STATE_LOCK:
+                d=load()
+                try:
+                    state=onyx_promo.create(d.get("promo") if isinstance(d.get("promo"),dict) else {},code,bonus,max_uses,expires,form.get("note",""))
+                except ValueError as exc:
+                    self.send_json({"ok":False,"message":str(exc)},400); return
+                d["promo"]=state; save(d)
+            audit('promo-create',code,"+%d дней"%bonus)
+            self.send_json({"ok":True,"message":"Промокод %s создан."%code}); return
+        if path==PANEL_PATH+"/promo-delete":
+            with STATE_LOCK:
+                d=load()
+                try:
+                    state=onyx_promo.delete(d.get("promo") if isinstance(d.get("promo"),dict) else {},form.get("code",""))
+                except ValueError as exc:
+                    self.send_json({"ok":False,"message":str(exc)},400); return
+                d["promo"]=state; save(d)
+            audit('promo-delete',form.get("code",""),"")
+            self.send_json({"ok":True,"message":"Промокод удалён."}); return
+        if path==PANEL_PATH+"/unbound-toggle":
+            enable=form.get("enable","")=="1"
+            if enable:
+                with open(UNBOUND_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                subprocess.run(["systemctl","restart","unbound"],capture_output=True,timeout=30)
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+                msg="DoT-резолвер включён: Xray резолвит через 127.0.0.1."
+            else:
+                try: os.unlink(UNBOUND_MARKER)
+                except FileNotFoundError: pass
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+                msg="DoT-резолвер выключен: системный резолвер."
+            audit('unbound-toggle',"",str(enable))
+            self.send_json({"ok":True,"message":msg}); return
+        if path==PANEL_PATH+"/node-bench":
+            url=form.get("url","").strip()
+            if not re.fullmatch(r"https?://[A-Za-z0-9.\-]+(?::\d+)?",url):
+                self.send_json({"ok":False,"message":"Укажите адрес ноды (https://…)."},400); return
+            threading.Thread(target=_node_bench_job,args=(url,),daemon=True).start()
+            self.send_json({"ok":True,"message":"Замер скорости ноды запущен (~15 секунд)."}); return
+        if path==PANEL_PATH+"/awg-speed":
+            uid=str(form.get("id",""))
+            user=next((u for u in users() if u.get("id")==uid and u.get("protocol") in awg.PROTOCOLS),None)
+            if user is None:
+                self.send_json({"ok":False,"message":"AWG-профиль не найден."},404); return
+            threading.Thread(target=_awg_speed_job,args=(uid,),daemon=True).start()
+            self.send_json({"ok":True,"message":"Замер скорости AWG запущен (~15 секунд)."}); return
         if path in (PANEL_PATH+"/cascade-add",PANEL_PATH+"/cascade-toggle",PANEL_PATH+"/cascade-delete",PANEL_PATH+"/cascade-users",PANEL_PATH+"/cascade-ping"):
             async_action=self.headers.get("X-Onyx-Async","")=="1"
             def cascade_fail(message,status=400):
@@ -5101,7 +5374,7 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                         try: devices=int(form.get("max_devices","2"))
                         except (TypeError,ValueError): raise ValueError("Устройства: число от 0 до 20.")
                         if not 0<=devices<=20: raise ValueError("Устройства: число от 0 до 20.")
-                        protocols=[p for p in ("vless","hysteria") if form.get(p)=="1"]
+                        protocols=[p for p in ("vless","hysteria","tuic") if form.get(p)=="1"]
                         if not protocols: raise ValueError("Выберите хотя бы один протокол.")
                         try: limit_gb=onyx_limits.validate(form.get("limit_gb","0"))
                         except onyx_limits.LimitError as exc: raise ValueError(str(exc))
@@ -5491,10 +5764,10 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 if result.get("code")=="hwid_required": headers["X-Hwid-Not-Supported"]="true"
                 if result.get("code")=="device_limit": headers.update({"X-Hwid-Limit":"true","X-Hwid-Max-Devices-Reached":"true"})
                 self.send_data(result.get("message","Подписка недоступна"),int(result.get("status",503)),headers=headers); return
-            labels={"vless":"VLESS","hysteria":"Hysteria2"}
+            labels={"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC5"}
             local_name=node_api.location_prefix(node_api.load_location(LOCATION_FILE))
-            lines=[proxy_link(u["protocol"],u["secret"],u["backend_port"],local_name+" · "+labels[u["protocol"]],u.get("username","")) for u in result["users"]]
-            lines+=[link for link in (reality_link(u["secret"],local_name+" · Reality") for u in result["users"] if u["protocol"]=="vless") if link]
+            lines=[proxy_link(u["protocol"],u["secret"],u["backend_port"],local_name+" · "+labels[u["protocol"]],u.get("username",""),u.get("id","")) for u in result["users"]]
+            lines+=[link for link in (reality_link(u["secret"],local_name+" · Reality",u.get("id","")) for u in result["users"] if u["protocol"]=="vless") if link]
             if result["users"]:
                 first=result["users"][0]
                 remote_id=federation_id(first.get("subscription_id",""),first.get("device_id",""))
@@ -5537,12 +5810,12 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
             expiry=expires.get(sub["id"])
             used,limit_gb=client_month_usage(sub["id"])
             profiles=[u for u in users() if u.get("subscription_id")==sub["id"] and u.get("enabled",True)]
-            labels={"vless":"VLESS XHTTP · TLS через домен","hysteria":"Hysteria2 · быстрый QUIC"}
+            labels={"vless":"VLESS XHTTP · TLS через домен","hysteria":"Hysteria2 · быстрый QUIC","tuic":"TUIC 5 · быстрый QUIC + BBR"}
             qrs=[]
             for profile in profiles:
                 proto=profile.get("protocol","")
                 if proto not in labels: continue
-                try: link=proxy_link(proto,profile["secret"],int(profile.get("backend_port",443)),sub.get("name",""),profile.get("username",""))
+                try: link=proxy_link(proto,profile["secret"],int(profile.get("backend_port",443)),sub.get("name",""),profile.get("username",""),profile.get("id",""))
                 except Exception: continue
                 png=""
                 try: png=base64.b64encode(qr_png_bytes(link)).decode("ascii")
@@ -5558,7 +5831,8 @@ if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById
                 except Exception: pass
                 qrs.append({"label":"Ссылка подписки","hint":"Добавьте в приложение — все профили появятся автоматически","link":sub_url,"png":png})
             if any(u.get("protocol")=="vless" for u in profiles):
-                reality=reality_link(next((u for u in profiles if u.get("protocol")=="vless"),{}).get("secret",""),sub.get("name","")+" · Reality")
+                vless_profile=next((u for u in profiles if u.get("protocol")=="vless"),{})
+                reality=reality_link(vless_profile.get("secret",""),sub.get("name","")+" · Reality",vless_profile.get("id",""))
                 if reality:
                     png=""
                     try: png=base64.b64encode(qr_png_bytes(reality)).decode("ascii")
@@ -6494,6 +6768,119 @@ def heal_caddy_route():
     if r.returncode: subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60)
     print("caddy route healed for",PANEL_PATH,file=sys.stderr,flush=True)
 
+def _ctl_apply_job():
+    # Пересобрать Xray после смены настроек обхода (leastPing/hopping/ipv6/unbound).
+    try:
+        with APPLY_LOCK:
+            ctl("sync")
+    except Exception as exc:
+        print("ctl sync failed:",type(exc).__name__,str(exc)[:150],file=sys.stderr,flush=True)
+
+BENCH_RESULTS={}
+def _node_bench_job(url):
+    # Замер скорости через каскад: onyx_cascade.speedtest гоняет трафик через
+    # ноду и пишет Мбит/с; результат живёт в BENCH_RESULTS до ответа страницы.
+    try:
+        record={"id":"bench","url":url,"enabled":True,"transport":"vless","link":"","name":"bench"}
+        result=cascade_api.speedtest(record) if hasattr(cascade_api,"speedtest") else {}
+        BENCH_RESULTS[url]={"ok":bool(result.get("ok")),"mbps":result.get("mbps"),"message":result.get("message","")}
+        if result.get("ok"):
+            with STATE_LOCK:
+                d=load(); d.setdefault("node_bench",{})[url]=BENCH_RESULTS[url]; save(d)
+    except Exception as exc:
+        BENCH_RESULTS[url]={"ok":False,"message":str(exc)[:200]}
+    time.sleep(120)
+    BENCH_RESULTS.pop(url,None)
+
+def _awg_speed_job(uid):
+    try:
+        user=next((u for u in users() if u.get("id")==uid),None)
+        if user is None: return
+        result=awg.speed(user) if hasattr(awg,"speed") else {}
+        BENCH_RESULTS["awg:"+uid]={"ok":bool(result.get("ok")),"mbps":result.get("mbps"),"message":result.get("message","")}
+    except Exception as exc:
+        BENCH_RESULTS["awg:"+uid]={"ok":False,"message":str(exc)[:200]}
+    time.sleep(120)
+    BENCH_RESULTS.pop("awg:"+uid,None)
+
+def censor_worker():
+    # Каждые 6 часов (плюс старт через 3 минуты) проверяет TCP/TLS-доступность
+    # портов панели извне: переход порта в «blocked» = вероятная блокировка
+    # провайдером, уведомление уходит в Telegram.
+    time.sleep(180)
+    while True:
+        try:
+            with STATE_LOCK: d=load()
+            cfg=d.get("censor") if isinstance(d.get("censor"),dict) else {}
+            targets=onyx_censor.normalize_state(cfg.get("targets")).get("targets",[])
+            if not targets:
+                targets=onyx_censor.default_targets(DOMAIN,int((reality_api.load(REALITY_FILE) or {}).get("port",0) or 0))
+            results=onyx_censor.run_probes(targets)
+            state=onyx_censor.normalize_state(cfg)
+            transitions=onyx_censor.transitions(state.get("results",{}),results)
+            state=onyx_censor.record_round(state,results)
+            with STATE_LOCK:
+                d=load(); d["censor"]=state; save(d)
+            blocked=[t for t in transitions if transitions[t]=="blocked"]
+            restored=[t for t in transitions if transitions[t]=="up"]
+            if blocked or restored:
+                lines=[]
+                if blocked: lines.append("⛔ Заблокированы порты: "+", ".join(blocked))
+                if restored: lines.append("🟢 Порты снова доступны: "+", ".join(restored))
+                threading.Thread(target=telegram_notify,args=("alerts","\n".join(lines)),daemon=True).start()
+        except Exception as exc:
+            print("censor worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(6*3600)
+
+DEFENSE_STATE={"running":False,"banned":0}
+def defense_worker():
+    # Ханипот включается/выключается вместе с тумблером в настройках обхода;
+    # бэкенд — onyx_defense.start в отдельном потоке ядра.
+    was_on=False
+    while True:
+        try:
+            with STATE_LOCK: d=load()
+            on=bool((d.get("bypass") or {}).get("honeypot",False))
+            if on and not was_on:
+                DEFENSE_STATE["running"]=True
+                threading.Thread(target=_defense_run,daemon=True).start()
+            was_on=on
+        except Exception as exc:
+            print("defense worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(30)
+
+def _defense_run():
+    def on_ban(source_ip):
+        try:
+            subprocess.run(onyx_defense.ban_command(source_ip).split(),capture_output=True,timeout=10)
+            DEFENSE_STATE["banned"]+=1
+        except Exception: pass
+    try:
+        onyx_defense.start(on_ban=on_ban)
+    except Exception as exc:
+        print("defense backend failed:",type(exc).__name__,str(exc)[:120],file=sys.stderr,flush=True)
+    finally:
+        DEFENSE_STATE["running"]=False
+
+def unbound_worker():
+    # Watchdog DoT-резолвера: unbound установлен установщиком; если служба
+    # упала при включённом маркере — пробуем поднять, иначе снимаем маркер,
+    # чтобы Xray вернулся на системный резолвер и трафик не встал.
+    while True:
+        try:
+            marker=os.path.exists(UNBOUND_MARKER)
+            if marker:
+                check=subprocess.run(["systemctl","is-active","--quiet","unbound"],capture_output=True,timeout=10)
+                if check.returncode:
+                    subprocess.run(["systemctl","restart","unbound"],capture_output=True,timeout=30)
+                    time.sleep(5)
+                    if subprocess.run(["systemctl","is-active","--quiet","unbound"],capture_output=True,timeout=10).returncode:
+                        os.unlink(UNBOUND_MARKER)
+                        print("unbound degraded: marker removed",file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("unbound worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(300)
+
 def main():
     heal_caddy_route()
     threading.Thread(target=expiry_sweep,daemon=True).start()
@@ -6504,6 +6891,9 @@ def main():
     threading.Thread(target=limits_worker,daemon=True).start()
     threading.Thread(target=alerts_worker,daemon=True).start()
     threading.Thread(target=traffic_sampler,daemon=True).start()
+    threading.Thread(target=censor_worker,daemon=True).start()
+    threading.Thread(target=defense_worker,daemon=True).start()
+    threading.Thread(target=unbound_worker,daemon=True).start()
     ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
 
 if __name__=="__main__":
@@ -6700,7 +7090,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.6.8')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.7.0')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
