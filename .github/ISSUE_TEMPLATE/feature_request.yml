@@ -1,0 +1,24 @@
+name: Feature request / Предложение
+description: Idea for a new capability / Идея новой возможности
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Задача
+      description: What are you trying to achieve? / Чего не хватает сейчас?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution / Предложение
+      description: How would you like it to work? / Как это должно работать?
+    validations:
+      required: true
+  - type: checkboxes
+    id: workaround
+    attributes:
+      label: Alternatives / Альтернативы
+      options:
+        - label: I found a workaround / Обходной путь найден

@@ -4,9 +4,11 @@ import json
 import os
 import re
 import time
-from urllib.parse import urlencode, urlsplit, parse_qs
+from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
-VERSION = '1.8.8'
+import onyx_i18n as i18n
+
+VERSION = '2.8.0'
 
 
 def login_version():
@@ -46,7 +48,6 @@ def icon(name):
              'power': '<path d="M12 3v8"/><path d="M17.4 6.6a8 8 0 1 1-10.8 0"/>',
              'route': '<circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M7 19h6a4 4 0 0 0 4-4V9"/><path d="m17 6 3-3 2 4-5-1Z"/>',
              'logout': '<path d="M10 4H4v16h6m4-12 4 4-4 4m-6-4h10"/>',
-             'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"/>',
              'refresh': '<path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 14 6M4 12a8 8 0 0 0 14 6"/>',
              'modules': '<rect x="3" y="4" width="18" height="4.6" rx="1.5"/><rect x="3" y="10.7" width="18" height="4.6" rx="1.5"/><rect x="3" y="17.4" width="18" height="4.6" rx="1.5"/><path d="M6.6 6.3h.01M6.6 13h.01M6.6 19.7h.01"/>',
              'globe': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.8 13.8 0 0 1 3.6 9 13.8 13.8 0 0 1-3.6 9 13.8 13.8 0 0 1-3.6-9 13.8 13.8 0 0 1 3.6-9z"/>',
@@ -63,16 +64,17 @@ def icon(name):
              'youtube': '<rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3z"/>',
              'menu': '<path d="M4 7h16M4 12h16M4 17h16"/>',
              'bell': '<path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 8H3c0-1 3-1 3-8Z"/><path d="M9 21h6"/>',
-             'plus': '<path d="M12 5v14M5 12h14"/>'}
+             'plus': '<path d="M12 5v14M5 12h14"/>',
+             'warp': '<path d="M6.5 18a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19 10.5 3.75 3.75 0 0 1 18 18Z"/><path d="M12 12v6m0 0-2.2-2.2M12 18l2.2-2.2"/>'}
     return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+paths.get(name, paths['grid'])+'</svg>'
 
 
 CSS = '''
 :root{color-scheme:dark;--bg:#071116;--surface:#0f2028;--raised:#152b35;--input:#0a1920;--line:#24404b;--text:#e9f4f6;--muted:#91aeb8;--accent:#56decb;--on-accent:#052820;--tint:#56decb12;--green:#8bdbaa;--red:#ff9993;--amber:#f5c989;--shadow:0 18px 60px #0003}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;min-width:320px;-webkit-text-size-adjust:100%;background:var(--bg);color:var(--text);font:14px/1.55 "Segoe UI",system-ui,sans-serif}button,input,select,textarea{font:inherit}button,input,select,textarea,a,summary{outline-offset:4px}a{color:var(--accent)}button{cursor:pointer;touch-action:manipulation}button:disabled{opacity:.45;cursor:not-allowed}h1,h2,h3,p{overflow-wrap:anywhere}h1{font-size:34px;line-height:1.15;letter-spacing:-.055em;margin:0;font-weight:650}h2{font-size:17px;margin:0;font-weight:600;letter-spacing:-.02em}h3{font-size:15px;margin:0}p{margin:8px 0 16px}.muted,small,.sub{color:var(--muted)}.ico{width:18px;height:18px;flex:0 0 auto}.eyebrow{display:block;font:10px/1.5 ui-monospace,monospace;letter-spacing:.18em;color:var(--accent);text-transform:uppercase;margin-bottom:9px}
-.app{height:100dvh;padding:14px;display:grid;grid-template-columns:218px minmax(0,1fr);gap:14px}.sidebar{display:flex;flex-direction:column;min-height:0;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:22px 14px}.brand{display:flex;gap:11px;align-items:center;padding:0 6px 20px}.brand img{width:42px;height:42px;border-radius:13px}.brand b{font-size:12px;letter-spacing:.035em}.brand small{display:block;font:10px/1.7 ui-monospace,monospace;margin-top:3px}.brand-tools{padding:0 6px 25px;display:flex;gap:8px}.brand-tools button{width:100%;justify-content:flex-start;font-size:11px;background:transparent}.nav{display:grid;gap:8px}.nav a,.logout{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid transparent;border-radius:12px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:550}.nav a.active{background:var(--accent);color:var(--on-accent)}.nav a:hover:not(.active),.logout:hover{background:var(--raised);color:var(--text)}.side-footer{margin-top:auto;padding-top:32px}.logout{color:var(--muted)}.social{display:flex;justify-content:center;gap:16px;padding-top:21px;border-top:1px solid var(--line);margin-top:14px}.social a{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:10px;text-decoration:none}.social .ico{width:14px;height:14px}.workspace{min-width:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}main{max-width:1560px;margin:0 auto;padding:24px 24px 44px}.page-head{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:26px}.page-head p{font-size:13px;color:var(--muted);margin:8px 0 0}.card,.account{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:18px}.card{padding:23px;margin-bottom:18px}.card-title{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:20px}.card-title h2{display:flex;align-items:center;gap:8px}.btn,button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border:1px solid var(--line);background:var(--raised);color:var(--text);border-radius:10px;text-decoration:none;font-size:12px;font-weight:550;line-height:1.4}.btn:hover,button:hover{border-color:var(--accent)}.btn.primary,button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}button.danger,.btn.danger{background:transparent;color:var(--red)}button.quiet,.btn.quiet{background:transparent}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.actions form{margin:0}.note{margin:15px 0;padding:12px 15px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;background:var(--tint);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.note.warning{border-left-color:var(--amber);color:var(--amber)}.note.error{border-left-color:var(--red);color:var(--red)}.note code{font-size:11px;overflow-wrap:anywhere}input,textarea,select{width:100%;min-width:0;border:1px solid var(--line);background:var(--input);color:var(--text);padding:11px 13px;border-radius:10px}input:focus,textarea:focus,select:focus{border-color:var(--accent)}input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}label{display:block;font-size:12px;font-weight:550;color:var(--muted);margin:13px 0 7px}.checks{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0}.check{display:flex;align-items:center;gap:8px;margin:0;color:var(--text)}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap;color:var(--muted)}.badge:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--muted)}.badge.on{color:var(--green)}.badge.on:before{background:var(--green)}.pill{display:inline-flex;align-items:center;padding:3px 7px;border-radius:6px;border:1px solid var(--line);font-size:10px;line-height:1.5;color:var(--muted)}.pills{display:flex;flex-wrap:wrap;gap:5px}.proto-vless{color:var(--accent);background:var(--tint)}.proto-hysteria{color:var(--amber)}.proto-web{color:var(--green)}
-.overview-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}.overview-stat{padding:17px 19px;border-left:2px solid var(--line)}.overview-stat:first-child{border-color:var(--accent)}.overview-stat span{display:block;font-size:11px;color:var(--muted)}.overview-stat b{display:block;font:500 29px/1.3 ui-monospace,monospace;letter-spacing:-.07em;margin-top:5px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(280px,1fr);gap:18px}.graph-card{background:linear-gradient(145deg,var(--surface),var(--input));border-top:2px solid var(--accent)}.graph-speeds{display:flex;gap:38px;margin:26px 0 0}.graph-speeds span{font-size:11px;color:var(--muted);display:block}.graph-speeds b{font:500 25px/1.8 ui-monospace,monospace;letter-spacing:-.05em}.graph-speeds small{font-size:11px;color:var(--muted)}.chart-wrap{height:250px;margin:6px 0 15px}.chart-wrap svg{display:block;width:100%;height:100%;overflow:visible}.chart-wrap text{fill:var(--muted);font:10px ui-monospace,monospace}.chart-empty{height:100%;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:12px}.chart-empty .ico{width:34px;height:34px;opacity:.6}.range{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px}.range button{border:0;background:transparent;font-size:11px;padding:5px 9px}.range button.selected{background:var(--tint);color:var(--accent)}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:10px;color:var(--muted)}.legend i{display:inline-block;width:7px;height:7px;border-radius:3px;background:var(--accent);margin-right:6px}.legend .down i{background:var(--amber)}.service-list{display:grid}.service-line{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:15px 0;font-size:12px}.service-line:last-child{border-bottom:0}.node-domain{font-size:15px;font-weight:550;overflow-wrap:anywhere;margin-bottom:8px}.node-label{display:flex;align-items:center;gap:8px}.node-label i{display:block;width:8px;height:8px;border:2px solid var(--accent);border-radius:50%}.update-box{border-top:1px dashed var(--line);padding-top:20px;margin-top:20px}.update-box p{font-size:11px;color:var(--muted);margin:10px 0 0}.resource-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}.resource{padding:19px;background:var(--surface);border:1px solid var(--line);border-radius:15px}.resource-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.resource strong{font-size:12px;font-weight:550}.resource-head b{font:500 20px ui-monospace,monospace;color:var(--accent)}.meter{height:4px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:12px}.meter i{display:block;width:var(--value,0%);height:100%;background:var(--accent);border-radius:4px}.resource small{display:block;font-size:10px}.two-col.equal{display:grid;grid-template-columns:1fr 1fr;gap:18px}.detail-list{display:grid;gap:14px}.detail-line{display:flex;justify-content:space-between;gap:18px;font-size:12px}.detail-line span{color:var(--muted)}.detail-line strong{font-weight:550;text-align:right}.dashboard-clients{display:grid;gap:1px}.client-glance{display:grid;grid-template-columns:minmax(140px,1fr) minmax(100px,1fr) 120px auto;gap:16px;align-items:center;padding:15px 0;border-top:1px solid var(--line);font-size:12px}.client-glance:first-child{border-top:0}.client-glance strong{font-size:13px;overflow-wrap:anywhere}.client-glance small{display:block;margin-top:3px}.client-glance .btn{padding:6px 10px;font-size:11px}.client-glance .traffic-value{text-align:right}
-.clients-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);background:var(--surface);border-radius:18px;margin-bottom:20px;padding:20px 5px}.client-stat{padding:2px 18px;border-right:1px solid var(--line)}.client-stat:last-child{border:0}.client-stat span{display:block;font-size:10px;color:var(--muted);white-space:nowrap}.client-stat b{display:block;margin-top:6px;font:500 23px ui-monospace,monospace}.client-stat:first-child b{color:var(--accent)}.client-stat:nth-child(3) b{color:var(--green)}.clients-panel{border:1px solid var(--line);background:var(--surface);border-radius:18px;overflow:hidden}.clients-toolbar{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--line);flex-wrap:wrap}.search-field{flex:1;min-width:180px;display:flex;align-items:center;gap:8px;padding-left:12px;border:1px solid var(--line);border-radius:10px;background:var(--input);color:var(--muted)}.search-field input{border:0;background:transparent;padding-left:0;font-size:12px}.clients-toolbar select{font-size:12px;width:auto;max-width:175px;padding:10px 30px 10px 11px}.table-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}.clients-table{width:100%;min-width:930px;border-collapse:collapse;text-align:left;table-layout:auto}.clients-table th{font-size:10px;font-weight:500;letter-spacing:.03em;color:var(--muted);background:var(--raised);padding:12px 11px;white-space:nowrap}.clients-table td{padding:18px 11px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:middle}.clients-table tr:last-child td{border-bottom:0}.clients-table tbody tr:hover{background:var(--tint)}.clients-table .select-col{width:40px;text-align:center;padding-right:4px}.clients-table .client-name{min-width:155px;max-width:240px}.client-name strong{display:block;font-size:13px;overflow-wrap:anywhere}.client-name small{display:block;color:var(--muted);font:10px/1.8 ui-monospace,monospace}.clients-table .protocol-col{max-width:160px;min-width:105px}.traffic-cell{min-width:120px}.traffic-cell b{font:500 12px ui-monospace,monospace}.traffic-cell small{display:block;font-size:9px;white-space:nowrap;margin-top:4px}.traffic-split{height:3px;margin-top:9px;background:var(--line);border-radius:4px;overflow:hidden;display:flex}.traffic-split i{height:100%;display:block}.traffic-split .up{background:var(--accent)}.traffic-split .down{background:var(--amber)}.hwid-cell{font:12px ui-monospace,monospace}.hwid-cell small{font:9px "Segoe UI",sans-serif;display:block}.row-actions{display:flex;gap:3px;align-items:center}.icon-btn{height:30px;width:30px;padding:6px;background:transparent;border-color:transparent;border-radius:8px;color:var(--muted)}.icon-btn .ico{width:16px;height:16px}.icon-btn:hover{color:var(--accent)}.icon-btn.danger:hover{color:var(--red);border-color:var(--red)}.access-switch{padding:0;width:33px;height:19px;background:var(--line);border:0;border-radius:20px;display:block;position:relative}.access-switch:after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;background:var(--muted);border-radius:50%;transition:left .15s}.access-switch[aria-checked=true]{background:var(--accent)}.access-switch[aria-checked=true]:after{left:17px;background:var(--on-accent)}.access-switch:disabled{opacity:.6}.bulk-bar{padding:11px 16px;background:var(--tint);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap}.bulk-bar strong{font-size:11px;margin-right:auto}.bulk-bar button{font-size:11px;padding:7px 11px}.list-footer{padding:13px 17px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--muted)}.empty{padding:30px;text-align:center;color:var(--muted);font-size:13px}.table-loading{opacity:.6;pointer-events:none}
+.app{height:100dvh;padding:14px;display:grid;grid-template-columns:218px minmax(0,1fr);gap:14px}.sidebar{display:flex;flex-direction:column;min-height:0;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:22px 14px;opacity:.95}.brand{display:flex;gap:11px;align-items:center;padding:0 6px 20px}.brand img{width:42px;height:42px;border-radius:13px}.brand b{font-size:12px;letter-spacing:.035em}.brand small{display:block;font:10px/1.7 ui-monospace,monospace;margin-top:3px}.brand-tools{padding:0 6px 25px;display:flex;gap:8px}.brand-tools button{width:100%;justify-content:flex-start;font-size:11px;background:transparent}.nav{display:grid;gap:8px}.nav a,.logout{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid transparent;border-radius:12px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:550}.nav a.active{background:var(--accent);color:var(--on-accent)}.nav a:hover:not(.active),.logout:hover{background:var(--raised);color:var(--text)}.side-footer{margin-top:auto;padding-top:32px}.logout{color:var(--muted)}.social{display:flex;justify-content:center;gap:16px;padding-top:21px;border-top:1px solid var(--line);margin-top:14px}.social a{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:10px;text-decoration:none}.social .ico{width:14px;height:14px}.workspace{min-width:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}main{max-width:1560px;margin:0 auto;padding:24px 24px 44px}.page-head{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:26px}.page-head p{font-size:13px;color:var(--muted);margin:8px 0 0}.card,.account{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:18px}.card{padding:23px;margin-bottom:18px}.card-title{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:20px}.card-title h2{display:flex;align-items:center;gap:8px}.btn,button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border:1px solid var(--line);background:var(--raised);color:var(--text);border-radius:10px;text-decoration:none;font-size:12px;font-weight:550;line-height:1.4}.btn:hover,button:hover{border-color:var(--accent)}.btn.primary,button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}button.danger,.btn.danger{background:transparent;color:var(--red)}button.quiet,.btn.quiet{background:transparent}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.actions form{margin:0}.note{margin:15px 0;padding:12px 15px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;background:var(--tint);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.note.warning{border-left-color:var(--amber);color:var(--amber)}.note.error{border-left-color:var(--red);color:var(--red)}.note code{font-size:11px;overflow-wrap:anywhere}input,textarea,select{width:100%;min-width:0;border:1px solid var(--line);background:var(--input);color:var(--text);padding:11px 13px;border-radius:10px}input:focus,textarea:focus,select:focus{border-color:var(--accent)}input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}label{display:block;font-size:12px;font-weight:550;color:var(--muted);margin:13px 0 7px}.checks{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0}.check{display:flex;align-items:center;gap:8px;margin:0;color:var(--text)}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap;color:var(--muted)}.badge:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--muted)}.badge.on{color:var(--green)}.badge.on:before{background:var(--green)}.pill{display:inline-flex;align-items:center;padding:3px 7px;border-radius:6px;border:1px solid var(--line);font-size:10px;line-height:1.5;color:var(--muted)}.pills{display:flex;flex-wrap:wrap;gap:5px}.proto-vless{color:var(--accent);background:var(--tint)}.proto-hysteria{color:var(--amber)}.proto-web{color:var(--green)}
+.overview-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}.overview-stat{padding:17px 19px;border-left:2px solid var(--line)}.overview-stat:first-child{border-color:var(--accent)}.overview-stat span{display:block;font-size:11px;color:var(--muted)}.overview-stat b{display:block;font:500 29px/1.3 ui-monospace,monospace;letter-spacing:-.07em;margin-top:5px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(280px,1fr);gap:18px}.graph-card{background:linear-gradient(145deg,var(--surface),var(--input));border-top:2px solid var(--accent)}.graph-speeds{display:flex;gap:38px;margin:26px 0 0}.graph-speeds span{font-size:11px;color:var(--muted);display:block}.graph-speeds b{font:500 25px/1.8 ui-monospace,monospace;letter-spacing:-.05em}.graph-speeds small{font-size:11px;color:var(--muted)}.chart-wrap{height:250px;margin:6px 0 15px}.chart-wrap svg{display:block;width:100%;height:100%;overflow:visible}.chart-wrap text{fill:var(--muted);font:10px ui-monospace,monospace}.chart-empty{height:100%;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:12px}.chart-empty .ico{width:34px;height:34px;opacity:.6}.range{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px}.range button{border:0;background:transparent;font-size:11px;padding:5px 9px}.range button.selected{background:var(--tint);color:var(--accent)}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:10px;color:var(--muted)}.legend i{display:inline-block;width:7px;height:7px;border-radius:3px;background:var(--accent);margin-right:6px}.legend .down i{background:var(--amber)}.legend-node{display:inline-flex;align-items:center}.legend-node i{display:inline-block;width:14px;height:2px;border-radius:2px;margin-right:6px}.service-list{display:grid}.service-line{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:15px 0;font-size:12px}.service-line:last-child{border-bottom:0}.node-domain{font-size:15px;font-weight:550;overflow-wrap:anywhere;margin-bottom:8px}.node-label{display:flex;align-items:center;gap:8px}.node-label i{display:block;width:8px;height:8px;border:2px solid var(--accent);border-radius:50%}.update-box{border-top:1px dashed var(--line);padding-top:20px;margin-top:20px}.update-box p{font-size:11px;color:var(--muted);margin:10px 0 0}.resource-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}.resource{padding:19px;background:var(--surface);border:1px solid var(--line);border-radius:15px}.resource-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.resource strong{font-size:12px;font-weight:550}.resource-head b{font:500 20px ui-monospace,monospace;color:var(--accent)}.meter{height:4px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:12px}.meter i{display:block;width:var(--value,0%);height:100%;background:var(--accent);border-radius:4px}.resource small{display:block;font-size:10px}.two-col.equal{display:grid;grid-template-columns:1fr 1fr;gap:18px}.detail-list{display:grid;gap:14px}.detail-line{display:flex;justify-content:space-between;gap:18px;font-size:12px}.detail-line span{color:var(--muted)}.detail-line strong{font-weight:550;text-align:right}.dashboard-clients{display:grid;gap:1px}.client-glance{display:grid;grid-template-columns:minmax(140px,1fr) minmax(100px,1fr) 120px auto;gap:16px;align-items:center;padding:15px 0;border-top:1px solid var(--line);font-size:12px}.client-glance:first-child{border-top:0}.client-glance strong{font-size:13px;overflow-wrap:anywhere}.client-glance small{display:block;margin-top:3px}.client-glance .btn{padding:6px 10px;font-size:11px}.client-glance .traffic-value{text-align:right}
+.clients-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);background:var(--surface);border-radius:18px;margin-bottom:20px;padding:20px 5px}.client-stat{padding:2px 18px;border-right:1px solid var(--line)}.client-stat:last-child{border:0}.client-stat span{display:block;font-size:10px;color:var(--muted);white-space:nowrap}.client-stat b{display:block;margin-top:6px;font:500 23px ui-monospace,monospace}.client-stat:first-child b{color:var(--accent)}.client-stat:nth-child(3) b{color:var(--green)}.clients-panel{border:1px solid var(--line);background:var(--surface);border-radius:18px;overflow:visible}.clients-toolbar{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--line);flex-wrap:wrap}.search-field{flex:1;min-width:180px;display:flex;align-items:center;gap:8px;padding-left:12px;border:1px solid var(--line);border-radius:10px;background:var(--input);color:var(--muted)}.search-field input{border:0;background:transparent;padding-left:0;font-size:12px}.clients-toolbar select{font-size:12px;width:auto;max-width:175px;padding:10px 30px 10px 11px}.table-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}.clients-table{width:100%;min-width:930px;border-collapse:collapse;text-align:left;table-layout:auto}.clients-table th{font-size:10px;font-weight:500;letter-spacing:.03em;color:var(--muted);background:var(--raised);padding:12px 11px;white-space:nowrap}.clients-table td{padding:18px 11px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:middle}.clients-table tr:last-child td{border-bottom:0}.clients-table tbody tr:hover{background:var(--tint)}.clients-table .select-col{width:40px;text-align:center;padding-right:4px}.clients-table .client-name{min-width:155px;max-width:240px}.client-name strong{display:block;font-size:13px;overflow-wrap:anywhere}.client-name small{display:block;color:var(--muted);font:10px/1.8 ui-monospace,monospace}.clients-table .protocol-col{max-width:160px;min-width:105px}.traffic-cell{min-width:120px}.traffic-cell b{font:500 12px ui-monospace,monospace}.traffic-cell small{display:block;font-size:9px;white-space:nowrap;margin-top:4px}.traffic-split{height:3px;margin-top:9px;background:var(--line);border-radius:4px;overflow:hidden;display:flex}.traffic-split i{height:100%;display:block}.traffic-split .up{background:var(--accent)}.traffic-split .down{background:var(--amber)}.hwid-cell{font:12px ui-monospace,monospace}.hwid-cell small{font:9px "Segoe UI",sans-serif;display:block}.row-actions{display:flex;gap:3px;align-items:center}.icon-btn{height:30px;width:30px;padding:6px;background:transparent;border-color:transparent;border-radius:8px;color:var(--muted)}.icon-btn .ico{width:16px;height:16px}.icon-btn:hover{color:var(--accent)}.icon-btn.danger:hover{color:var(--red);border-color:var(--red)}.access-switch{padding:0;width:33px;height:19px;background:var(--line);border:0;border-radius:20px;display:block;position:relative}.access-switch:after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;background:var(--muted);border-radius:50%;transition:left .15s}.access-switch[aria-checked=true]{background:var(--accent)}.access-switch[aria-checked=true]:after{left:17px;background:var(--on-accent)}.access-switch:disabled{opacity:.6}.bulk-bar{padding:11px 16px;background:var(--tint);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap}.bulk-bar strong{font-size:11px;margin-right:auto}.bulk-bar button{font-size:11px;padding:7px 11px}.list-footer{padding:13px 17px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--muted)}.empty{padding:30px;text-align:center;color:var(--muted);font-size:13px}.table-loading{opacity:.6;pointer-events:none}
 dialog{padding:25px;width:min(570px,calc(100vw - 32px));max-height:90vh;max-height:min(90dvh,calc(100dvh - 12px));overflow:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:20px;box-shadow:var(--shadow)}dialog::backdrop{background:#020d14aa;backdrop-filter:blur(7px)}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.dialog-head h2{font-size:21px}.dialog-head button{padding:4px 10px;font-size:21px}
 @media(max-width:760px){.dialog-head button{min-width:40px;min-height:40px}}.client-detail .account{padding:0;border:0;background:transparent}.account{padding:20px;margin:0}.account-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.account-head .identity{display:flex;align-items:center;gap:12px;min-width:0}.avatar{display:grid;place-items:center;width:40px;height:40px;flex-shrink:0;background:var(--tint);color:var(--accent);border-radius:12px}.account h3{font-size:16px}.account .pills{margin-top:5px}.account-metrics{display:flex;gap:22px;margin:20px 0;font-size:13px}.account-metrics span{display:block;font-size:10px;color:var(--muted);margin-bottom:4px}.account details{border-top:1px solid var(--line);padding-top:12px;margin-top:18px}.account summary{cursor:pointer;color:var(--muted);font-size:12px;padding:4px 0}.sub-url{font:11px/1.5 ui-monospace,monospace;margin-bottom:12px}.device{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-top:1px solid var(--line);font-size:12px}.device small{display:block;font-size:10px}.qr-image{display:block;width:100%;max-width:260px;padding:12px;background:#fff;border-radius:10px;margin:18px auto}.client-detail .account>details>summary{display:none}
 .account-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 2px}.account-actions form{margin:0}.account-actions .btn,.account-actions button{margin:0}
@@ -80,16 +82,22 @@ dialog{padding:25px;width:min(570px,calc(100vw - 32px));max-height:90vh;max-heig
 .release-banner{max-width:1512px;margin:14px auto 0;padding:13px 16px;display:flex;align-items:center;gap:13px;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--line));border-radius:13px;background:linear-gradient(100deg,var(--tint),var(--surface) 58%);box-shadow:0 12px 34px #0002}.release-banner[hidden]{display:none}.release-banner-mark{display:grid;place-items:center;width:38px;height:38px;flex:0 0 auto;border-radius:11px;background:var(--accent);color:var(--on-accent)}.release-banner-mark .ico{width:19px;height:19px}.release-banner-copy{min-width:0;flex:1}.release-banner-copy b{display:block;font-size:12px}.release-banner-copy small{display:block;margin-top:2px;font-size:10px}.release-banner-version{font:600 11px ui-monospace,monospace;color:var(--accent);white-space:nowrap}.release-banner-actions{display:flex;align-items:center;gap:7px}.release-banner-actions .btn{padding:8px 12px}.release-banner-close{width:34px;height:34px;padding:6px;background:transparent;font-size:18px;color:var(--muted)}
 @media(max-width:700px){.release-banner{margin:10px 8px 0;align-items:flex-start;flex-wrap:wrap}.release-banner-copy{width:calc(100% - 54px)}.release-banner-version{margin-left:51px}.release-banner-actions{margin-left:auto}.release-banner-actions .btn{font-size:11px}}
 .version-manager{margin-top:18px}.version-manager h3{font-size:13px;margin:0 0 5px}.version-manager>p{margin:0 0 14px;color:var(--muted);font-size:10px}.version-row{display:grid;grid-template-columns:110px minmax(120px,1fr) auto;gap:8px;align-items:center;margin-top:9px}.version-row label{margin:0;font-size:11px}.version-row select{min-width:0;padding:9px}.version-row button{white-space:nowrap}.version-state{display:block;grid-column:2/-1;color:var(--muted);font-size:9px}
-.updates-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;background:linear-gradient(135deg,var(--surface),var(--raised));border-top:2px solid var(--accent)}.updates-hero-copy{display:flex;align-items:center;gap:16px}.updates-hero-icon{display:grid;place-items:center;width:52px;height:52px;flex:0 0 auto;border-radius:15px;background:var(--tint);color:var(--accent)}.updates-hero-icon .ico{width:25px;height:25px}.updates-hero p{margin:6px 0 0;color:var(--muted);font-size:12px}.updates-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.updates-card{display:flex;flex-direction:column;margin:0}.updates-card .card-title{align-items:flex-start}.updates-card .card-title p{margin:6px 0 0;color:var(--muted);font-size:11px}.update-installed{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px 15px;margin-bottom:15px;border:1px solid var(--line);border-radius:11px;background:var(--input)}.update-installed span{font-size:11px;color:var(--muted)}.update-installed strong{font:600 13px ui-monospace,monospace}.update-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end}.update-control label{grid-column:1/-1;margin-top:0}.update-control button{min-width:126px}.update-control button.comp-icon{min-width:44px;width:44px;height:44px;padding:0;justify-self:end}.update-control button.comp-icon .ico{width:18px;height:18px}.component-stack{display:grid;gap:12px}.component-item{padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--input)}.component-item-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}.component-item-head strong{font-size:13px}.component-item-head small{font:10px ui-monospace,monospace}.update-status{min-height:46px;margin:16px 0 0}.update-safety{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.update-safety div{padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.update-safety b{display:block;font-size:11px;margin-bottom:4px}.update-safety small{font-size:10px;line-height:1.55}
+.updates-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;background:linear-gradient(135deg,var(--surface),var(--raised));border-top:2px solid var(--accent)}.updates-hero-copy{display:flex;align-items:center;gap:16px}.updates-hero-icon{display:grid;place-items:center;width:52px;height:52px;flex:0 0 auto;border-radius:15px;background:var(--tint);color:var(--accent)}.updates-hero-icon .ico{width:25px;height:25px}.updates-hero p{margin:6px 0 0;color:var(--muted);font-size:12px}.updates-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.updates-card{display:flex;flex-direction:column;margin:0}.updates-card .card-title{align-items:flex-start}.updates-card .card-title p{margin:6px 0 0;color:var(--muted);font-size:11px}.update-installed{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px 15px;margin-bottom:15px;border:1px solid var(--line);border-radius:11px;background:var(--input)}.update-installed span{font-size:11px;color:var(--muted)}.update-installed strong{font:600 13px ui-monospace,monospace}.update-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end}.update-control label{grid-column:1/-1;margin-top:0}.update-control button{min-width:126px}.update-control.panel-update-control{grid-template-columns:minmax(0,1fr) auto auto}.update-control button.comp-icon{min-width:44px;width:44px;height:44px;padding:0;justify-self:end}.update-control button.comp-icon .ico{width:18px;height:18px}.component-stack{display:grid;gap:12px}.component-item{padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--input)}.component-item-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}.component-item-head strong{font-size:13px}.component-item-head small{font:10px ui-monospace,monospace}.update-status{min-height:46px;margin:16px 0 0}.update-safety{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.update-safety div{padding:15px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.update-safety b{display:block;font-size:11px;margin-bottom:4px}.update-safety small{font-size:10px;line-height:1.55}
 @media(max-width:900px){.updates-grid{grid-template-columns:1fr}.updates-hero{align-items:flex-start}.update-safety{grid-template-columns:1fr}}
-@media(max-width:600px){.version-row{grid-template-columns:1fr}.version-state{grid-column:auto}.version-row button{width:100%}.updates-hero{display:block}.updates-hero>.actions{margin-top:16px}.update-control{grid-template-columns:1fr}.update-control button{width:100%}.updates-hero-copy{align-items:flex-start}}
-.preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.preset{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-width:0;padding:18px;background:var(--raised);border:1px solid var(--line);border-radius:14px}.preset .preset-art{display:grid;place-items:center;height:54px;width:100%;font-size:28px;border-bottom:1px dashed var(--line);padding-bottom:12px;margin-bottom:15px}.preset b{font-size:12px}.preset p{font-size:11px;color:var(--muted);margin:7px 0 18px}.preset button{width:100%;margin-top:auto;font-size:11px}.editor-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 16px;font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--raised)}.editor-bar i{font-style:normal;color:var(--accent)}.code-editor{display:block;min-height:340px;max-height:700px;padding:19px;border-radius:0 0 12px 12px;font:12px/1.9 ui-monospace,Consolas,monospace;resize:vertical;tab-size:2}.editor-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:17px}.preview-dialog{width:min(1240px,calc(100vw - 32px));padding:0;overflow:auto}.preview-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:15px 18px;border-bottom:1px solid var(--line)}.preview-top strong{font-size:13px}.preview-stage{display:flex;justify-content:center;padding:20px;background:var(--bg);height:min(72dvh,780px);min-height:240px}.preview-stage iframe{display:block;width:100%;max-width:100%;height:100%;border:1px solid var(--line);border-radius:10px;background:transparent}.preview-stage.phone iframe{width:390px;border-radius:24px}.preview-caption{margin:0;padding:10px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+@media(max-width:600px){.version-row{grid-template-columns:1fr}.version-state{grid-column:auto}.version-row button{width:100%}.component-item .update-control{grid-template-columns:minmax(0,1fr) auto}.updates-hero{display:block}.updates-hero>.actions{margin-top:16px}.update-control{grid-template-columns:1fr}.update-control.panel-update-control{grid-template-columns:1fr}.update-control button{width:100%}.updates-hero-copy{align-items:flex-start}}
+.preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.preset{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-width:0;padding:18px;background:var(--raised);border:1px solid var(--line);border-radius:14px}.preset .preset-art{display:grid;place-items:center;height:54px;width:100%;font-size:28px;border-bottom:1px dashed var(--line);padding-bottom:12px;margin-bottom:15px}.preset b{font-size:12px}.preset p{font-size:11px;color:var(--muted);margin:7px 0 18px}.preset button{width:100%;margin-top:auto;font-size:11px}.preset-pin{display:inline-flex;align-items:center;gap:4px;margin-left:7px;padding:2px 7px;border-radius:7px;background:var(--tint);color:var(--accent);font-size:9px;font-weight:600;letter-spacing:.04em;white-space:nowrap;vertical-align:middle}.preset-pin:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent)}.preset.pinned{border-color:color-mix(in srgb,var(--accent) 32%,var(--line));background:linear-gradient(180deg,var(--tint),var(--raised))}.preset.pinned .preset-art{color:var(--accent)}.editor-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 16px;font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--raised)}.editor-bar i{font-style:normal;color:var(--accent)}.code-editor{display:block;min-height:340px;max-height:700px;padding:19px;border-radius:0 0 12px 12px;font:12px/1.9 ui-monospace,Consolas,monospace;resize:vertical;tab-size:2}.editor-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:17px}.preview-dialog{width:min(1240px,calc(100vw - 32px));padding:0;overflow:auto}.preview-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:15px 18px;border-bottom:1px solid var(--line)}.preview-top strong{font-size:13px}.preview-stage{display:flex;justify-content:center;padding:20px;background:var(--bg);height:min(72dvh,780px);min-height:240px}.preview-stage iframe{display:block;width:100%;max-width:100%;height:100%;border:1px solid var(--line);border-radius:10px;background:transparent}.preview-stage.phone iframe{width:390px;border-radius:24px}.preview-caption{margin:0;padding:10px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
 .login-page{min-height:100dvh;display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse at 15% 20%,var(--tint),transparent 65%),var(--bg)}.mobile-caption{display:none}[hidden]{display:none!important}
 @media(min-width:1700px){main{padding-left:36px;padding-right:36px}.app{grid-template-columns:230px minmax(0,1fr)}}
 @media(max-width:1150px){.app{grid-template-columns:192px minmax(0,1fr);padding:10px;gap:8px}main{padding:24px 18px}.brand{gap:8px}.brand b{font-size:11px}.brand img{width:36px;height:36px}.dashboard-grid{grid-template-columns:minmax(0,1.5fr) minmax(245px,1fr)}.clients-summary{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:18px}.client-stat:nth-child(3){border-right:0}.resource-grid{grid-template-columns:1fr 1fr}.graph-speeds{gap:20px}.graph-speeds b{font-size:22px}.preset-grid{grid-template-columns:1fr 1fr}.client-glance{grid-template-columns:1fr 1fr auto}.client-glance .badge{display:none}}
 @media(max-width:900px){.dashboard-grid,.two-col.equal{grid-template-columns:1fr}.overview-stats{grid-template-columns:1fr 1fr}.graph-card{margin-bottom:0}.graph-speeds b{font-size:27px}.clients-toolbar select{max-width:100%}}
 @media(max-width:700px){.app{display:block;height:auto;padding:8px}.sidebar{padding:14px;border-radius:16px;overflow:visible}.brand{padding:0 50px 13px 2px}.brand b{font-size:12px}.brand img{width:37px;height:37px}.brand-tools{position:absolute;right:25px;top:24px;padding:0;gap:5px}.brand-tools button{width:34px;height:34px;padding:7px}.brand-tools button span{display:none}.brand-tools .mobile-caption{display:none}.nav{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.nav a{padding:9px 4px;font-size:11px;gap:6px;justify-content:center}.nav .ico{width:15px}.side-footer{display:flex;justify-content:space-between;align-items:center;padding-top:10px}.side-footer .logout{font-size:10px;padding:4px 6px;gap:5px}.social{margin:0;padding:0;border:0;gap:14px}.social a{font-size:9px}.social .ico{width:12px}.workspace{overflow:visible}main{padding:23px 5px 35px}.page-head{align-items:flex-start;gap:12px;margin-bottom:21px}.page-head h1{font-size:30px}.page-head p{font-size:12px}.page-head>button{font-size:11px;padding:10px;max-width:145px}.eyebrow{font-size:9px}.card{padding:18px}.graph-speeds{gap:20px}.graph-speeds b{font-size:23px}.chart-wrap{height:210px}.resource{padding:15px}.resource-head b{font-size:17px}.resource-head strong{font-size:11px}.overview-stat{padding:10px 14px}.overview-stat b{font-size:24px}.client-glance{grid-template-columns:minmax(0,1fr) auto;gap:9px}.client-glance .pills{display:none}.client-glance .btn{grid-column:1/-1;justify-self:start}.clients-summary{padding:16px 0;row-gap:16px;border-radius:15px}.client-stat{padding:0 11px}.client-stat b{font-size:20px}.client-stat span{font-size:9px}.clients-toolbar{padding:12px;gap:8px}.search-field{flex-basis:100%}.clients-toolbar select{flex:1 1 100%;font-size:12px;min-width:0;width:100%;padding-right:28px}.clients-table{display:block;min-width:0}.clients-table thead{display:none}.clients-table tbody{display:grid;gap:12px;padding:12px}.clients-table tr{position:relative;display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:13px;padding:12px;gap:10px;background:var(--input)}.clients-table td{display:block;padding:0;border:0;min-width:0}.clients-table td:before{content:attr(data-label);display:block;color:var(--muted);font-size:9px;margin-bottom:4px}.clients-table .select-col{position:absolute;right:12px;top:14px;width:20px}.clients-table .client-name{grid-column:1/-1;max-width:none;padding-right:28px}.client-name strong{font-size:15px}.clients-table .state-col{position:static;grid-area:2/2;justify-self:end;align-self:center}.clients-table .state-col:before{display:none}.clients-table .activity-col{grid-area:2/1;min-height:26px;align-self:center}.clients-table .activity-col:before{display:none}.clients-table .protocol-col{max-width:none}.traffic-cell{min-width:0}.clients-table .actions-col{grid-column:1/-1;border-top:1px solid var(--line);padding-top:9px}.clients-table .actions-col:before{display:none}.row-actions{justify-content:flex-end;gap:9px}.row-actions .icon-btn{width:35px;height:33px;border:1px solid var(--line)}.clients-table tr:last-child td{border:0}.bulk-bar{padding:12px}.form-grid{grid-template-columns:1fr}.account-head{flex-wrap:wrap}.account-metrics{gap:15px}.device{flex-wrap:wrap}.preview-top{padding:12px}.preview-stage{padding:10px;height:65dvh}.preview-dialog{width:calc(100vw - 16px)}.editor-actions{align-items:stretch;flex-direction:column}.preset-grid{gap:8px}.preset{padding:13px}.preset button{padding:9px}.login-page{padding:80px 18px 30px}}
-.totp-dialog{width:min(330px,calc(100vw - 32px));padding:26px 24px 22px;text-align:center;border-radius:24px}.totp-close{position:absolute;top:10px;right:12px;width:32px;height:32px;padding:4px;font-size:20px;background:transparent;border-color:transparent;color:var(--muted)}.totp-mark{width:44px;height:44px;margin:0 auto 12px;display:block}.totp-dialog h2{font-size:19px}.totp-hint{font-size:11.5px;color:var(--muted);margin:8px auto 0;max-width:230px;line-height:1.55}.totp-dialog img{display:block;width:172px;height:172px;margin:14px auto 0;padding:10px;background:#fff;border-radius:14px}.totp-secret-line{font-size:10px;color:var(--muted);margin:10px 0 0;overflow-wrap:anywhere}.totp-secret-line code{font-family:var(--font-mono);font-size:10px;word-break:break-all}.totp-otp-label{font-size:12px;color:var(--muted);margin:16px 0 0}.totp-cells{display:flex;gap:8px;justify-content:center;margin:10px 0 2px}.totp-cells input{width:42px;height:52px;padding:0;text-align:center;font:600 22px/1 var(--font-mono);border-radius:11px}.totp-status{min-height:18px;margin:10px 0 0;font-size:11.5px;color:var(--muted)}.totp-actions{display:flex;gap:9px;justify-content:center;margin-top:14px}.totp-actions .btn,.totp-actions button{min-width:110px}.head-search,#refreshDashboard{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:8px;border-radius:10px;border-color:transparent;background:transparent;color:var(--muted);transition:background .18s ease,border-color .18s ease,color .18s ease}.head-search:hover,#refreshDashboard:hover{background:var(--raised);border-color:color-mix(in srgb,var(--text) 18%,transparent);color:var(--text)}.head-search .ico,#refreshDashboard .ico{width:19px;height:19px}.head-avatar{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--sidebar);border:1px solid var(--line-soft);overflow:hidden}.page-head .actions .bell-btn{width:34px;height:34px;padding:8px;border-radius:10px}.page-head .actions .bell-btn .ico{width:19px;height:19px}.page-head .actions .bell-count{top:-4px;right:-4px}.bell-wrap{position:relative}.bell-btn{position:relative}.bell-count{position:absolute;top:-6px;right:-7px;min-width:16px;height:16px;padding:0 4px;display:grid;place-items:center;border-radius:8px;background:var(--accent);color:var(--on-accent);font:600 9px/1 ui-monospace,monospace}.bell-menu{position:absolute;right:0;top:calc(100% + 9px);z-index:50;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);width:min(380px,calc(100vw - 48px));max-height:min(70dvh,560px)}.bell-menu[hidden]{display:none}.bell-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line);flex:0 0 auto}.bell-head b{font-size:12px}.bell-head button{padding:6px 10px;font-size:10px;background:transparent;border-color:transparent;color:var(--muted)}.bell-head button:hover{color:var(--red);border-color:var(--red)}.bell-list{overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}.bell-item{padding:15px 16px;border-bottom:1px solid var(--line)}.bell-item:last-child{border-bottom:0}.bell-item.fresh{background:var(--tint)}.bell-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.bell-item-head b{font-size:12px}.bell-item-head small{font:9px ui-monospace,monospace;color:var(--muted);white-space:nowrap}.bell-item p{margin:8px 0 0;font-size:11px;color:var(--muted);line-height:1.6}.bell-item .btn,.bell-item button{margin-top:11px;padding:8px 13px;font-size:11px}.bell-changes{margin:9px 0 0;padding:0;list-style:none;display:grid;gap:6px}.bell-changes li{position:relative;padding-left:14px;font-size:11px;line-height:1.55;color:var(--muted);overflow-wrap:anywhere}.bell-changes li:before{content:"";position:absolute;left:2px;top:7px;width:5px;height:5px;border-radius:2px;background:var(--accent)}.bell-link{display:inline-block;margin-top:10px;font-size:10px}.bell-empty{padding:28px 16px;text-align:center;color:var(--muted);font-size:11px;line-height:1.6}
+.totp-dialog{width:min(330px,calc(100vw - 32px));padding:26px 24px 22px;text-align:center;border-radius:24px}.totp-close{position:absolute;top:10px;right:12px;width:32px;height:32px;padding:4px;font-size:20px;background:transparent;border-color:transparent;color:var(--muted)}.totp-mark{width:44px;height:44px;margin:0 auto 12px;display:block}.totp-dialog h2{font-size:19px}.totp-hint{font-size:11.5px;color:var(--muted);margin:8px auto 0;max-width:230px;line-height:1.55}.totp-dialog img{display:block;width:172px;height:172px;margin:14px auto 0;padding:10px;background:#fff;border-radius:14px}.totp-secret-line{font-size:10px;color:var(--muted);margin:10px 0 0;overflow-wrap:anywhere}.totp-secret-line code{font-family:var(--font-mono);font-size:10px;word-break:break-all}.totp-otp-label{font-size:12px;color:var(--muted);margin:16px 0 0}.totp-cells{display:flex;gap:8px;justify-content:center;margin:10px 0 2px}.totp-cells input{width:42px;height:52px;padding:0;text-align:center;font:600 22px/1 var(--font-mono);border-radius:11px}.totp-status{min-height:18px;margin:10px 0 0;font-size:11.5px;color:var(--muted)}.totp-status.err{color:var(--red)}.totp-status.ok{color:var(--green)}.totp-cells input{transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}.totp-cells input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);transform:translateY(-1px)}.totp-dialog.working .totp-cells input{animation:totp-pulse .9s ease-in-out infinite}.totp-dialog.done .totp-mark{animation:totp-pop .45s cubic-bezier(.2,.9,.3,1.3)}@keyframes totp-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}@keyframes totp-pop{0%{transform:scale(.8);opacity:.5}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}.totp-actions{display:flex;gap:9px;justify-content:center;margin-top:14px}.totp-actions .btn,.totp-actions button{min-width:110px}.head-search,#refreshDashboard{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:8px;border-radius:10px;border-color:transparent;background:transparent;color:var(--muted);transition:background .18s ease,border-color .18s ease,color .18s ease}.head-search:hover,#refreshDashboard:hover{background:var(--raised);border-color:color-mix(in srgb,var(--text) 18%,transparent);color:var(--text)}.head-search .ico,#refreshDashboard .ico{width:19px;height:19px}.head-avatar{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--sidebar);border:1px solid var(--line-soft);overflow:hidden}.head-cluster{display:inline-flex;align-items:center;gap:8px}.page-head .actions .bell-btn{width:34px;height:34px;padding:8px;border-radius:10px}.page-head .actions .bell-btn .ico{width:19px;height:19px}.page-head .actions .bell-count{top:-4px;right:-4px}.bell-wrap{position:relative}.bell-btn{position:relative}.bell-count{position:absolute;top:-6px;right:-7px;min-width:16px;height:16px;padding:0 4px;display:grid;place-items:center;border-radius:8px;background:var(--accent);color:var(--on-accent);font:600 9px/1 ui-monospace,monospace}.bell-menu{position:absolute;right:0;top:calc(100% + 9px);z-index:50;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);width:min(380px,calc(100vw - 48px));max-height:min(70dvh,560px)}.bell-menu[hidden]{display:none}.bell-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line);flex:0 0 auto}.bell-head b{font-size:12px}.bell-head button{padding:6px 10px;font-size:10px;background:transparent;border-color:transparent;color:var(--muted)}.bell-head button:hover{color:var(--red);border-color:var(--red)}.bell-list{overflow:auto;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text) 30%,transparent) transparent;overscroll-behavior:contain}
+.bell-list::-webkit-scrollbar{width:8px}
+.bell-list::-webkit-scrollbar-track{background:transparent}
+.bell-list::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text) 26%,transparent);border-radius:8px}
+.bell-list::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text) 42%,transparent)}
+.bell-head{position:sticky;top:0;z-index:1;background:var(--raised)}.bell-item{padding:15px 16px;border-bottom:1px solid var(--line)}.bell-item:last-child{border-bottom:0}.bell-item.fresh{background:var(--tint)}.bell-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.bell-item-head b{font-size:12px}.bell-item-head small{font:9px ui-monospace,monospace;color:var(--muted);white-space:nowrap}.bell-item p{margin:8px 0 0;font-size:11px;color:var(--muted);line-height:1.6}.bell-item .btn,.bell-item button{margin-top:11px;padding:8px 13px;font-size:11px}.bell-changes{margin:9px 0 0;padding:0;list-style:none;display:grid;gap:6px}.bell-changes li{position:relative;padding-left:14px;font-size:11px;line-height:1.55;color:var(--muted);overflow-wrap:anywhere}.bell-changes li:before{content:"";position:absolute;left:2px;top:7px;width:5px;height:5px;border-radius:2px;background:var(--accent)}.bell-link{display:inline-block;margin-top:10px;font-size:10px}.bell-empty{display:grid;justify-items:center;gap:5px;padding:36px 20px 32px;text-align:center;color:var(--muted);font-size:11px;line-height:1.6}.bell-empty .ico{width:30px;height:30px;opacity:.65;margin-bottom:2px}.bell-empty b{font-size:13px;font-weight:600;color:var(--text)}.bell-empty p{margin:0;max-width:270px}
+.limit-bar{height:4px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:9px}.limit-bar i{display:block;height:100%;background:var(--green);border-radius:4px;transition:width .3s}.limit-bar-warn i{background:var(--amber)}.limit-bar-over i{background:var(--red)}.limit-note{display:block;font-size:9px;color:var(--muted);margin-top:4px;white-space:nowrap}.spark{display:block;margin-top:7px}.invite-list{display:grid;gap:10px}.invite-card{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:13px;background:var(--input)}.invite-card small{display:block;color:var(--muted);font-size:10px;margin-top:3px;overflow-wrap:anywhere}.invite-card .actions{flex-wrap:nowrap}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 '''
 
@@ -225,14 +233,99 @@ function build(sel){
   sel.addEventListener("change",render);
   new MutationObserver(render).observe(sel,{childList:true});
   render();
+  if(sel.hasAttribute("data-selx-lock"))lockWidth();
+  function lockWidth(){
+    const freeze=()=>{
+      const longest=[...sel.options].reduce((a,o)=>o.textContent.length>(a?a.textContent.length:0)?o:a,null);
+      if(!longest)return;
+      // Замер по клону триггера вне дерева: блок может быть скрыт (свёрнутая карточка), и живой замер даст ноль.
+      // Класс audit-filter нужен, чтобы контекстные правила (.audit-filter .selx-trigger) применились и к клону.
+      const box=document.createElement("div");
+      box.className="audit-filter";
+      box.style.cssText="position:absolute;left:-99999px;top:0;width:max-content";
+      const clone=btn.cloneNode(true);
+      clone.querySelector(".selx-label").textContent=longest.textContent;
+      box.appendChild(clone);
+      document.body.appendChild(box);
+      const w=box.getBoundingClientRect().width;
+      box.remove();
+      if(w>0)wrap.style.width=Math.ceil(w)+"px";
+    };
+    (document.fonts&&document.fonts.ready)?document.fonts.ready.then(freeze):freeze();
+  }
 }
 document.querySelectorAll("select").forEach(build);
-new MutationObserver(muts=>{muts.forEach(m=>{m.addedNodes.forEach(n=>{if(n.nodeType===1){if(n.matches("select"))build(n);n.querySelectorAll("select").forEach(build)}})})}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(muts=>{muts.forEach(m=>{m.addedNodes.forEach(n=>{if(n.nodeType===1&&!(n.closest&&n.closest("[data-live-block]"))){if(n.matches("select"))build(n);n.querySelectorAll("select").forEach(build)}})})}).observe(document.body,{childList:true,subtree:true});
+/* Кнопка обновления дашборда: иконка крутится две секунды после клика */
+document.addEventListener("click",e=>{const b=e.target.closest("#refreshDashboard");if(!b)return;b.classList.add("spin2");clearTimeout(b._onyxSpin);b._onyxSpin=setTimeout(()=>b.classList.remove("spin2"),2000)});
 })();</script>"""
 
 
+# PWA: регистрация минимального service worker (панель ставится как приложение).
+PWA_JS="""<script>
+(()=>{if(!("serviceWorker" in navigator))return;
+// После обновления панели worker активируется (skipWaiting+claim) и начинает
+// управлять страницей: перезагружаем её ровно один раз, чтобы UI совпал с
+// бэкендом. Саму навигацию делает страница — не worker: clients.navigate()
+// из активации подвешивает загрузку в Safari.
+if(navigator.serviceWorker.controller){let reloaded=false;
+navigator.serviceWorker.addEventListener("controllerchange",()=>{if(reloaded)return;reloaded=true;location.reload()})}
+window.addEventListener("load",()=>{navigator.serviceWorker.register(@@SW@@,{scope:@@SCOPE@@+"/"}).catch(()=>{})});
+})();
+</script>"""
+
+# PWA: одноразовое предложение установки на мобильных — подсказки зависят от платформы телефона.
+CSS += '''
+.pwa-dialog{width:min(400px,calc(100vw - 28px));padding:24px 22px 20px;border-radius:22px}
+.pwa-head{display:flex;align-items:center;gap:13px;margin-bottom:13px}
+.pwa-head img{width:44px;height:44px;border-radius:13px}
+.pwa-head b{display:block;font-size:15px}
+.pwa-head small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.pwa-steps{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.pwa-steps li{display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.55;color:var(--muted)}
+.pwa-steps i{flex:0 0 auto;display:grid;place-items:center;width:20px;height:20px;border-radius:7px;background:var(--tint);color:var(--accent);font:600 11px ui-monospace,monospace;font-style:normal}
+.pwa-steps b{color:var(--text);font-weight:550}
+.pwa-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:17px}
+.pwa-actions .install{min-width:130px}
+'''
+
+PWA_INSTALL_DIALOG="""<dialog id="pwaInstall" class="pwa-dialog" aria-labelledby="pwaTitle">
+<div class="pwa-head"><img src="@@LOGO@@" alt="" width="44" height="44"><div><b id="pwaTitle">Установить Onyx Panel</b><small>Откроется как приложение — без адресной строки, с иконкой на экране</small></div></div>
+<ol class="pwa-steps" id="pwaSteps"></ol>
+<div class="pwa-actions"><button type="button" class="btn quiet" id="pwaLater">Не сейчас</button><button type="button" class="btn primary install" id="pwaGo" hidden>Установить</button></div>
+</dialog>"""
+
+PWA_INSTALL_JS="""<script>
+(()=>{try{if(localStorage.getItem("onyx-pwa-hint")==="1")return}catch(e){}
+if(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches)return;
+if(navigator.standalone)return;
+const ua=navigator.userAgent||"";
+const ios=/iphone|ipad|ipod/i.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+if(!ios&&!/android|mobile/i.test(ua))return;
+const dlg=document.getElementById("pwaInstall");if(!dlg)return;
+const steps=document.getElementById("pwaSteps"),go=document.getElementById("pwaGo");
+const done=()=>{try{localStorage.setItem("onyx-pwa-hint","1")}catch(e){}};
+document.getElementById("pwaLater").addEventListener("click",()=>dlg.close());
+dlg.addEventListener("close",done);
+window.addEventListener("appinstalled",done);
+let deferred=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferred=e;go.hidden=false});
+const li=(n,text)=>{const el=document.createElement("li");el.innerHTML="<i>"+n+"</i><span>"+text+"</span>";steps.append(el)};
+if(ios){
+ li(1,"Нажмите кнопку <b>«Поделиться»</b> на панели Safari");
+ li(2,"Выберите в списке <b>«На экран “Домой”»</b>");
+ li(3,"Нажмите <b>«Добавить»</b> — панель откроется как приложение");
+}else{
+ li(1,"Нажмите <b>«Установить»</b> ниже — или меню браузера <b>⋮</b> → «Установить приложение»");
+ li(2,"Иконка панели появится на домашнем экране и в списке приложений");
+}
+setTimeout(()=>{try{dlg.showModal()}catch(e){}},2500);
+})();
+</script>"""
+
+
 def qr_attributes(endpoint, name, link, protocols, kind='direct', user_port=None):
-    labels={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1','openflux':'OpenFlux'}
+    labels={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','tuic':'TUIC 5','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1','openflux':'OpenFlux'}
     parsed=urlsplit(link)
     web=protocols==['web']
     openflux=protocols==['openflux']
@@ -255,6 +348,7 @@ QR_CSS='''
 @media(max-width:600px){.connection-dialog{width:calc(100vw - 24px);max-height:92dvh}.connection-header{padding:19px 19px 16px}.connection-body{grid-template-columns:1fr;gap:18px;padding:0 20px 20px}.qr-visual{grid-row:2}.qr-canvas{margin:0 auto;width:216px;height:216px}.connection-info{text-align:center}.connection-info h3{font-size:22px}.connection-meta{justify-content:center;margin-bottom:12px}.connection-protocol{margin:7px 0 10px}.connect-steps{text-align:left;max-width:285px;margin:0 auto;gap:7px}.connection-footer{padding:16px 20px}.connection-footer>.actions{display:grid;justify-content:stretch}.connection-footer .primary{width:100%}.connection-footer small{max-width:none}.connection-status{text-align:center}}
 '''
 CSS += QR_CSS
+CSS += '''.login-modal-card .move-ring{width:88px;height:88px;margin:0 auto}.login-modal-card.upd-done .move-ring .fg{stroke:var(--green)}.login-modal-card.upd-done .move-ring b{color:var(--green)}.login-modal-card.upd-err .move-ring .fg{stroke:var(--red)}.login-modal-card.upd-err .move-ring b{color:var(--red)}'''
 CSS += '''.preset>.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));width:100%;gap:7px;margin-top:auto}.preset>.actions form{min-width:0}.preset>.actions button{margin:0;padding:9px 7px}'''
 CSS += '''.preset-create-dialog{width:min(920px,calc(100vw - 28px))}.preset-create-dialog .code-editor{min-height:300px;max-height:46dvh}.preset-create-dialog .editor-bar{margin-top:0}@media(max-width:700px){.preset-create-dialog .form-grid{grid-template-columns:1fr}.preset-create-dialog .code-editor{min-height:240px}}'''
 CSS += '''.preset[data-preset-card]{display:block;padding:0;aspect-ratio:16/10;overflow:hidden;isolation:isolate}
@@ -279,8 +373,8 @@ CSS += '''.palette-dialog{width:min(560px,calc(100vw - 28px));padding:0;border:1
 .palette-results button small{color:var(--muted);font-size:10px}
 .palette-results button.selected,.palette-results button:hover{background:var(--tint)}
 .palette-empty{padding:16px;color:var(--muted);font-size:12px;text-align:center}
-.palette-hint{padding:8px 14px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}
-.failover-toggle{display:inline-flex;align-items:center;gap:9px;font-size:11px;color:var(--muted);cursor:pointer}
+.palette-hint{padding:8px 14px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}.palette-results button .palette-act{margin-left:auto;flex:0 0 auto;padding:4px 10px;border:1px solid var(--line);border-radius:8px;font-size:11px;color:var(--accent)}
+.failover-toggle{display:inline-flex;align-items:center;gap:9px;font-size:11px;color:var(--muted);cursor:pointer}@media(max-width:740px){.page-head .failover-toggle{order:9;width:100%;flex-direction:row-reverse;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--raised)}}
 .failover-note{display:block;font-size:11px;color:var(--muted);margin:-6px 0 14px}
 .top-list{display:grid;gap:4px}
 .top-row{display:flex;align-items:center;gap:11px;padding:9px 10px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--text);font-size:12px}
@@ -308,16 +402,16 @@ CSS += '''
 .openflux-card{overflow:hidden;background:radial-gradient(circle at 100% 0,var(--tint),transparent 38%),var(--surface)}.openflux-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.openflux-title{display:flex;align-items:center;gap:13px}.openflux-mark{display:grid;place-items:center;width:43px;height:43px;flex:0 0 auto;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:12px;background:var(--tint);color:var(--accent);font-weight:750}.openflux-title h2{margin:0}.openflux-title p{margin:4px 0 0;color:var(--muted);font-size:11px}.openflux-status{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-size:10px;white-space:nowrap}.openflux-status i{width:7px;height:7px;border-radius:50%;background:var(--muted)}.openflux-status.on{color:var(--green)}.openflux-status.on i{background:var(--green);box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 14%,transparent)}.openflux-form{margin-top:22px}.openflux-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px}.openflux-input input{font:11px ui-monospace,monospace}.openflux-input button{min-width:155px}.openflux-hint{display:block;margin-top:9px;font-size:10px}.openflux-client{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}.openflux-field{min-width:0;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--input)}.openflux-field.wide{grid-column:1/-1}.openflux-field span{display:block;margin-bottom:7px;color:var(--muted);font-size:9px;letter-spacing:.06em;text-transform:uppercase}.openflux-value{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px}.openflux-value input{min-width:0;padding:9px;font:10px ui-monospace,monospace}.openflux-value button{padding:8px 10px}.openflux-field b{font:500 12px ui-monospace,monospace}.openflux-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:15px}.openflux-controls>small{max-width:600px;font-size:10px}.openflux-controls .actions{margin-left:auto}.openflux-copy-status{min-height:16px;margin:9px 0 0;color:var(--accent);font-size:10px}@media(max-width:700px){.openflux-head{align-items:stretch;flex-direction:column}.openflux-status{width:max-content}.openflux-input{grid-template-columns:1fr}.openflux-input button{width:100%}.openflux-client{grid-template-columns:1fr}.openflux-field.wide{grid-column:auto}.openflux-controls{align-items:stretch;flex-direction:column}.openflux-controls .actions{display:grid;width:100%;margin:0}.openflux-controls .actions form,.openflux-controls .actions button{width:100%}}
 '''
 
-# Graphite-blue theme restored from the selected reference; light mode remains available.
+# Graphite-blue theme restored from the selected reference.
 CSS += '''
 :root{--bg:#101318;--surface:#1b1e24;--raised:#22262e;--input:#171a20;--line:#303641;--text:#f3f5f8;--muted:#93a0b8;--accent:#3b82f6;--on-accent:#fff;--tint:#3b82f619;--green:#41c78d;--red:#f06f75;--amber:#dcae43;--sidebar:#181b21;--shadow:0 14px 46px #0006}
 body{font-size:14px;line-height:1.5}h1{font-size:32px;font-weight:650;letter-spacing:-.035em}h2{letter-spacing:-.015em}.eyebrow{display:none}
-.app{padding:0;gap:0;grid-template-columns:216px minmax(0,1fr)}.sidebar{border:0;border-right:1px solid var(--line);border-radius:0;background:var(--sidebar);padding:36px 18px 22px}.brand{display:block;padding:0 16px 50px}.brand-wordmark{display:block;font-size:40px!important;line-height:1.1;letter-spacing:-.06em!important;color:var(--accent)}.brand-name{display:block;font-size:10px;letter-spacing:.07em;color:var(--muted);margin-top:9px}.brand small{font:10px/1.5 inherit;margin-top:5px}.nav{gap:9px}.nav a,.logout{font-size:13px;font-weight:500;padding:13px 15px;border-radius:9px}.nav a.active{background:var(--tint);color:var(--accent)}.side-footer{padding-top:36px}.brand-tools{padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:12px}.brand-tools button{width:100%;font-size:11px;justify-content:flex-start;border:0;padding:10px}.theme-track{margin-left:auto;width:29px;height:17px;border-radius:20px;background:var(--accent);position:relative;flex-shrink:0}.theme-track:after{content:"";position:absolute;top:3px;right:3px;width:11px;height:11px;background:var(--on-accent);border-radius:50%}:root[data-theme=dark] .theme-track:after{right:15px}.social{border:0;justify-content:flex-start;padding:20px 12px 0;gap:18px}.social a{font-size:10px}.social .ico{width:16px;height:16px}.workspace{background:var(--bg)}main{max-width:1720px;padding:38px 36px 44px}.page-head{margin-bottom:32px;align-items:center}.page-head p{font-size:13px;margin-top:6px}.page-head .primary{padding:12px 17px;font-size:13px}.btn,button{border-radius:8px;font-weight:500;background:var(--surface)}.btn.primary,button.primary{box-shadow:0 2px 6px #0003}input,textarea,select{border-radius:8px;background:var(--input)}button:hover,.btn:hover{background:var(--tint)}button.primary:hover,.btn.primary:hover{background:var(--accent);filter:brightness(1.08)}.card,.account{border-radius:14px}.pill,.proto-hysteria,.proto-web,.proto-vless{border:0;background:var(--tint);color:var(--accent);font-size:11px;padding:4px 7px}.badge{font-size:10px}.avatar{border-radius:50%}
-.clients-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}.clients-content{min-width:0}.connection-slot:empty{display:none}.clients-summary{grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:18px 5px;margin-bottom:20px;gap:0}.client-stat{padding:0 20px}.client-stat:first-child{padding-left:20px}.client-stat:nth-child(3){border-right:1px solid var(--line)}.client-stat:last-child{border:0}.client-stat span{font-size:11px;white-space:normal}.client-stat b{font:600 25px/1.3 "Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;color:var(--text);margin-top:8px}.client-stat:first-child b{color:var(--accent)}.clients-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}.clients-toolbar{padding:16px;border-bottom:1px solid var(--line);gap:8px}.search-field{min-width:190px;border-radius:8px;flex:2}.search-field input{font-size:12px}.clients-toolbar select{flex:1;min-width:110px;max-width:180px;font-size:11px;background:var(--input)}.clients-toolbar #clientSort{max-width:140px}.clients-table{min-width:730px}.clients-table th{padding:12px 8px;font-size:11px;letter-spacing:0;background:var(--raised);border-bottom:1px solid var(--line)}.clients-table td{padding:16px 8px;font-size:12px}.clients-table .client-name{min-width:170px;max-width:260px}.client-identity{display:flex;align-items:center;gap:11px;min-width:0}.client-initial{display:grid;place-items:center;width:35px;height:35px;flex-shrink:0;border-radius:50%;background:var(--tint);color:var(--accent);font-size:16px;font-weight:500}.client-identity>div{min-width:0}.client-name strong{font-size:13px;font-weight:550}.client-name small{font:10px/1.7 "Segoe UI",system-ui,sans-serif}.client-name .badge{margin-top:4px}.clients-table .activity-col{display:none}.clients-table .hwid-cell{display:none}.clients-table .protocol-col{max-width:170px}.traffic-cell{min-width:104px}.traffic-cell b{font:500 12px "Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums}.traffic-cell small{font-size:9px}.traffic-split{height:2px;opacity:.5}.row-actions{gap:2px}.row-actions .icon-btn{width:28px;height:30px;border:0}.icon-btn.danger{color:var(--muted)}.icon-btn.danger:hover{color:var(--red)}.clients-table .select-col{width:28px;padding-left:0}.clients-table input[type=checkbox]{width:13px;height:13px}.access-switch{width:36px;height:21px}.access-switch:after{width:15px;height:15px}.access-switch[aria-checked=true]:after{left:18px}.clients-table tr.qr-selected{background:var(--tint);box-shadow:inset 2px 0 var(--accent)}.clients-table tr.qr-selected [data-qr]{color:var(--accent);background:var(--surface)}.list-footer{padding:15px 16px;border-top:1px solid var(--line);font-size:11px}.list-footer span:last-child{font-size:10px}.client-help{border:0;background:none;border-top:1px solid var(--line);border-radius:0;padding:16px 28px;margin-top:22px}.client-help summary{cursor:pointer}.bulk-bar{border:1px solid var(--line);border-radius:8px;margin-bottom:10px}
+.app{padding:0;gap:0;grid-template-columns:216px minmax(0,1fr)}.sidebar{border:0;border-right:1px solid var(--line);border-radius:0;background:var(--sidebar);padding:36px 18px 22px;opacity:.95}.brand{display:block;padding:0 16px 50px}.brand-wordmark{display:block;font-size:40px!important;line-height:1.1;letter-spacing:-.06em!important;color:var(--accent)}.brand-name{display:block;font-size:10px;letter-spacing:.07em;color:var(--muted);margin-top:9px}.brand small{font:10px/1.5 inherit;margin-top:5px}.nav{gap:9px}.nav a,.logout{font-size:13px;font-weight:500;padding:13px 15px;border-radius:9px}.nav a.active{background:var(--tint);color:var(--accent)}.side-footer{padding-top:36px}.brand-tools{padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:12px}.brand-tools button{width:100%;font-size:11px;justify-content:flex-start;border:0;padding:10px}.social{border:0;justify-content:flex-start;padding:20px 12px 0;gap:18px}.social a{font-size:10px}.social .ico{width:16px;height:16px}.workspace{background:var(--bg)}main{max-width:1720px;padding:38px 36px 44px}.page-head{margin-bottom:32px;align-items:center}.page-head p{font-size:13px;margin-top:6px}.page-head .primary{padding:12px 17px;font-size:13px}.btn,button{border-radius:8px;font-weight:500;background:var(--surface)}.btn.primary,button.primary{box-shadow:0 2px 6px #0003}input,textarea,select{border-radius:8px;background:var(--input)}button:hover,.btn:hover{background:var(--tint)}button.primary:hover,.btn.primary:hover{background:var(--accent);filter:brightness(1.08)}.card,.account{border-radius:14px}.pill,.proto-hysteria,.proto-web,.proto-vless{border:0;background:var(--tint);color:var(--accent);font-size:11px;padding:4px 7px}.badge{font-size:10px}.avatar{border-radius:50%}
+.clients-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}.clients-content{min-width:0}.connection-slot:empty{display:none}.clients-summary{grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:18px 5px;margin-bottom:20px;gap:0}.client-stat{padding:0 20px}.client-stat:first-child{padding-left:20px}.client-stat:nth-child(3){border-right:1px solid var(--line)}.client-stat:last-child{border:0}.client-stat span{font-size:11px;white-space:normal}.client-stat b{font:600 25px/1.3 "Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;color:var(--text);margin-top:8px}.client-stat:first-child b{color:var(--accent)}.clients-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:visible}.clients-panel+.card{margin-top:20px}.clients-table thead th:first-child{border-top-left-radius:24px}.clients-table thead th:last-child{border-top-right-radius:24px}.clients-toolbar{padding:16px;border-bottom:1px solid var(--line);gap:8px}.search-field{min-width:190px;border-radius:8px;flex:2}.search-field input{font-size:12px}.clients-toolbar select{flex:1;min-width:110px;max-width:180px;font-size:11px;background:var(--input)}.clients-toolbar #clientSort{max-width:140px}.clients-table{min-width:730px}.clients-table th{padding:12px 8px;font-size:11px;letter-spacing:0;background:var(--raised);border-bottom:1px solid var(--line)}.clients-table td{padding:16px 8px;font-size:12px}.clients-table .client-name{min-width:170px;max-width:260px}.client-identity{display:flex;align-items:center;gap:11px;min-width:0}.client-initial{display:grid;place-items:center;width:35px;height:35px;flex-shrink:0;border-radius:50%;background:var(--tint);color:var(--accent);font-size:16px;font-weight:500}.client-identity>div{min-width:0}.client-name strong{font-size:13px;font-weight:550}.client-name small{font:10px/1.7 "Segoe UI",system-ui,sans-serif}.client-name .badge{margin-top:4px}.clients-table .activity-col{display:none}.clients-table .hwid-cell{display:none}.clients-table .protocol-col{max-width:170px}.traffic-cell{min-width:104px}.traffic-cell b{font:500 12px "Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums}.traffic-cell small{font-size:9px}.traffic-split{height:2px;opacity:.5}.row-actions{gap:2px}.row-actions .icon-btn{width:28px;height:30px;border:0}.icon-btn.danger{color:var(--muted)}.icon-btn.danger:hover{color:var(--red)}.clients-table .select-col{width:28px;padding-left:0}.clients-table input[type=checkbox]{width:13px;height:13px}.access-switch{width:36px;height:21px}.access-switch:after{width:15px;height:15px}.access-switch[aria-checked=true]:after{left:18px}.clients-table tr.qr-selected{background:var(--tint);box-shadow:inset 2px 0 var(--accent)}.clients-table tr.qr-selected [data-qr]{color:var(--accent);background:var(--surface)}.list-footer{padding:15px 16px;border-top:1px solid var(--line);font-size:11px}.list-footer span:last-child{font-size:10px}.client-help{border:0;background:none;border-top:1px solid var(--line);border-radius:0;padding:16px 28px;margin-top:22px}.client-help summary{cursor:pointer}.bulk-bar{border:1px solid var(--line);border-radius:8px;margin-bottom:10px}
 .connection-dialog{width:min(390px,calc(100vw - 32px));padding:0;border-radius:14px;background:var(--surface);max-height:90dvh;box-shadow:var(--shadow)}.connection-header{padding:22px 23px 18px}.connection-header h2{font-size:15px;font-weight:550}.connection-close{border:0;width:30px;height:30px}.connection-body{display:flex;flex-direction:column;gap:19px;padding:0 24px 20px}.connection-info{width:100%;text-align:left}.connection-person{display:flex;align-items:center;gap:12px}.connection-person .client-initial{width:45px;height:45px;font-size:22px}.connection-person>div{min-width:0}.connection-info h3{font-size:21px;letter-spacing:-.025em;overflow-wrap:anywhere}.connection-kind{font-size:11px;letter-spacing:0;color:var(--muted);margin:5px 0 0}.connection-protocol{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin:18px 0 10px}.connection-meta{justify-content:center;margin:0;gap:8px;font-size:10px}.qr-canvas{width:220px;height:220px;max-width:100%;margin:0 auto;border:1px solid #e1e6df;border-radius:12px;box-shadow:none;padding:12px}.qr-visual{width:100%}.qr-caption{font-size:11px;max-width:230px;margin:12px auto 0;line-height:1.6}.connection-footer{padding:0 24px 20px;border:0;background:transparent}.connection-footer .primary{width:100%;min-width:0;padding:12px;font-size:12px}.connection-status{font-size:11px;margin-top:10px;text-align:center}.connection-link{margin-top:14px}.connection-link summary{margin:0 auto;color:var(--accent);padding:5px;font-size:12px;list-style:none}.connection-link summary::-webkit-details-marker{display:none}.connection-link input{font-size:10px}.connection-privacy{margin:20px 0 0;padding-top:16px;border-top:1px solid var(--line);font-size:10px;line-height:1.6;color:var(--muted);text-align:center}.connection-slot{min-width:0}
 .graph-card{background:var(--surface);border-top:1px solid var(--line)}.graph-speeds b,.overview-stat b,.resource-head b{font-family:"Segoe UI",system-ui,sans-serif;letter-spacing:-.03em;font-variant-numeric:tabular-nums}.resource{border-radius:12px}.resource-grid{gap:14px}.preset{background:var(--raised)}.login-page{background:radial-gradient(circle at 18% 20%,var(--tint),transparent 38%),var(--bg)}
 @media(max-width:1150px){.app{padding:0;gap:0;grid-template-columns:190px minmax(0,1fr)}main{padding:28px 24px}.sidebar{padding:30px 12px 20px}.brand{padding-left:12px}.client-stat{padding:0 12px}.client-stat b{font-size:23px}.clients-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.clients-toolbar select{max-width:none}}
-@media(max-width:700px){.app{display:block;padding:0}.sidebar{padding:18px 16px 10px;border:0;border-bottom:1px solid var(--line);border-radius:0}.brand{padding:0 58px 18px 0}.brand-wordmark{font-size:28px!important}.brand-name{font-size:8px;margin-top:4px}.brand small{display:none}.brand-tools{top:21px;right:16px;border:0;margin:0;padding:0;position:absolute}.brand-tools button{border:1px solid var(--line);width:36px;height:36px;padding:8px}.theme-track{display:none}.nav a{padding:10px 4px;font-size:12px}.side-footer{padding-top:8px}.side-footer .logout{font-size:11px;padding:6px 0}.social{padding:0;gap:15px}.social a{font-size:10px}main{padding:24px 16px 36px}.page-head{align-items:flex-start;margin-bottom:25px;flex-wrap:wrap}.page-head h1{font-size:29px}.page-head .primary{font-size:12px;padding:10px 14px}.page-head .actions{gap:6px}.clients-summary{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px;margin-bottom:25px}.client-stat{padding:0 14px}.client-stat:nth-child(odd){padding-left:0}.client-stat:nth-child(even){border-right:0}.client-stat b{font-size:24px;margin-top:5px}.client-stat span{font-size:11px}.clients-toolbar{padding:14px 14px 16px}.clients-toolbar select{flex:1 1 calc(50% - 8px);width:auto;max-width:none;font-size:12px}.clients-toolbar #clientSort{max-width:none}.clients-table{min-width:0}.clients-table tbody{padding:14px;gap:12px}.clients-table tr{padding:15px;background:var(--surface);grid-template-columns:1fr 1fr}.clients-table td{padding:0}.clients-table .client-name{max-width:none;padding-right:44px}.client-name strong{font-size:15px}.client-identity{gap:10px}.client-name .badge{display:none}.clients-table .activity-col,.clients-table .hwid-cell{display:block}.clients-table .protocol-col{max-width:none}.clients-table .state-col{justify-self:end}.client-name small{font-size:10px}.clients-table .select-col{right:20px;top:18px}.clients-table .actions-col{padding-top:10px}.row-actions{gap:12px}.row-actions .icon-btn{height:38px;width:38px;border:1px solid var(--line)}.client-help{font-size:11px}.connection-dialog{width:min(390px,calc(100vw - 24px));max-height:92dvh}.connection-body{padding:0 20px 18px;gap:17px}.connection-header{padding:18px 20px 15px}.connection-footer{padding:0 20px 18px}.connection-info h3{font-size:21px}.connection-info{text-align:left}.qr-canvas{width:210px;height:210px}.connection-slot{position:static!important}.connection-privacy{margin-top:15px}}
+@media(max-width:700px){.app{display:block;padding:0}.sidebar{padding:18px 16px 10px;border:0;border-bottom:1px solid var(--line);border-radius:0}.brand{padding:0 58px 18px 0}.brand-wordmark{font-size:28px!important}.brand-name{font-size:8px;margin-top:4px}.brand small{display:none}.brand-tools{top:21px;right:16px;border:0;margin:0;padding:0;position:absolute}.brand-tools button{border:1px solid var(--line);width:36px;height:36px;padding:8px}.nav a{padding:10px 4px;font-size:12px}.side-footer{padding-top:8px}.side-footer .logout{font-size:11px;padding:6px 0}.social{padding:0;gap:15px}.social a{font-size:10px}main{padding:24px 16px 36px}.page-head{align-items:flex-start;margin-bottom:25px;flex-wrap:wrap}.page-head h1{font-size:29px}.page-head .primary{font-size:12px;padding:10px 14px}.page-head .actions{gap:6px}.clients-summary{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px;margin-bottom:25px;padding:18px 14px}.client-stat{padding:0 14px}.client-stat:nth-child(odd){padding-left:0}.client-stat:nth-child(even){border-right:0}.client-stat b{font-size:24px;margin-top:5px}.client-stat span{font-size:11px}.clients-toolbar{padding:14px 14px 16px}.clients-toolbar select{flex:1 1 calc(50% - 8px);width:auto;max-width:none;font-size:12px}.clients-toolbar #clientSort{max-width:none}.clients-table{min-width:0}.clients-table tbody{padding:14px;gap:12px}.clients-table tr{padding:15px;background:var(--surface);grid-template-columns:1fr 1fr}.clients-table td{padding:0}.clients-table .client-name{max-width:none;padding-right:44px}.client-name strong{font-size:15px}.client-identity{gap:10px}.client-name .badge{display:none}.clients-table .activity-col,.clients-table .hwid-cell{display:block}.clients-table .protocol-col{max-width:none}.clients-table .state-col{justify-self:end}.client-name small{font-size:10px}.clients-table .select-col{right:20px;top:18px}.clients-table .actions-col{padding-top:10px}.row-actions{gap:12px}.row-actions .icon-btn{height:38px;width:38px;border:1px solid var(--line)}.client-help{font-size:11px}.connection-dialog{width:min(390px,calc(100vw - 24px));max-height:92dvh}.connection-body{padding:0 20px 18px;gap:17px}.connection-header{padding:18px 20px 15px}.connection-footer{padding:0 20px 18px}.connection-info h3{font-size:21px}.connection-info{text-align:left}.qr-canvas{width:210px;height:210px}.connection-slot{position:static!important}.connection-privacy{margin-top:15px}}
 '''
 
 CSS += '''
@@ -333,9 +427,10 @@ input[type=checkbox]{accent-color:var(--accent)}
 .load-more button{display:inline-flex;align-items:center;gap:8px;padding:10px 26px;border:1px solid var(--line);border-radius:999px;background:var(--raised);color:var(--text);font-size:12px;font-weight:550;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease}
 .load-more button:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
 .load-more button .ico{width:15px;height:15px}
+.node-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.pill.node-pill{background:color-mix(in srgb,var(--green) 12%,transparent);color:var(--green)}
 .nodes-live-card .pill{white-space:nowrap}
 .dashboard-nodes{display:grid;gap:14px}
-.node-glance{border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:var(--raised)}
+.node-glance{min-width:0;border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:var(--raised)}
 .node-glance.offline{opacity:.85}
 .node-glance-head{display:flex;align-items:center;gap:12px}
 .node-glance-head .node-flag{display:grid;place-items:center;flex:0 0 auto;width:41px;height:41px;border:1px solid var(--line);border-radius:11px;background:var(--input);overflow:hidden}
@@ -343,12 +438,21 @@ input[type=checkbox]{accent-color:var(--accent)}
 .node-glance-name strong{font-size:13px;overflow-wrap:anywhere}
 .node-glance-name small{display:block;margin-top:2px;color:var(--muted);font:9px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .node-glance-head>.badge{margin-left:auto}
+.node-glance-head{cursor:pointer;user-select:none;-webkit-user-select:none}
+.node-glance-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.node-glance-chevron{display:grid;place-items:center;flex:0 0 auto;width:26px;height:26px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--muted)}
+.node-glance-chevron .ico{width:14px;height:14px;transition:transform .18s ease}
+.node-glance-head:hover .node-glance-chevron{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
+.node-glance.expanded .node-glance-chevron .ico{transform:rotate(180deg)}
+.node-glance .node-glance-body{display:none}
+.node-glance.expanded .node-glance-body{display:block}
+.node-glance.offline .node-glance-body{margin:0}
 .node-glance-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
 .node-glance-stats>div{padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--input)}
 .node-glance-stats span{display:block;font-size:9px;color:var(--muted)}
 .node-glance-stats b{display:block;margin-top:3px;font:500 12px var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-.node-glance-users{display:grid;gap:2px;margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
-.node-user{display:flex;align-items:center;gap:9px;padding:5px 2px;font-size:11.5px}
+.node-glance-users{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+.node-user{min-width:0;display:flex;align-items:center;gap:9px;padding:5px 2px;font-size:11.5px}
 .node-user i{width:7px;height:7px;border-radius:50%;background:var(--line);flex:0 0 auto}
 .node-user.on i{background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 16%,transparent)}
 .node-user span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -364,11 +468,11 @@ input[type=checkbox]{accent-color:var(--accent)}
 COMPONENT_MODAL_JS = '''<script>
 (()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
 const overlay=document.createElement('div');overlay.className='move-overlay';overlay.hidden=true;
-overlay.innerHTML='<div class="move-card" id="onyxCompCard"><div class="move-ring" id="onyxCompRing"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" cx="50" cy="50" r="44"/></svg><b id="onyxCompRingText">↑</b></div><h3 id="onyxCompTitle">Обновление</h3><p id="onyxCompText"></p><div class="actions upd-actions" id="onyxCompActions" hidden><button type="button" id="onyxCompCancel">Отмена</button><button type="button" class="primary" id="onyxCompGo">Установить</button></div><div class="actions upd-actions"><button type="button" id="onyxCompClose" hidden>Закрыть</button></div></div>';
+overlay.innerHTML='<div class="move-card" id="onyxCompCard"><div class="move-ring" id="onyxCompRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="onyxCompRingText">↑</b></div><h3 id="onyxCompTitle">Обновление</h3><p id="onyxCompText"></p><div class="actions upd-actions" id="onyxCompActions" hidden><button type="button" class="primary" id="onyxCompGo">Установить</button><button type="button" id="onyxCompCancel">Отмена</button></div></div>';
 document.body.append(overlay);
-const card=overlay.querySelector('#onyxCompCard'),ringText=overlay.querySelector('#onyxCompRingText'),title=overlay.querySelector('#onyxCompTitle'),text=overlay.querySelector('#onyxCompText'),actions=overlay.querySelector('#onyxCompActions'),goBtn=overlay.querySelector('#onyxCompGo'),cancelBtn=overlay.querySelector('#onyxCompCancel'),closeBtn=overlay.querySelector('#onyxCompClose');
+const card=overlay.querySelector('#onyxCompCard'),ringText=overlay.querySelector('#onyxCompRingText'),title=overlay.querySelector('#onyxCompTitle'),text=overlay.querySelector('#onyxCompText'),actions=overlay.querySelector('#onyxCompActions'),goBtn=overlay.querySelector('#onyxCompGo'),cancelBtn=overlay.querySelector('#onyxCompCancel');
 let resolveActions=null;
-function show(state,t,m){card.classList.remove('spin','time','upd-done','upd-err');actions.hidden=true;closeBtn.hidden=true;ringText.textContent='↑';title.textContent=t;text.textContent=m||'';if(state==='running')card.classList.add('spin','time');if(state==='err'){card.classList.add('upd-err');ringText.textContent='!';closeBtn.hidden=false}overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'))}
+function show(state,t,m){card.classList.remove('spin','time','upd-done','upd-err');actions.hidden=true;closeBtn.hidden=true;ringText.textContent='↑';title.textContent=t;text.textContent=m||'';if(state==='running')card.classList.add('spin','time');if(state==='err'){card.classList.add('upd-err');ringText.textContent='!';setTimeout(hide,8000)}overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'))}
 function hide(){overlay.classList.remove('show');setTimeout(()=>{overlay.hidden=true},260);resolveActions=null}
 function confirm(label,target){card.classList.remove('spin','time','upd-done','upd-err');ringText.textContent='↑';title.textContent='Обновить '+label+'?';text.textContent='Версия '+target+' установится поверх текущей. При ошибке — автоматический откат.';actions.hidden=false;overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'));return new Promise(res=>{resolveActions=res})}
 goBtn.addEventListener('click',()=>{if(resolveActions){const r=resolveActions;resolveActions=null;r(true)}});
@@ -426,14 +530,93 @@ dialog.addEventListener('close',()=>{++serial;clearImage();canvas.classList.remo
 </script>'''
 
 CSS += '''
-.create-dialog{width:min(760px,calc(100vw - 28px));padding:0;overflow:hidden}.create-dialog .dialog-head{padding:24px 26px 18px;margin:0;border-bottom:1px solid var(--line)}.create-dialog form{padding:22px 26px 25px;overflow:auto;max-height:calc(90dvh - 78px)}.create-step{margin-top:22px}.create-step:first-of-type{margin-top:18px}.create-step-title{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:12px;color:var(--muted)}.create-step-title i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--tint);color:var(--accent);font:600 11px/1 ui-monospace,monospace}.create-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.choice-card{position:relative;display:flex;gap:12px;align-items:flex-start;margin:0;padding:15px;border:1px solid var(--line);border-radius:11px;background:var(--input);color:var(--text);cursor:pointer}.choice-card:hover{border-color:var(--accent)}.choice-card input{width:16px;height:16px;flex:0 0 auto;margin-top:3px;accent-color:var(--accent)}.choice-card:has(input:checked){border-color:var(--accent);background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent)}.choice-card strong{display:block;font-size:13px}.choice-card small{display:block;font-size:10px;line-height:1.45;margin-top:4px}.protocol-picker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.protocol-picker .choice-card{min-height:76px}.protocol-picker em{font:500 9px/1.5 ui-monospace,monospace;color:var(--accent);display:block;margin-top:5px}.device-row{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:14px;align-items:end}.device-row label{margin-top:0}.create-summary{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:22px;padding:14px 15px;border:1px solid var(--line);border-radius:10px;background:var(--raised)}.create-summary span{font-size:11px;color:var(--muted)}.create-summary b{font-size:12px;text-align:right}.create-actions{position:sticky;z-index:2;bottom:-25px;justify-content:flex-end;margin-top:18px;padding:13px 0 0;background:linear-gradient(transparent,var(--surface) 18%)}.create-actions .primary{min-width:150px}.proto-mtproto{color:var(--green)}
-.secret-editor{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:8px 0}.secret-editor input{min-width:0;font:11px ui-monospace,monospace}.secret-editor+small{display:block;margin-bottom:12px;line-height:1.5;color:var(--muted)}
+.create-dialog{width:min(760px,calc(100vw - 28px));padding:0;overflow:hidden}.create-dialog .dialog-head{padding:24px 26px 18px;margin:0;border-bottom:1px solid var(--line)}.create-dialog form{padding:22px 26px 25px;overflow:auto;max-height:calc(90dvh - 78px)}.create-step{margin-top:22px}.create-step:first-of-type{margin-top:18px}.create-step-title{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:12px;color:var(--muted)}.create-step-title i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--tint);color:var(--accent);font:600 11px/1 ui-monospace,monospace}.create-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.choice-card{position:relative;display:flex;gap:12px;align-items:flex-start;margin:0;padding:15px;border:1px solid var(--line);border-radius:11px;background:var(--input);color:var(--text);cursor:pointer}.choice-card:hover{border-color:var(--accent)}.choice-card input{width:16px;height:16px;flex:0 0 auto;margin-top:3px;accent-color:var(--accent)}.choice-card:has(input:checked){border-color:var(--accent);background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent)}.choice-card strong{display:block;font-size:13px}.choice-card small{display:block;font-size:10px;line-height:1.45;margin-top:4px}.protocol-picker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.protocol-picker .choice-card{min-height:76px}.protocol-picker em{font:500 9px/1.5 ui-monospace,monospace;color:var(--accent);display:block;margin-top:5px}.device-row{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:14px;align-items:center}.device-row input{width:100%}.create-summary{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:22px;padding:14px 15px;border:1px solid var(--line);border-radius:10px;background:var(--raised)}.create-summary span{font-size:11px;color:var(--muted)}.create-summary b{font-size:12px;text-align:right}.create-actions{position:sticky;z-index:2;bottom:-25px;justify-content:flex-end;margin-top:18px;padding:13px 0 0;background:linear-gradient(transparent,var(--surface) 18%)}.create-actions .primary{min-width:150px}.proto-mtproto{color:var(--green)}
+.secret-editor{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:8px 0;align-items:stretch}.secret-editor .sub-url{margin-bottom:0}.secret-editor button{height:100%}.secret-editor input{min-width:0;font:11px ui-monospace,monospace}.secret-editor+small{display:block;margin-bottom:12px;line-height:1.5;color:var(--muted)}
 .live-indicator{display:inline-flex;align-items:center;gap:7px;margin-left:auto;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:10px;color:var(--muted);white-space:nowrap}.live-indicator i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 14%,transparent)}.live-indicator.stale i{background:var(--amber);box-shadow:none}.live-indicator.offline i{background:var(--red);box-shadow:none}.live-block{transition:opacity .18s ease}.live-block.refreshing{opacity:.72}
 @media(max-width:620px){.create-dialog .dialog-head{padding:19px}.create-dialog form{padding:18px}.create-mode-grid,.protocol-picker{grid-template-columns:1fr}.device-row{grid-template-columns:1fr}.create-summary{align-items:flex-start;flex-direction:column}.create-actions{display:grid;grid-template-columns:1fr 1fr;bottom:-17px}.create-actions .primary{min-width:0}.secret-editor{grid-template-columns:1fr 1fr}.secret-editor input{grid-column:1/-1}}
 '''
 
 
-FAVICON_MARK = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%20128%20128%22%3E%3Cg%20transform=%22translate(14%2014)%22%3E%3Cpath%20fill=%22%23FF792D%22%20d=%22M50%205C25%205%205%2025%205%2050C5%2063%2010%2074%2019%2082C10%2057%2024%2031%2050%2028C66%2026%2077%2031%2087%2040C82%2020%2067%205%2050%205Z%20M50%2095C75%2095%2095%2075%2095%2050C95%2037%2090%2026%2081%2018C90%2043%2076%2069%2050%2072C34%2074%2023%2069%2013%2060C18%2080%2033%2095%2050%2095Z%22/%3E%3C/g%3E%3C/svg%3E'
+PANEL_MODAL_JS = '''<script>
+(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
+const overlay=document.createElement('div');overlay.className='move-overlay';overlay.hidden=true;
+overlay.innerHTML='<div class="move-card" id="onyxPanelCard"><div class="move-ring" id="onyxPanelRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="onyxPanelRingText">↑</b></div><h3 id="onyxPanelTitle">Обновление панели</h3><p id="onyxPanelText"></p><div class="actions upd-actions" id="onyxPanelActions" hidden><button type="button" class="primary" id="onyxPanelGo">Обновить</button><button type="button" id="onyxPanelCancel">Отмена</button></div></div>';
+document.body.append(overlay);
+const card=overlay.querySelector('#onyxPanelCard'),ringText=overlay.querySelector('#onyxPanelRingText'),title=overlay.querySelector('#onyxPanelTitle'),text=overlay.querySelector('#onyxPanelText'),actions=overlay.querySelector('#onyxPanelActions'),goBtn=overlay.querySelector('#onyxPanelGo'),cancelBtn=overlay.querySelector('#onyxPanelCancel');
+let target='',goResolve=null,watchRun=0;
+function hide(){overlay.classList.remove('show');setTimeout(()=>{overlay.hidden=true},260);goResolve=null}
+function confirmState(value){
+ card.classList.remove('spin','time','upd-done','upd-err');actions.hidden=false;ringText.textContent='↑';
+ title.textContent='Обновить панель?';
+ text.textContent='Версия '+String(value).replace(/^v/,'')+' установится поверх текущей. Резервная копия создаётся автоматически, панель и подключения кратко прервутся.';
+ overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'));
+}
+function runningState(message){
+ card.classList.remove('upd-done','upd-err');card.classList.add('spin','time');actions.hidden=true;
+ title.textContent='Обновляем панель';text.textContent=message||'Устанавливаем обновление…';
+ overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'));
+}
+function fail(message){
+ card.classList.remove('spin','time');card.classList.add('upd-err');ringText.textContent='!';
+ title.textContent='Обновление не удалось';text.textContent=message||'Проверьте журнал через Onyx или SSH и попробуйте ещё раз.';
+ setTimeout(hide,8000);
+}
+function watchLoop(){
+ const started=Date.now(),my=++watchRun;
+ const clock=setInterval(()=>{if(my!==watchRun)return;const s=Math.floor((Date.now()-started)/1000);ringText.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')},500);
+ (async()=>{
+  let down=false;
+  while(Date.now()-started<15*60*1000){
+   if(my!==watchRun){clearInterval(clock);return}
+   await new Promise(res=>setTimeout(res,2000));
+   let d=null;
+   try{const r=await fetch(PATH+'/update-status',{cache:'no-store',signal:window.AbortSignal?AbortSignal.timeout(10000):undefined});if(r.ok&&!r.redirected)d=await r.json()}catch(e){}
+   if(my!==watchRun){clearInterval(clock);return}
+   if(!d){if(!down){down=true;text.textContent='Панель перезапускается — ждём возвращения…'}continue}
+   if(down&&['queued','running'].includes(d.phase))down=false;
+   if(['queued','running'].includes(d.phase)){text.textContent=d.message||'Устанавливаем обновление…';continue}
+   clearInterval(clock);
+   if(d.phase==='done'){
+    card.classList.remove('spin','time');card.classList.add('upd-done');ringText.textContent='✓';
+    title.textContent='Панель обновлена';text.textContent='Обновляем страницу…';
+    let left=5;ringText.textContent=left;
+    const cd=setInterval(()=>{if(my!==watchRun){clearInterval(cd);return}left-=1;if(left>0)ringText.textContent=left;else{clearInterval(cd);location.reload()}},1000);
+   }else fail(d.message||'Обновление завершилось ошибкой.');
+   return;
+  }
+  clearInterval(clock);
+  if(my===watchRun)fail('Обновление слишком долго не отвечает. Проверьте статус на странице «Обновления».');
+ })();
+}
+async function start(){
+ runningState('Создаём резервную копию и устанавливаем обновление…');
+ try{
+  const r=await fetch(PATH+'/update-start',{method:'POST',body:new URLSearchParams({csrf:CSRF,target}),
+      signal:window.AbortSignal?AbortSignal.timeout(30000):undefined});
+  if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');
+  let d;try{d=await r.json()}catch(e){throw new Error('Панель не отвечает')}
+  if(!r.ok)throw new Error(d.message||'Не удалось запустить обновление.');
+ }catch(e){fail(e.message||'Не удалось запустить обновление.');return}
+ watchLoop();
+}
+goBtn.addEventListener('click',()=>{const r=goResolve;goResolve=null;if(r)r(true)});
+cancelBtn.addEventListener('click',()=>{const r=goResolve;goResolve=null;hide();if(r)r(false)});
+window.ONYXPanelModal={confirmAndStart(value){target=value;confirmState(value);goResolve=go=>{if(go)start()}}};
+// Если обновление уже идёт (запущено с другой страницы) — показать модалку.
+// На странице «Обновлений» у модалки своя реализация, там не дублируем.
+(async()=>{
+ if(document.getElementById('updOverlay'))return;
+ try{
+  const r=await fetch(PATH+'/update-status',{cache:'no-store',signal:window.AbortSignal?AbortSignal.timeout(10000):undefined});
+  if(!r.ok||r.redirected)return;
+  const d=await r.json();
+  if(['queued','running'].includes(d.phase)){runningState(d.message||'Обновление уже выполняется…');watchLoop()}
+ }catch(e){}
+})();
+})();
+</script>'''
+
+
 
 
 def restart_buttons(path, csrf):
@@ -446,28 +629,56 @@ def bell_button(path, csrf, role='admin'):
     """Notifications bell: new versions and post-update changelogs."""
     if not csrf or role != 'admin': return ''
     return (f'<div class="bell-wrap"><button type="button" class="nav-button bell-btn" data-bell aria-label="Уведомления" data-tip="Уведомления">{icon("bell")}<span class="bell-count" data-bell-count hidden></span></button>'
-            f'<div class="bell-menu" data-bell-menu hidden><div class="bell-head"><b>Уведомления</b><button type="button" class="quiet" data-bell-clear>Очистить все</button></div><div class="bell-list" data-bell-list></div></div></div>')
+            f'<div class="bell-menu" data-bell-menu hidden><div class="bell-head"><b>Уведомления</b><span class="head-actions"><button type="button" class="quiet" data-bell-notify hidden>Уведомления браузера</button><button type="button" class="quiet" data-bell-clear>Очистить все</button></span></div><div class="bell-list" data-bell-list></div></div></div>')
 
 
 # Command palette: one overlay for pages, quick actions and client search.
 # Pure frontend — client names arrive from /clients-state on first open.
 PALETTE_JS='''<script>
-(()=>{const PATH=@@PATH@@,dialog=document.getElementById('paletteDialog');
+(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@,dialog=document.getElementById('paletteDialog');
 if(!dialog)return;
 const input=document.getElementById('paletteInput'),box=document.getElementById('paletteResults');
 let clients=null,cursor=0,items=[];
 const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const sections=[['Дашборд','/dashboard','Раздел'],['Клиенты','/users','Раздел'],['Ноды','/nodes','Раздел'],['Каскад','/cascade','Раздел'],['Маршрутизация','/routing','Раздел'],['Обновления','/updates','Раздел'],['Настройки','/settings','Раздел']];
-const actions=[['Создать заглушку','/settings','Действие'],['Ключи API','/settings','Действие'],['Автобэкап','/settings','Действие'],['Журнал входов и 2FA','/settings','Действие'],['Правила маршрутизации','/routing','Действие']];
-async function loadClients(){if(clients)return;try{const r=await fetch(PATH+'/clients-state',{cache:'no-store'});if(!r.ok||r.redirected)return;const d=await r.json();clients=(d.clients||[]).slice(0,60)}catch(e){}}
+const sections=[['Дашборд','/dashboard','Раздел'],['Клиенты','/users','Раздел'],['Ноды и локации','/nodes','Раздел'],['Каскад','/cascade','Раздел'],['Маршрутизация','/routing','Раздел'],['Обновления','/updates','Раздел'],['Настройки','/settings','Раздел']];
+const actions=[
+ ['Создать клиента','/users','Клиенты · кнопка «Добавить доступ»'],
+ ['Подписки и устройства','/users','Клиенты'],
+ ['OpenFlux — туннель через Яндекс и Mail.ru','/users','Клиенты'],
+ ['Подключить ноду','/nodes','Ноды и локации'],
+ ['Reality-вход (маска под белый список)','/routing','Маршрутизация'],
+ ['Выход через WARP (IP Cloudflare)','/routing','Маршрутизация'],
+ ['Прямые IP-адреса и домены','/routing','Маршрутизация'],
+ ['Блокировка торрентов','/routing','Маршрутизация'],
+ ['Добавить каскад','/cascade','Каскад'],
+ ['Автопереключение каскадов','/cascade','Каскад'],
+ ['Проверить каскад','/cascade','Каскад'],
+ ['Ключи API','/settings','Настройки'],
+ ['Двухфакторная аутентификация','/settings','Настройки'],
+ ['Журнал входов','/settings','Настройки'],
+ ['Резервная копия и восстановление','/settings','Настройки'],
+ ['Сменить адрес панели','/settings','Настройки'],
+ ['Сменить логин и пароль','/settings','Настройки'],
+ ['Обновление компонентов','/settings','Настройки'],
+ ['Редактор главной страницы','/settings','Настройки'],
+ ['Telegram-уведомления','/settings','Настройки'],
+ ['Журналы служб (live)','/logs','Диагностика'],
+ ['Диагностика сервера','/diagnostics','Диагностика'],
+ ['Приглашения для гостей','/users','Клиенты'],
+ ['Проверить обновление панели','/updates','Обновления'],
+ ['Выйти из панели','/logout','Сессия']];
+async function loadClients(){if(clients)return;try{const r=await fetch(PATH+'/clients-state',{cache:'no-store'});if(!r.ok||r.redirected)return;const d=await r.json();clients=(d.clients||[]).slice(0,80)}catch(e){}}
+const kindLabel=c=>c.kind==='subscription'?('Подписка · '+(c.devices||0)+' устр. · '+(c.protocols||[]).join(', ')):c.kind==='openflux'?'OpenFlux':'Клиент · '+(c.protocols||[]).join(', ');
+loadClients();
 function render(q){
   q=(q||'').trim().toLowerCase();items=[];
-  const push=(title,sub,path)=>{if(!q||title.toLowerCase().includes(q))items.push({title,sub,path})};
+  const push=(title,sub,path,act)=>{if(!q||(title+' '+(sub||'')).toLowerCase().includes(q))items.push({title,sub,path,act})};
   sections.forEach(([t,p,s])=>push(t,s,PATH+p));
+  (clients||[]).forEach(c=>{const canToggle=(c.kind==='subscription'||c.kind==='direct');push(c.name,kindLabel(c),PATH+'/users#account-'+c.id,canToggle?{label:c.enabled?'\u0412\u044b\u043a\u043b':'\u0412\u043a\u043b',id:c.id,kind:c.kind,enabled:c.enabled?0:1}:null)});
   actions.forEach(([t,p,s])=>push(t,s,PATH+p));
-  (clients||[]).forEach(c=>push(c.name,c.kind==='subscription'?'Подписка · клиенты':'Клиент · '+c.protocols.join(', '),PATH+'/users'));
   const shown=items.slice(0,12);cursor=Math.max(0,Math.min(cursor,shown.length-1));
-  box.innerHTML=shown.map((it,i)=>'<button type="button" class="'+(i===cursor?'selected':'')+'" data-i="'+i+'"><b>'+esc(it.title)+'</b><small>'+esc(it.sub||'')+'</small></button>').join('')||'<p class="palette-empty">Ничего не найдено</p>';}
+  box.innerHTML=shown.map((it,i)=>'<button type="button" class="'+(i===cursor?'selected':'')+'" data-i="'+i+'"><b>'+esc(it.title)+'</b><small>'+esc(it.sub||'')+'</small>'+(it.act?'<span class="palette-act" data-act="'+i+'">'+esc(it.act.label)+'</span>':'')+'</button>').join('')||'<p class="palette-empty">Ничего не найдено</p>';}
+async function toggleClient(i){const it=items[i];if(!it||!it.act)return;try{const r=await fetch(PATH+'/client-action',{method:'POST',headers:{'X-Onyx-Async':'1'},body:new URLSearchParams({csrf:CSRF,id:it.act.id,kind:it.act.kind,operation:'state',enabled:String(it.act.enabled)})});let d=null;try{d=await r.json()}catch(e){}if(!r.ok||!d||d.ok===false)throw new Error((d&&d.message)||'\u041d\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u043e');const c=(clients||[]).find(x=>x.id===it.act.id);if(c)c.enabled=!!it.act.enabled;if(window.onyxToast)onyxToast(it.act.enabled?'\u0414\u043e\u0441\u0442\u0443\u043f \u0432\u043a\u043b\u044e\u0447\u0451\u043d.':'\u0414\u043e\u0441\u0442\u0443\u043f \u043e\u0442\u043a\u043b\u044e\u0447\u0451\u043d.');render(input.value)}catch(e){if(window.onyxToast)onyxToast(e.message||'\u041e\u0448\u0438\u0431\u043a\u0430.','err')}}
 function go(i){const it=items[Math.min(items.length,12)-1]&&items[i];if(!it)return;dialog.close();location.href=it.path}
 function open(){if(dialog.open)return;dialog.showModal();input.value='';cursor=0;render();input.focus();loadClients().then(()=>render(input.value))}
 document.addEventListener('keydown',e=>{
@@ -479,7 +690,7 @@ input.addEventListener('keydown',e=>{
   if(e.key==='ArrowDown'){e.preventDefault();cursor=Math.min(cursor+1,max);render(input.value)}
   else if(e.key==='ArrowUp'){e.preventDefault();cursor=Math.max(cursor-1,0);render(input.value)}
   else if(e.key==='Enter'&&items[cursor]){e.preventDefault();go(cursor)}});
-box.addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(!b)return;go(Number(b.dataset.i))});
+box.addEventListener('click',e=>{const a=e.target.closest('[data-act]');if(a){e.stopPropagation();toggleClient(Number(a.dataset.act));return}const b=e.target.closest('[data-i]');if(!b)return;go(Number(b.dataset.i))});
 })();
 </script>'''
 
@@ -491,7 +702,7 @@ box.addEventListener('click',e=>{const b=e.target.closest('[data-i]');if(!b)retu
 BELL_JS='''<script>
 (()=>{const PATH=@@PATH@@,CSRF='@@CSRF@@';
 const btn=document.querySelector('[data-bell]');if(!btn)return;
-const menu=btn.parentElement.querySelector('[data-bell-menu]'),list=menu.querySelector('[data-bell-list]'),count=btn.querySelector('[data-bell-count]');
+const bellWrap=btn.parentElement,menu=bellWrap.querySelector('[data-bell-menu]'),list=menu.querySelector('[data-bell-list]'),count=btn.querySelector('[data-bell-count]');
 let items=[],unread=0,open=false,watching=false;
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=ts=>{try{return new Date(ts*1000).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
@@ -505,15 +716,46 @@ function itemHTML(it){
     const rows=(it.changes||[]).map(s=>'<li>'+esc(s)+'</li>').join('');
     const link=it.link?'<a class="bell-link" target="_blank" rel="noopener" href="'+esc(it.link)+'">Все изменения релиза на GitHub</a>':'';
     return '<div class="bell-item'+fresh+'"><div class="bell-item-head"><b>Onyx Panel '+esc(short(it.version))+' установлена</b><small>'+esc(fmt(it.created))+'</small></div>'+(rows?'<ul class="bell-changes">'+rows+'</ul>':'<p>Список изменений не загрузился — подробности в релизе на GitHub.</p>')+link+'</div>'}
+  if(it.kind==='openflux'){
+    const rows=(it.changes||[]).map(s=>'<li>'+esc(s)+'</li>').join('');
+    return '<div class="bell-item'+fresh+'"><div class="bell-item-head"><b>OpenFlux · '+esc(short(it.version))+'</b><small>'+esc(fmt(it.created))+'</small></div>'+(rows?'<ul class="bell-changes">'+rows+'</ul>':'<p>Событие транспорта OpenFlux.</p>')+'</div>'}
+  if(it.kind==='alert'){
+    const rows=(it.changes||[]).map(s=>'<li>'+esc(s)+'</li>').join('');
+    return '<div class="bell-item'+fresh+'"><div class="bell-item-head"><b>Сервер</b><small>'+esc(fmt(it.created))+'</small></div>'+(rows?'<ul class="bell-changes">'+rows+'</ul>':'<p>Событие наблюдения за сервером.</p>')+'</div>'}
+  if(it.kind==='limit'){
+    const rows=(it.changes||[]).map(s=>'<li>'+esc(s)+'</li>').join('');
+    return '<div class="bell-item'+fresh+'"><div class="bell-item-head"><b>Лимит трафика</b><small>'+esc(fmt(it.created))+'</small></div>'+(rows?'<ul class="bell-changes">'+rows+'</ul>':'<p>Событие месячного лимита.</p>')+'</div>'}
   return ''}
 function render(){
-  if(!items.length){list.innerHTML='<p class="bell-empty">Пока нет уведомлений. Здесь появится информация о новых версиях панели и список изменений после обновления.</p>';return}
+  if(!items.length){list.innerHTML='<div class="bell-empty"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b>Уведомлений нет</b><p>Здесь появятся новые версии панели, изменения после обновления и события сервера.</p></div>';return}
   list.innerHTML=items.map(itemHTML).join('')}
-async function load(){try{const r=await fetch(PATH+'/notifications',{cache:'no-store'});if(!r.ok||r.redirected)return;const d=await r.json();items=(Array.isArray(d.items)?d.items.slice():[]).reverse();unread=Number(d.unread)||0;badge();if(open)render()}catch(e){}}
+async function load(){try{const r=await fetch(PATH+'/notifications',{cache:'no-store'});if(!r.ok||r.redirected)return;const d=await r.json();const fresh=(Array.isArray(d.items)?d.items.slice():[]).reverse();const known=new Set(items.map(i=>i.kind+':'+i.version+':'+i.created));notifyNew(fresh.filter(i=>!i.read&&!known.has(i.kind+':'+i.version+':'+i.created)));items=fresh;unread=Number(d.unread)||0;badge();if(open)render()}catch(e){}}
+function notifyNew(fresh){if(!fresh.length||!('Notification' in window)||Notification.permission!=='granted')return;fresh.slice(0,3).forEach(it=>{const title=it.kind==='alert'?'Сервер':it.kind==='limit'?'Лимит трафика':'Onyx Panel';const body=((it.changes||[])[0])||(it.kind==='available'?('Доступна версия '+short(it.version)):'Новое событие');try{const n=new Notification(title,{body:body.slice(0,160),tag:it.kind+':'+it.version});n.onclick=()=>{window.focus();n.close()}}catch(e){}})}
 function markRead(){if(unread<1)return;unread=0;badge();items.forEach(i=>i.read=true);if(open)render();fetch(PATH+'/notifications-read',{method:'POST',body:new URLSearchParams({csrf:CSRF})}).catch(()=>{})}
-function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=(btn.getBoundingClientRect().bottom+9)+'px';menu.style.width='auto';menu.style.maxWidth='none'}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth=''}menu.hidden=!state;if(state)load().then(markRead)}
+(function(){const b=document.querySelector('[data-bell-notify]');if(!b||!('Notification' in window)||Notification.permission!=='default')return;b.hidden=false;b.addEventListener('click',()=>{Notification.requestPermission().then(p=>{if(p!=='default'){b.hidden=true;onyxPushSync()}})});
+/* Web Push колокольчика: при выданном разрешении держим подписку актуальной,
+   чтобы события приходили, даже когда PWA закрыт (push-пинг будит service worker). */
+async function onyxPushSync(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window))return;
+  if(Notification.permission!=='granted')return;
+  try{
+    const reg=await navigator.serviceWorker.getRegistration(PATH+'/');
+    if(!reg||!reg.pushManager)return;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      const cfg=await fetch(PATH+'/push-config',{cache:'no-store'}).then(r=>r.ok&&!r.redirected?r.json():null).catch(()=>null);
+      if(!cfg||!cfg.publicKey)return;
+      const raw=atob(cfg.publicKey.replace(/-/g,'+').replace(/_/g,'/'));
+      const key=Uint8Array.from(raw,c=>c.charCodeAt(0));
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+    }
+    await fetch(PATH+'/push-subscribe',{method:'POST',body:new URLSearchParams({csrf:CSRF,endpoint:sub.endpoint,keys:JSON.stringify(sub.toJSON().keys||{})})}).catch(()=>{});
+  }catch(e){}
+}
+onyxPushSync();})();
+function setOpen(state){if(state===open)return;open=state;if(state&&innerWidth<=760){menu.style.position='fixed';menu.style.left='12px';menu.style.right='12px';menu.style.top=Math.max(Math.round(btn.getBoundingClientRect().bottom)+9,80)+'px';menu.style.width='auto';menu.style.maxWidth='none';if(menu.parentElement!==document.body)document.body.append(menu)}else{menu.style.position='';menu.style.left='';menu.style.right='';menu.style.top='';menu.style.width='';menu.style.maxWidth='';if(menu.parentElement!==bellWrap)bellWrap.append(menu)}menu.hidden=!state;if(state){render();load().then(markRead)}}
 btn.addEventListener('click',e=>{e.stopPropagation();setOpen(!open)});
-document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap'))setOpen(false)});
+document.addEventListener('click',e=>{if(open&&!e.target.closest('.bell-wrap')&&!e.target.closest('[data-bell-menu]'))setOpen(false)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&open)setOpen(false)});
 function watch(){if(watching)return;watching=true;let down=false;
   const tick=setInterval(async()=>{let d=null;
@@ -532,6 +774,8 @@ menu.addEventListener('click',async e=>{
   const upd=e.target.closest('[data-bell-update]');
   if(!upd||upd.disabled)return;
   const target=upd.dataset.bellUpdate;
+  setOpen(false);
+  if(window.ONYXPanelModal){ONYXPanelModal.confirmAndStart(target);return}
   if(!(await onyxConfirm('Установить версию '+short(target)+'? Будет создана резервная копия. Панель и подключения могут временно прерваться.',{title:'Установка обновления',ok:'Обновить'})))return;
   upd.disabled=true;
   try{
@@ -542,8 +786,19 @@ menu.addEventListener('click',async e=>{
   }catch(err){onyxToast(err.message||'Ошибка обновления.','err');upd.disabled=false}
 });
 load();setInterval(load,30000);
+// Автопроверка новой версии панели раз в 10 минут: сервер сам троттлит проверку,
+// здесь просто раз в 10 минут просим его посмотреть репозиторий и обновляем колокольчик.
+setInterval(async()=>{if(document.hidden)return;try{await fetch(PATH+'/update-check',{method:'POST',body:new URLSearchParams({csrf:CSRF})})}catch(e){}load()},600000);
 })();
 </script>'''
+
+
+def ui_version():
+    """Версия установленной панели: страницы помечаются ею для авто-перезагрузки UI."""
+    try:
+        return open('/etc/onyx-panel/version', encoding='ascii').read().strip()
+    except OSError:
+        return ''
 
 
 def page_layout(title, body, path, active, domain, csrf='', role='admin'):
@@ -555,20 +810,137 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
         state = ' active' if key == active else ''
         nav += f'<a class="nav-button{state}" href="{esc(path)}/{key}" data-tip="{label}" aria-label="{label}"{current}>{icon(glyph)}</a>'
     banner = f'''<aside id="releaseBanner" class="release-banner" role="status" hidden><span class="release-banner-mark">{icon('refresh')}</span><div class="release-banner-copy"><b>Доступна новая версия Onyx Panel</b><small>Обновление можно установить с автоматической резервной копией</small></div><span id="releaseBannerVersion" class="release-banner-version"></span><div class="release-banner-actions"><a class="btn primary" href="{esc(path)}/updates">Посмотреть</a><button type="button" id="releaseBannerClose" class="release-banner-close" aria-label="Скрыть уведомление">×</button></div></aside>'''
-    banner_script = f'''<script>(()=>{{const banner=document.getElementById('releaseBanner'),version=document.getElementById('releaseBannerVersion'),close=document.getElementById('releaseBannerClose');if(!banner)return;function dismissed(v){{try{{return localStorage.getItem('onyx-release-banner:'+v)==='1'}}catch(e){{return false}}}}function show(d){{if(!d||!d.available||!d.latest||dismissed(d.latest)){{banner.hidden=true;return}}banner.dataset.version=d.latest;version.textContent=(d.current||'—')+' → '+d.latest;banner.hidden=false}}async function check(){{try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(r.ok&&!r.redirected)show(await r.json())}}catch(e){{}}}}close.addEventListener('click',()=>{{const v=banner.dataset.version;if(v)try{{localStorage.setItem('onyx-release-banner:'+v,'1')}}catch(e){{}}banner.hidden=true}});window.addEventListener('onyx-update-status',e=>show(e.detail));check();setInterval(check,30000)}})();</script>'''
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#252526"><title>{esc(title)} · Onyx Panel</title><link rel="icon" type="image/svg+xml" href="{FAVICON_MARK}"><style>{CSS}</style></head><body data-role="{esc(role)}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: разделы, клиенты, действия…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{COMMON_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
+    banner_script = f'''<script>(()=>{{const banner=document.getElementById('releaseBanner'),version=document.getElementById('releaseBannerVersion'),close=document.getElementById('releaseBannerClose');if(!banner)return;function dismissed(v){{try{{return localStorage.getItem('onyx-release-banner:'+v)==='1'}}catch(e){{return false}}}}function show(d){{if(!d||!d.available||!d.latest||dismissed(d.latest)){{banner.hidden=true;return}}banner.dataset.version=d.latest;version.textContent=(d.current||'—')+' → '+d.latest;banner.hidden=false}}async function check(){{try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(!r.ok||r.redirected)return;const d=await r.json();const mine=document.body.dataset.uiVersion;if(d.current&&mine&&d.current!==mine&&!['queued','running'].includes(d.phase)){{location.reload();return}}show(d)}}catch(e){{}}}}close.addEventListener('click',()=>{{const v=banner.dataset.version;if(v)try{{localStorage.setItem('onyx-release-banner:'+v,'1')}}catch(e){{}}banner.hidden=true}});window.addEventListener('onyx-update-status',e=>show(e.detail));check();setInterval(check,30000)}})();</script>'''
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>{esc(title)} · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}</style></head><body data-role="{esc(role)}" data-ui-version="{esc(ui_version())}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: клиенты, функции, разделы…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{PWA_INSTALL_DIALOG.replace("@@LOGO@@",esc(path)+"/__logo")}{COMMON_JS}{PWA_JS.replace("@@SW@@",json.dumps(path+"/__/sw.js")).replace("@@SCOPE@@",json.dumps(path))}{PWA_INSTALL_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{PANEL_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
 
 
 def login_ui(path, totp=False):
-    code_field = ('<label for="loginCode">Код двухфакторной аутентификации</label>'
-                  '<input id="loginCode" name="code" inputmode="numeric" pattern="[0-9]*"'
-                  ' autocomplete="one-time-code" placeholder="6 цифр из приложения">') if totp else ''
     mark = '<path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z" transform="translate(24 25) scale(1.1)"/>'
     letters = '<path d="M420 752C200 752 30 585 30 369C30 155 202 -13 419 -13C634 -13 800 154 800 369C800 582 631 752 420 752ZM418 620C555 620 662 510 662 368C662 225 558 119 418 119C278 119 168 229 168 369C168 512 276 620 418 620Z" transform="translate(163.000 90) scale(0.067 -0.067)"/><path d="M54 0H187V261C187 335 192 367 209 394C230 427 264 445 307 445C342 445 369 433 387 410C405 386 413 345 413 271V0H546V297C546 396 536 444 506 487C470 539 410 567 333 567C269 567 226 549 177 501V554H54Z" transform="translate(217.980 90) scale(0.067 -0.067)"/><path d="M105 -185H248L568 554H414L281 195L158 554H6L209 52Z" transform="translate(256.880 90) scale(0.067 -0.067)"/><path d="M1 0H161L277 190L393 0H553L356 286L525 554H375L277 387L177 554H27L197 286Z" transform="translate(294.440 90) scale(0.067 -0.067)"/>'
     subtitle = '<path d="M68 0H205V281H249C354 281 402 289 443 314C503 352 540 426 540 511C540 596 504 666 440 705C398 730 348 739 251 739H68ZM205 412V608H251C296 608 317 606 338 601C378 590 402 555 402 509C402 473 386 445 357 429C336 418 299 412 245 412Z" transform="translate(168.000 121) scale(0.016 -0.016)"/><path d="M7 0H158L240 191H503L582 0H733L423 739H315ZM290 322 369 546 448 322Z" transform="translate(182.060 121) scale(0.016 -0.016)"/><path d="M68 0H205V537L514 0H667V739H530V201L224 739H68Z" transform="translate(199.000 121) scale(0.016 -0.016)"/><path d="M68 0H465V131H205V303H454V434H205V608H465V739H68Z" transform="translate(215.940 121) scale(0.016 -0.016)"/><path d="M68 0H431V131H205V739H68Z" transform="translate(229.360 121) scale(0.016 -0.016)"/>'
     wordmark = ('<svg class="login-brand-mark" viewBox="0 0 440 160" role="img" aria-label="Onyx Panel">'
                 + mark + '<g fill="var(--text)">' + letters + '</g><g fill="var(--muted)">' + subtitle + '</g></svg>')
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#252526"><title>Вход · Onyx Panel</title><link rel="icon" type="image/svg+xml" href="{FAVICON_MARK}"><style>{CSS}</style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form method="post" action="{esc(path)}/login"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required>{code_field}<button class="primary">Войти</button></form><small class="login-version">ONYX PANEL · {login_version()}</small></main>{COMMON_JS}</body></html>'''
+    totp_flag = 'true' if totp else 'false'
+    # Two-step sign-in only makes sense with 2FA on: the OTP step markup is
+    # rendered solely when the gate can actually ask for a code, otherwise
+    # "digesting code" fields would exist without a purpose on plain logins.
+    otp_step = ('<div class="login-step" id="loginStep2" hidden><p class="login-step-title">Код двухфакторной аутентификации</p>'
+                '<div class="login-otp-cells" id="loginOtpCells">'
+                + ''.join(f'<input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Цифра {i+1}">' for i in range(6))
+                + '</div><input type="hidden" name="code" id="loginCode" autocomplete="one-time-code">'
+                '<button type="submit" class="primary" id="loginVerify">Войти</button>'
+                '<button type="button" class="login-back" id="loginBack">← Назад</button></div>') if totp else ''
+    otp_js = '''cells.forEach((cell,i)=>{{
+  cell.addEventListener('input',()=>{{
+    cell.value=cell.value.replace(/\\D/g,'').slice(0,1);
+    if(cell.value){{cell.classList.add('filled');if(i<cells.length-1)cells[i+1].focus()}}else cell.classList.remove('filled');
+    codeField.value=Array.from(cells).map(c=>c.value).join('');
+    if(codeField.value.length===6)form.requestSubmit(form.querySelector('#loginVerify'));
+  }});
+  cell.addEventListener('keydown',e=>{{
+    if(e.key==='Backspace'&&!cell.value&&i>0){{cells[i-1].focus();cells[i-1].value='';cells[i-1].classList.remove('filled');codeField.value=Array.from(cells).map(c=>c.value).join('')}}
+    if(e.key==='ArrowLeft'&&i>0)cells[i-1].focus();
+    if(e.key==='ArrowRight'&&i<cells.length-1)cells[i+1].focus();
+  }});
+  cell.addEventListener('paste',e=>{{
+    e.preventDefault();const digits=(e.clipboardData||window.clipboardData).getData('text').replace(/\\D/g,'').slice(0,cells.length);
+    digits.split('').forEach((d,j)=>{{if(j<cells.length){{cells[j].value=d;cells[j].classList.add('filled')}}}});
+    codeField.value=Array.from(cells).map(c=>c.value).join('');
+    if(codeField.value.length===6)form.requestSubmit(verifyBtn);
+    else if(digits.length<cells.length)cells[Math.min(digits.length,cells.length-1)].focus();
+  }});
+}});
+backBtn.addEventListener('click',()=>showStep(1));''' if totp else ''
+    # Поля и JS для шага кода существуют только при включённой 2FA: без неё
+    # страницы входа не должны содержать даже упоминаний loginCode/loginOtpCells.
+    js_fields = ("const userField=document.getElementById('loginName'),passField=document.getElementById('loginPassword'),codeField=document.getElementById('loginCode');"
+                 if totp else
+                 "const userField=document.getElementById('loginName'),passField=document.getElementById('loginPassword');")
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>Вход · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}
+.login-step{{animation:login-fade-in .3s ease}}
+.login-step[hidden]{{display:none!important}}
+@keyframes login-fade-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
+.login-otp-cells{{display:flex;gap:9px;justify-content:center;margin:18px 0 4px}}
+.login-otp-cells input{{width:44px;height:54px;padding:0;text-align:center;font:600 22px/1 var(--font-mono);border:1px solid var(--line);border-radius:12px;background:var(--input);color:var(--text);transition:border-color .15s,box-shadow .15s}}
+.login-otp-cells input:focus{{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}}
+.login-otp-cells input.filled{{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--input))}}
+.login-otp-cells input.error-shake{{animation:login-shake .4s;border-color:var(--red)}}
+@keyframes login-shake{{0%,100%{{transform:translateX(0)}}20%,60%{{transform:translateX(-5px)}}40%,80%{{transform:translateX(5px)}}}}
+.login-step-title{{font-size:13px;color:var(--muted);text-align:center;margin-bottom:2px}}
+.login-back{{display:block;margin:14px auto 0;font-size:11px;background:transparent;border-color:transparent;color:var(--muted);cursor:pointer}}
+.login-back:hover{{color:var(--accent)}}
+@media(max-width:480px){{.login-otp-cells{{gap:6px}}.login-otp-cells input{{width:38px;height:48px;font-size:19px}}}}
+.login-modal{{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}}
+.login-modal.show{{opacity:1;visibility:visible}}
+.login-modal-card{{display:flex;flex-direction:column;align-items:center;gap:14px;padding:36px 40px;border:1px solid var(--line);border-radius:20px;background:var(--surface);box-shadow:0 24px 70px rgba(0,0,0,.5);transform:scale(.9);transform-origin:center;transition:transform .3s cubic-bezier(.2,.8,.2,1)}}
+.login-modal.show .login-modal-card{{transform:scale(1)}}
+.login-modal-title{{font-size:17px;font-weight:600;margin:0}}
+.login-modal-text{{font-size:13px;color:var(--muted);margin:0;text-align:center;max-width:260px}}
+</style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
+<div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card" id="loginModalCard"><div class="move-ring spin" id="loginModalRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="loginModalMark">…</b></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
+{COMMON_JS}
+<script>(()=>{{
+const TOTP={totp_flag};
+const form=document.getElementById('loginForm'),step1=document.getElementById('loginStep1'),step2=document.getElementById('loginStep2');
+{js_fields}
+const submitBtn=document.getElementById('loginSubmit'),verifyBtn=document.getElementById('loginVerify'),backBtn=document.getElementById('loginBack');
+const cells=document.querySelectorAll('#loginOtpCells input');
+let inOtp=false;
+function showStep(n){{if(n===2){{step1.hidden=true;step2.hidden=false;inOtp=true;cells[0].focus()}}else{{step2.hidden=true;step1.hidden=false;inOtp=false;cells.forEach(c=>{{c.value='';c.classList.remove('filled','error-shake')}});codeField.value='';passField.focus()}}}}
+{otp_js}
+form.addEventListener('submit',async e=>{{
+  e.preventDefault();e.stopImmediatePropagation();
+  if(TOTP&&!inOtp){{
+    if(!userField.value.trim()||!passField.value)return;
+    showStep(2);return;
+  }}
+  if(TOTP&&inOtp&&codeField.value.length!==6){{
+    cells.forEach(c=>c.classList.add('error-shake'));
+    if(window.onyxToast)onyxToast('Введите 6 цифр кода','err');
+    setTimeout(()=>cells.forEach(c=>c.classList.remove('error-shake')),400);
+    return;
+  }}
+  const btn=inOtp?verifyBtn:submitBtn;const oldText=btn.textContent;btn.disabled=true;btn.textContent='Входим…';
+  const modal=document.getElementById('loginModal'),modalCard=document.getElementById('loginModalCard'),modalRing=document.getElementById('loginModalRing'),modalMark=document.getElementById('loginModalMark'),modalTitle=document.getElementById('loginModalTitle'),modalText=document.getElementById('loginModalText');
+  function showModal(state,title,text){{
+    modalCard.classList.remove('upd-done','upd-err');
+    modalRing.classList.remove('spin');
+    void modalRing.offsetWidth;
+    if(state==='success'){{modalCard.classList.add('upd-done');modalMark.textContent='✓';}}
+    else if(state==='error'){{modalCard.classList.add('upd-err');modalMark.textContent='!';}}
+    else{{modalRing.classList.add('spin');modalMark.textContent='…';}}
+    modalTitle.textContent=title;modalText.textContent=text;
+    void modal.offsetWidth;
+    modal.classList.add('show');modal.setAttribute('aria-hidden','false');
+    requestAnimationFrame(()=>modal.classList.add('show'));
+  }}
+  function hideModal(){{
+    modal.classList.remove('show');modal.setAttribute('aria-hidden','true');
+    setTimeout(()=>{{modalCard.classList.remove('upd-done','upd-err');modalRing.classList.add('spin');modalMark.textContent='…';modalTitle.textContent='Входим…';modalText.textContent='Проверяем данные';}},300);
+  }}
+  try{{
+    showModal('spin','Входим…','Проверяем данные');
+    const r=await fetch(form.action,{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams(new FormData(form))}});
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель вернула некорректный ответ.')}}
+    if(!r.ok||!d.ok)throw Object.assign(new Error(d.message||'Ошибка входа'),{{field:d.field||''}});
+    showModal('success','Вход выполнен','Перенаправляем в панель…');
+    setTimeout(()=>{{location.href=d.redirect||('{esc(path)}'+'/dashboard')}},900);
+  }}catch(err){{
+    showModal('error','Ошибка входа',err.message||'Проверьте логин и пароль');
+    btn.disabled=false;btn.textContent=oldText;
+    setTimeout(()=>{{hideModal();
+    if(err.field==='code'&&TOTP){{
+      cells.forEach(c=>{{c.value='';c.classList.remove('filled');c.classList.add('error-shake')}});
+      codeField.value='';setTimeout(()=>{{cells.forEach(c=>c.classList.remove('error-shake'));cells[0].focus()}},400);
+    }}else if(err.field==='password'){{
+      if(TOTP&&inOtp)showStep(1);
+      passField.focus();passField.select();
+    }}
+    }},1400);
+  }}
+}},true);
+}})();
+</script></body></html>'''
 
 
 
@@ -576,9 +948,12 @@ HEAD_MOVE_JS = """<script>
 (()=>{const cluster=document.getElementById('headCluster');if(!cluster)return;
 const head=document.querySelector('.page-head');if(!head)return;
 let row=head.querySelector('.actions');if(!row){row=document.createElement('div');row.className='actions';head.appendChild(row)}
-row.append(cluster.content);
+// Кластер (колокольчик · поиск · аватар) оборачивается в один span, чтобы на
+// мобильных он прижимался вправо как единый блок и не растягивался на всю строку.
+const wrap=document.createElement('span');wrap.className='head-cluster';wrap.append(cluster.content);
+row.append(wrap);
 const search=row.querySelector('[data-head-search]');
-if(search)search.addEventListener('click',()=>{const dlg=document.getElementById('paletteDialog');if(dlg&&!dlg.open){dlg.showModal();const input=document.getElementById('paletteInput');if(input){input.value='';input.dispatchEvent(new Event('input'));input.focus()}}});
+if(search)search.addEventListener('click',()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))});
 })();
 </script>"""
 
@@ -597,7 +972,7 @@ def badge(active, enabled=True):
 
 
 def protocol_checks(sub):
-    choices=[('vless','VLESS XHTTP'),('hysteria','Hysteria2')]
+    choices=[('vless','VLESS XHTTP'),('hysteria','Hysteria2'),('tuic','TUIC 5')]
     return '<div class="checks">'+''.join(f'<label class="check"><input type="checkbox" name="{p}" value="1" {"checked" if p in sub.get("protocols",["vless","hysteria"]) else ""}>{title}</label>' for p,title in choices)+'</div>'
 
 
@@ -608,7 +983,7 @@ def subscription_card(sub, path, domain, csrf, traffic, compact=False):
     url = 'https://'+domain+'/onyx-sub/'+sub['token']
     count = sum(not d.get('revoked') for d in sub['devices'])
     limit = str(count)+' / '+str(sub['max_devices']) if sub['max_devices'] else 'Без лимита'
-    names={'vless':'VLESS','hysteria':'Hysteria2'}
+    names={'vless':'VLESS','hysteria':'Hysteria2','tuic':'TUIC 5'}
     head = f'''<div class="account-head"><div class="identity"><div class="avatar">{icon('link')}</div><div><h3>{esc(sub['name'])}</h3><div class="pills"><span class="pill">Подписка</span>{''.join('<span class="pill">'+names.get(p,p)+'</span>' for p in sub['protocols'])}</div></div></div>{badge(total['active'],enabled)}</div><div class="account-metrics"><div><span>Устройства · HWID</span><b>{limit}</b></div><div><span>Трафик: {size(total['up']+total['down'])}</span><b>↑ {size(total['up'])} · ↓ {size(total['down'])}</b></div></div>'''
     buttons = f'<div class="actions"><button class="btn primary" data-copy="{esc(url)}">Скопировать подписку</button>'
     if compact:
@@ -626,9 +1001,9 @@ def subscription_card(sub, path, domain, csrf, traffic, compact=False):
     return f'<article class="account" id="account-{esc(sid)}" data-account data-kind="subscription" data-name="{esc(sub["name"].lower())}">{head}{buttons}{details}</article>'
 
 
-def direct_card(user, path, csrf, traffic, proxy_link, compact=False):
+def direct_card(user, path, csrf, traffic, proxy_link, compact=False, reality_link=None):
     uid=user['id']; proto=user.get('protocol','web'); port=int(user.get('backend_port',443))
-    label={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1'}.get(proto,proto)
+    label={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','tuic':'TUIC 5','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1'}.get(proto,proto)
     total=aggregate([uid],traffic,user.get('enabled',True))
     device_secrets=user.get('device_secrets') if proto=='mtproto' else None
     if not isinstance(device_secrets,list) or not device_secrets: device_secrets=[user['secret']]
@@ -656,7 +1031,13 @@ def direct_card(user, path, csrf, traffic, proxy_link, compact=False):
             value_control=f'<div class="mtproto-access-head"><span>TCP-порт</span><b>{port}</b><small>Открыт панелью в firewall</small></div><div class="mtproto-devices">{"".join(device_rows)}</div>'
         download=f'<a class="btn" href="{esc(path)}/awg-config?{urlencode({"id":uid})}">Скачать .conf</a>' if proto in ('awg20','awg31') else ''
         access_note=(f'{len(device_secrets)} отдельных ключей устройств · Telegram не передаёт серверу HWID' if proto=='mtproto' else 'Отдельное подключение · без ограничения устройств')
-        details=f'<details><summary>Параметры подключения</summary><p class="muted">{access_note}</p>{value_control}<div class="account-actions">{download}{removal}</div>{secret_editor}</details>'
+        reality_row=''
+        if reality_link:
+            reality_row=(f'<label>Reality-ссылка (маскируется под белый список)</label>'
+                         f'<div class="secret-editor"><input class="sub-url" value="{esc(reality_link)}" readonly>'
+                         f'<button type="button" data-copy="{esc(reality_link)}">Копировать</button></div>'
+                         f'<small>Тот же ключ, но TLS-handshake маскируется под белый сайт. Подключение на порт, отличный от 443.</small>')
+        details=f'<details><summary>Параметры подключения</summary><p class="muted">{access_note}</p>{value_control}{reality_row}<div class="account-actions">{download}{removal}</div>{secret_editor}</details>'
     return f'''<article class="account" id="account-{esc(uid)}" data-account data-kind="direct" data-name="{esc(user['name'].lower())}"><div class="account-head"><div class="identity"><div class="avatar">{icon('users')}</div><div><h3>{esc(user['name'])}</h3><div class="pills"><span class="pill">{esc(label)}</span><span class="pill">Отдельная ссылка</span></div></div></div>{badge(total['active'],user.get('enabled',True))}</div><div class="account-metrics"><div><span>Получено</span><b>{size(total['down'])}</b></div><div><span>Отправлено</span><b>{size(total['up'])}</b></div><div><span>Всего</span><b>{size(total['up']+total['down'])}</b></div></div><div class="actions">{buttons}</div>{details}</article>'''
 
 
@@ -666,7 +1047,14 @@ def live_subscriptions(subs, profiles):
                  if u.get('subscription_id') == s['id'] and u.get('enabled', True)]) for s in subs]
 
 
-def client_records(subs, profiles, traffic, domain, proxy_link, expires=None):
+def node_pills(record):
+    """Small pills naming the nodes a subscription client uses."""
+    names=record.get('node_names') or []
+    if not names: return ''
+    return '<div class="node-pills">'+''.join('<span class="pill node-pill">'+esc(n)+'</span>' for n in names)+'</div>'
+
+
+def client_records(subs, profiles, traffic, domain, proxy_link, expires=None, node_summary=None, warp_ids=None):
     records=[]
     for s in live_subscriptions(subs,profiles):
         totals=aggregate(s.get('profile_ids',[]),traffic,s.get('enabled',True))
@@ -681,7 +1069,7 @@ def client_records(subs, profiles, traffic, domain, proxy_link, expires=None):
         proto=u.get('protocol','web')
         # Old experimental builds could leave Mieru or NaiveProxy records in
         # users.json. Preserve them for rollback without rendering them.
-        if proto not in {'web','vless','hysteria','mtproto','awg20','awg31'}:
+        if proto not in {'web','vless','hysteria','tuic','mtproto','awg20','awg31'}:
             continue
         try:
             link=proxy_link(proto,u['secret'],int(u.get('backend_port',443)),u['name'],u.get('username',''))
@@ -694,14 +1082,29 @@ def client_records(subs, profiles, traffic, domain, proxy_link, expires=None):
             link=link,source=u,devices=len(mt_devices) if proto=='mtproto' else None,
             limit=len(mt_devices) if proto=='mtproto' else None,
             expires=(expires or {}).get(u['id'])))
+    # Node traffic merges into subscription clients: counters add up, and a
+    # device passing traffic on a node counts as active here too.
+    if node_summary:
+        for r in records:
+            rec=node_summary.get(r['id'])
+            if rec and r['kind']=='subscription':
+                r['totals']['up']+=rec['up']
+                r['totals']['down']+=rec['down']
+                r['totals']['active']=r['totals']['active'] or rec['active']
+                r['node_names']=rec['nodes']
     # Newest clients — subscriptions, direct links and OpenFlux alike — always
     # land at the bottom of the list; stable sort keeps grouped ties in place.
+    if warp_ids is not None:
+        for r in records:
+            source=r.get('source') or {}
+            ids=source.get('profile_ids') or [source.get('id',r['id'])]
+            r['warp']=bool(warp_ids.intersection([str(i) for i in ids]))
     records.sort(key=lambda r:int(r.get('created') or 0))
     return records
 
 
 def client_protocols(protocols):
-    names={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1','openflux':'OpenFlux'}
+    names={'web':'WEB Proxy','vless':'VLESS XHTTP','hysteria':'Hysteria2','tuic':'TUIC 5','mtproto':'MTProto','awg20':'AWG 2.0','awg31':'AWG 3.1','openflux':'OpenFlux'}
     return '<div class="pills">'+''.join('<span class="pill proto-'+esc(p)+'">'+esc(names.get(p,p))+'</span>' for p in protocols)+'</div>'
 
 
@@ -720,6 +1123,63 @@ def client_glances(records,path):
     return '<div class="dashboard-clients">'+(''.join(rows) or '<p class="empty">Клиентов пока нет</p>')+'</div>'
 
 
+SEG_PROFILE = 'openflux-profile'
+SEG_DOC = 'openflux-document'
+A_BTN = 'data-flux-docgen'
+A_STATUS = 'data-flux-docgen-status'
+
+
+def flux_health_note(profile):
+    """' · документ не отвечает · 5 мин. назад' — для подзаголовка карточки."""
+    if not (profile.get('enabled', True) and profile.get('active', False)):
+        return ''
+    health = profile.get('health') or {}
+    label = {'ok': 'документ доступен', 'dead': 'документ не отвечает',
+             'unknown': 'ответ неясен'}.get(health.get('status'))
+    if not label:
+        return ''
+    checked = health.get('checked_at')
+    when = ' · ' + duration(max(0, int(time.time()) - int(checked))) + ' назад' if checked else ''
+    return ' · ' + label + when
+
+
+def flux_until_note(profile):
+    deadline = profile.get('expires_at')
+    return ' · до ' + time.strftime('%d.%m.%Y', time.localtime(int(deadline))) if deadline else ''
+
+
+def flux_fallback_html(path, csrf, profile):
+    """Блок «Резервный документ» в карточке профиля."""
+    fallback_url = profile.get('fallback_url', '')
+    transport = profile.get('transport', 'yandex')
+    other = 'mailru' if transport == 'yandex' else 'yandex'
+    other_name = 'Mail.ru Документы' if other == 'mailru' else 'Яндекс Документы'
+    pid = profile.get('id', '')
+    if fallback_url:
+        note = ('Резерв: ' + esc(fallback_url) + '. Если основной перестанет отвечать, '
+                'панель переключит профиль на него и сообщит в колокольчик и Telegram.')
+    else:
+        note = ('Если публичный документ перестанет отвечать, панель сама переключит профиль '
+                'на резервный и сообщит в колокольчик и Telegram. Основной и резервный документы '
+                'меняются местами, поэтому транспорт резерва должен отличаться.')
+    fb_clear = ''
+    if fallback_url:
+        fb_clear = ('<form method="post" action="' + esc(path) + '/' + SEG_PROFILE + '">'
+                    + hidden(csrf, operation='clear-fallback', id=pid)
+                    + '<button class="danger">Убрать резерв</button></form>')
+    return ('<details class="flux-fallback"><summary>Резервный документ</summary>'
+            '<p class="note">' + note + '</p>'
+            '<form method="post" action="' + esc(path) + '/' + SEG_PROFILE + '">'
+            + hidden(csrf, operation='set-fallback', id=pid)
+            + '<label>Ссылка (' + esc(other_name) + ')</label>'
+            '<input name="fallback_url" type="url" maxlength="2048" value="' + esc(fallback_url)
+            + '" required placeholder="https://disk.yandex.ru/i/… или https://cloud.mail.ru/public/…">'
+            '<input type="hidden" name="fallback_transport" value="' + esc(other) + '">'
+            '<div class="actions"><button>Сохранить резерв</button></div></form>' + fb_clear + '</details>')
+
+
+FLUX_DOCGEN_JS="<script>(()=>{const fluxDialog=document.getElementById('newOpenFlux');if(!fluxDialog)return;const fluxErrorEl=document.getElementById('fluxCreateError');function showFluxError(msg){if(!fluxErrorEl)return;fluxErrorEl.textContent=msg;fluxErrorEl.hidden=false;fluxErrorEl.scrollIntoView({block:'nearest',behavior:'smooth'})}function clearFluxError(){if(fluxErrorEl)fluxErrorEl.hidden=true}function validateFluxUrl(){const form=fluxDialog.querySelector('form');if(!form)return true;const transport=form.querySelector('[name=transport]:checked');const urlInput=form.querySelector('[name=url]');if(!transport||!urlInput||!urlInput.value.trim())return true;const url=urlInput.value.trim();const t=transport.value;let host='';try{host=new URL(url).hostname.toLowerCase().replace(/\\.$/,'')}catch(e){showFluxError('Ссылка имеет неверный формат. Вставьте полную HTTPS-ссылку на публичный документ.');return false}if(t==='yandex'){const ok=host==='yandex.ru'||host==='yandex.com'||host==='yadi.sk'||host.endsWith('.yandex.ru')||host.endsWith('.yandex.com')||host==='disk.yandex.ru'||host==='disk.yandex.com';if(!ok){showFluxError('Выбран транспорт «Яндекс Документы», но ссылка ведёт на другой сайт. Вставьте публичную ссылку disk.yandex.ru (или yadi.sk).');return false}}else if(t==='mailru'){const ok=host==='cloud.mail.ru';if(!ok){showFluxError('Выбран транспорт «Mail.ru Документы», но ссылка ведёт на другой сайт. Вставьте публичную ссылку cloud.mail.ru/public/…');return false}}clearFluxError();return true}const fluxForm=fluxDialog.querySelector('form');if(fluxForm){fluxForm.addEventListener('submit',e=>{const opField=fluxForm.querySelector('[name=operation]');if(!opField||opField.value!=='create')return;if(!validateFluxUrl()){e.preventDefault();e.stopImmediatePropagation()}},{capture:true});fluxForm.addEventListener('input',()=>clearFluxError(),{capture:true});fluxDialog.addEventListener('close',()=>clearFluxError())}const endpointOf=box=>box.querySelector('form').getAttribute('action').replace('/openflux-profile','/openflux-mailru-status');const paint=(el,ok,text)=>{el.classList.toggle('flux-status-ok',ok);el.classList.toggle('flux-status-err',!ok);el.textContent=text};const busy=(box,on,text)=>{const o=box.querySelector('[data-flux-busy]');if(!o)return;o.hidden=!on;if(on)o.querySelector('[data-flux-busy-text]').textContent=text||'Работаю…'};const refreshMailruStatus=()=>{const box=document.getElementById('newOpenFlux');const el=box.querySelector('[data-flux-mailru-status]');if(!el)return;el.textContent='Проверяю подключение Mail.ru…';fetch(endpointOf(box),{headers:{'Accept':'application/json'}}).then(r=>r.json()).then(d=>{box.querySelector('[data-flux-mailru-connected]').hidden=!d.connected;box.querySelector('[data-flux-mailru-login]').hidden=d.connected;paint(el,d.connected,d.connected?'Аккаунт подключён: '+(d.email||'')+' — можно создавать документы.':'Аккаунт не подключён — войдите в аккаунт Mail.ru ниже.')}).catch(()=>{paint(el,false,'Статус не удалось получить.')})};const toggle=()=>{const radio=document.querySelector('[name=transport]:checked');document.querySelectorAll('[data-flux-docgen-pane]').forEach(p=>{p.hidden=radio?p.dataset.fluxDocgenPane!==radio.value:false});if(radio&&radio.value==='mailru')refreshMailruStatus()};document.addEventListener('change',e=>{if(e.target.matches('[name=transport]'))toggle()});toggle();const loginDlg=document.getElementById('mailruLoginDialog');const loginMode=(mode,text)=>{const busyEl=loginDlg.querySelector('[data-flux-login-busy]'),retry=loginDlg.querySelector('[data-flux-login-retry]'),st=loginDlg.querySelector('[data-flux-login-status]');busyEl.hidden=mode!=='busy';retry.hidden=mode!=='retry';if(mode==='busy')busyEl.querySelector('[data-flux-login-busy-text]').textContent=text||'Входим в Mail.ru…';if(mode==='retry')st.textContent=text||'Вход не удался.'};const showRetry=msg=>{const inp=loginDlg.querySelector('[data-flux-login-password]');const pw=document.getElementById('newOpenFlux').querySelector('[name=mailru_password]');if(pw&&pw.value)inp.value=pw.value;loginMode('retry',msg);inp.focus();inp.select()};const finishLogin=()=>{loginDlg.close();const pw=document.getElementById('newOpenFlux').querySelector('[name=mailru_password]');if(pw)pw.value='';refreshMailruStatus()};const loginRequest=async password=>{const form=document.getElementById('newOpenFlux').querySelector('form');const body=new URLSearchParams({csrf:form.querySelector('[name=csrf]').value,provider:'mailru',action:'connect',mailru_email:form.querySelector('[name=mailru_email]').value.trim(),mailru_password:password});const r=await fetch(form.getAttribute('action').replace('/openflux-profile','/openflux-document'),{method:'POST',headers:{'X-Onyx-Async':'1'},body});return r.json()};const runConnect=async password=>{loginMode('busy',password===undefined?'Входим в Mail.ru…':'Проверяю пароль…');try{const d=await loginRequest(password);if(!d.ok)throw new Error(d.message||'Вход не удался.');finishLogin()}catch(err){showRetry(err.message||'Вход не удался.')}};loginDlg.addEventListener('close',()=>{const c=document.querySelector('[data-flux-connect]');if(c)c.disabled=false});loginDlg.addEventListener('click',e=>{const sub=e.target.closest('[data-flux-login-submit]');if(!sub)return;const inp=loginDlg.querySelector('[data-flux-login-password]'),val=inp.value;if(!val){loginMode('retry','Введите пароль для внешних приложений.');return}sub.disabled=true;runConnect(val).finally(()=>{sub.disabled=false})});loginDlg.addEventListener('keydown',e=>{if(e.key!=='Enter'||loginDlg.querySelector('[data-flux-login-retry]').hidden)return;e.preventDefault();const sub=loginDlg.querySelector('[data-flux-login-submit]');if(sub&&!sub.disabled)sub.click()});document.addEventListener('click',async e=>{const out=e.target.closest('[data-flux-mailru-disconnect]');if(out){out.disabled=true;const box=out.closest('dialog'),form=box.querySelector('form'),status=box.querySelector('[data-flux-mailru-status]');busy(box,true,'Выхожу из Mail.ru…');const confirmIt=window.onyxConfirm?window.onyxConfirm('Выйти из аккаунта Mail.ru? Сохранённый вход будет удалён.',{danger:true}):Promise.resolve(true);confirmIt.then(ok=>{if(!ok){out.disabled=false;busy(box,false);return}const body=new URLSearchParams({csrf:form.querySelector('[name=csrf]').value});fetch(form.getAttribute('action').replace('/openflux-profile','/openflux-mailru-disconnect'),{method:'POST',headers:{'X-Onyx-Async':'1'},body}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось выйти.');refreshMailruStatus()}).catch(err=>{paint(status,false,err.message)}).finally(()=>{out.disabled=false;busy(box,false)})});return}const conn=e.target.closest('[data-flux-connect]');if(conn){const box=conn.closest('dialog'),form=box.querySelector('form'),status=box.querySelector('[data-flux-mailru-status]');const email=form.querySelector('[name=mailru_email]').value.trim(),password=form.querySelector('[name=mailru_password]').value;if(!email||!password){paint(status,false,'Укажите почту Mail.ru и «пароль для внешних приложений».');return}conn.disabled=true;loginMode('busy','Входим в Mail.ru…');loginDlg.showModal();runConnect(password);return}const b=e.target.closest('[data-flux-docgen]');if(!b)return;b.disabled=true;const box=b.closest('dialog'),form=box.querySelector('form'),status=box.querySelector('[data-flux-docgen-status]'),url=form.querySelector('[name=url]'),name=form.querySelector('[name=name]'),provider=b.dataset.fluxDocgen;busy(box,true,provider==='mailru'?'Создаю документ в Облаке Mail.ru…':'Создаю документ на Яндекс Диске…');try{const body=new URLSearchParams({csrf:form.querySelector('[name=csrf]').value,name:name?name.value:'',provider:provider});if(provider==='mailru'){}else{const token=form.querySelector('[name=yandex_token]');body.append('token',token?token.value.trim():'')}const r=await fetch(form.getAttribute('action').replace('/openflux-profile','/openflux-document'),{method:'POST',headers:{'X-Onyx-Async':'1'},body});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось создать документ.');url.value=d.url;status.textContent='Готово: документ создан, публичная ссылка подставлена.';const token=form.querySelector('[name=yandex_token]');if(token)token.value='';if(provider==='mailru')refreshMailruStatus()}catch(err){status.textContent=err.message;if(provider==='mailru')refreshMailruStatus()}finally{b.disabled=false;busy(box,false)}})})();</script>"
+
 def openflux_profiles_ui(profiles, path, csrf):
     cards=[]
     for profile in profiles:
@@ -727,14 +1187,17 @@ def openflux_profiles_ui(profiles, path, csrf):
         platform='iOS' if ios else 'Android'
         transport=profile.get('transport','yandex')
         provider='Mail.ru Docs' if transport=='mailru' else 'Яндекс Документы'
+        doc_state=flux_health_note(profile)
+        until=flux_until_note(profile)
         key='' if ios else f'''<div class="flux-profile-secret"><span>Ключ</span><input value="{esc(profile.get('key',''))}" readonly type="password" aria-label="Ключ OpenFlux — {esc(profile.get('name',''))}"><button type="button" data-copy="{esc(profile.get('key',''))}">{icon('copy')}</button></div>'''
         controls=f'''<form method="post" action="{esc(path)}/openflux-profile">{hidden(csrf,operation='disable' if profile.get('enabled') else 'enable',id=pid)}<button>{'Остановить' if profile.get('enabled') else 'Запустить'}</button></form>'''
         if not ios:
             controls+=f'''<form method="post" action="{esc(path)}/openflux-profile" data-confirm="Создать новый ключ для этого Android-профиля?">{hidden(csrf,operation='rotate',id=pid)}<button>Новый ключ</button></form>'''
         controls+=f'''<form method="post" action="{esc(path)}/openflux-profile" data-confirm="Удалить профиль OpenFlux «{esc(profile.get('name',''))}» и остановить его службу?">{hidden(csrf,operation='delete',id=pid)}<button class="danger">Удалить</button></form>'''
-        cards.append(f'''<article class="flux-profile"><div class="flux-profile-head"><span class="flux-platform">{platform}</span><div><h3>{esc(profile.get('name','OpenFlux'))}</h3><small>{esc(provider)} · {'без AES · System VPN' if ios else 'AES-256-GCM'} · batched</small></div><span class="badge {'on' if active else ''}">{'Работает' if active else 'Остановлен'}</span></div><div class="flux-profile-secret"><span>{esc(provider)}</span><input value="{esc(profile.get('url',''))}" readonly aria-label="Документ OpenFlux — {esc(profile.get('name',''))}"><button type="button" data-copy="{esc(profile.get('url',''))}">{icon('copy')}</button></div>{key}<div class="actions">{controls}</div></article>''')
-    empty='<div class="flux-empty"><b>Профилей пока нет</b><span>Создайте отдельный доступ для iPhone, iPad или Android.</span></div>'
-    return f'''<section class="openflux-users"><div class="section-head"><div><span class="eyebrow">DOCUMENT TUNNEL</span><h2>Пользователи OpenFlux</h2><p>Яндекс или Mail.ru · каждому пользователю отдельный документ</p></div><button class="primary" type="button" data-open-dialog="newOpenFlux">＋ Добавить</button></div><div class="flux-profile-grid">{''.join(cards) if cards else empty}</div></section><dialog id="newOpenFlux" class="create-dialog"><div class="dialog-head"><div><h2>Новый профиль OpenFlux</h2><small>Используйте отдельный публичный документ</small></div><button type="button" data-close-dialog>×</button></div><form method="post" action="{esc(path)}/openflux-profile">{hidden(csrf,operation='create')}<label>Имя пользователя</label><input name="name" maxlength="80" required placeholder="Например, iPhone Анны"><label>Транспорт</label><div class="create-mode-grid flux-platform-picker"><label class="choice-card"><input type="radio" name="transport" value="yandex" checked><span><strong>Яндекс Документы</strong><small>Публичная ссылка disk.yandex.ru</small></span></label><label class="choice-card"><input type="radio" name="transport" value="mailru"><span><strong>Mail.ru Документы</strong><small>Публичная ссылка cloud.mail.ru</small></span></label></div><label>Ссылка на публичный документ</label><input name="url" type="url" maxlength="2048" required placeholder="https://disk.yandex.ru/i/… или https://cloud.mail.ru/public/…"><label>Устройство</label><div class="create-mode-grid flux-platform-picker"><label class="choice-card"><input type="radio" name="platform" value="ios" checked><span><strong>iOS</strong><small>iPhone и iPad · без AES-ключа</small></span></label><label class="choice-card"><input type="radio" name="platform" value="android"><span><strong>Android</strong><small>AES-256-GCM · ссылка и ключ</small></span></label></div><p class="note">Один документ нельзя одновременно использовать в нескольких активных профилях. В приложении выберите тот же транспорт, что и в панели.</p><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary">Создать профиль</button></div></form></dialog>'''
+        fallback=flux_fallback_html(path,csrf,profile)
+        cards.append(f'''<article class="flux-profile"><div class="flux-profile-head"><span class="flux-platform">{platform}</span><div><h3>{esc(profile.get('name','OpenFlux'))}</h3><small>{esc(provider)} · {'без AES · System VPN' if ios else 'AES-256-GCM'} · batched{doc_state}{until}</small></div><span class="badge {'on' if active else ''}">{'Работает' if active else 'Остановлен'}</span></div><div class="flux-profile-secret"><span>{esc(provider)}</span><input value="{esc(profile.get('url',''))}" readonly aria-label="Документ OpenFlux — {esc(profile.get('name',''))}"><button type="button" data-copy="{esc(profile.get('url',''))}">{icon('copy')}</button></div>{key}<div class="actions">{controls}</div>{fallback}</article>''')
+    empty='<div class="flux-empty"><b>Профилей пока нет</b><span>Заведите текстовый документ на Яндекс Диске или в Mail.ru, включите публичный доступ по ссылке и вставьте её в диалог ниже — или создайте документ кнопкой из диалога.</span></div>'
+    return f'''<section class="openflux-users"><div class="section-head"><div><span class="eyebrow">DOCUMENT TUNNEL</span><h2>Пользователи OpenFlux</h2><p>Яндекс или Mail.ru · каждому пользователю отдельный документ</p></div><button class="primary" type="button" data-open-dialog="newOpenFlux">＋ Добавить</button></div><div class="flux-profile-grid">{''.join(cards) if cards else empty}</div></section><dialog id="newOpenFlux" class="create-dialog"><div class="dialog-head"><div><h2>Новый профиль OpenFlux</h2><small>Используйте отдельный публичный документ</small></div><button type="button" data-close-dialog>×</button></div><form method="post" action="{esc(path)}/openflux-profile">{hidden(csrf,operation='create')}<div id="fluxCreateError" class="create-error" role="alert" hidden></div><label>Имя пользователя</label><input name="name" maxlength="80" required placeholder="Например, iPhone Анны"><label>Транспорт</label><div class="create-mode-grid flux-platform-picker"><label class="choice-card"><input type="radio" name="transport" value="yandex" checked><span><strong>Яндекс Документы</strong><small>Публичная ссылка disk.yandex.ru</small></span></label><label class="choice-card"><input type="radio" name="transport" value="mailru"><span><strong>Mail.ru Документы</strong><small>Публичная ссылка cloud.mail.ru</small></span></label></div><label>Ссылка на публичный документ</label><input name="url" type="url" maxlength="2048" required placeholder="https://disk.yandex.ru/i/… или https://cloud.mail.ru/public/…"><details class="note flux-docgen"><summary>Создать документ автоматически</summary><div data-flux-docgen-pane="yandex"><p>Панель сама создаст текстовый документ в папке OnyxPanel-OpenFlux и подставит публичную ссылку. Нужен OAuth-токен Диска: получите его на <a href="https://yandex.ru/dev/disk/poligon/" target="_blank" rel="noopener">полигоне для разработчиков</a> — панель запомнит его для следующих разов (хранится с правами 0600).</p><input name="yandex_token" type="password" autocomplete="new-password" placeholder="y0_AgAAAA…"><div class="actions"><button type="button" class="primary" data-flux-docgen="yandex">Создать и подставить ссылку</button></div></div><div data-flux-docgen-pane="mailru" hidden><p class="note" data-flux-mailru-status role="status">Статус подключения…</p><div data-flux-mailru-connected hidden><p class="note">Панель будет создавать документы в Облаке Mail.ru сама.</p><div class="actions"><button type="button" class="primary" data-flux-docgen="mailru">Создать документ</button><button type="button" class="danger" data-flux-mailru-disconnect>Выйти из аккаунта</button></div></div><div data-flux-mailru-login><p class="note">Панель будет создавать документы в Облаке сама. Mail.ru требует «пароль для внешних приложений» — обычный пароль почты сторонним приложениям не подходит: создайте его в настройках почты (Настройки → «Безопасность» → <a href="https://help.mail.ru/mail/security/protection/external" target="_blank" rel="noopener">Пароли для внешних приложений</a>) и введите здесь вместе с адресом почты. Пароль хранится с правами 0600.</p><input name="mailru_email" type="email" placeholder="имя@mail.ru" autocomplete="off"><input name="mailru_password" type="password" autocomplete="new-password" placeholder="Пароль для внешних приложений"><div class="actions"><button type="button" class="primary" data-flux-connect="mailru">Войти и подключить аккаунт</button></div></div></div></details><label>Дата автоотключения — необязательно</label><div class="onyx-cal" id="fluxExpiresCal"><input type="hidden" id="fluxExpires" name="expires" value="" autocomplete="off"><button type="button" class="onyx-cal-field" aria-label="Выбрать дату автоотключения"><svg class="onyx-cal-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="onyx-cal-value"></span><svg class="onyx-cal-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="onyx-cal-pop" role="dialog" aria-label="Календарь"><div class="onyx-cal-head"><button type="button" class="onyx-cal-nav" data-cal-prev aria-label="Предыдущий месяц">‹</button><div class="onyx-cal-title"></div><button type="button" class="onyx-cal-nav" data-cal-next aria-label="Следующий месяц">›</button></div><div class="onyx-cal-week"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div><div class="onyx-cal-grid"></div><div class="onyx-cal-foot"><button type="button" class="onyx-cal-clear" data-cal-clear>Без даты окончания</button></div></div></div><label>Устройство</label><div class="create-mode-grid flux-platform-picker"><label class="choice-card"><input type="radio" name="platform" value="ios" checked><span><strong>iOS</strong><small>iPhone и iPad · без AES-ключа</small></span></label><label class="choice-card"><input type="radio" name="platform" value="android"><span><strong>Android</strong><small>AES-256-GCM · ссылка и ключ</small></span></label></div><p class="note">Один документ нельзя одновременно использовать в нескольких активных профилях. В приложении выберите тот же транспорт, что и в панели. При сохранении панель проверит, что документ отвечает; просроченный профиль watchdog отключит сам.</p><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary">Создать профиль</button></div></form><div class="flux-busy" data-flux-busy hidden><svg class="onyx-ops-ring" viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><span data-flux-busy-text>Работаю…</span></div></dialog><dialog id="mailruLoginDialog" class="update-dialog flux-login-dialog" aria-labelledby="fluxLoginTitle"><div class="dialog-head"><div><small class="eyebrow">MAIL.RU</small><h2 id="fluxLoginTitle">Вход в аккаунт</h2></div><button type="button" data-close-dialog aria-label="Отменить вход">×</button></div><div class="update-dialog-body flux-login-body"><div class="flux-login-busy" data-flux-login-busy><svg class="onyx-ops-ring" viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><span data-flux-login-busy-text>Входим в Mail.ru…</span></div><div class="flux-login-retry" data-flux-login-retry hidden><p class="note flux-login-status" role="status" data-flux-login-status></p><div class="flux-login-row"><input data-flux-login-password type="password" placeholder="Пароль для внешних приложений" autocomplete="new-password"><button type="button" class="primary" data-flux-login-submit>Отправить</button></div></div></div></dialog>'''+FLUX_DOCGEN_JS
 
 
 def openflux_create_dialog(path, csrf):
@@ -742,12 +1205,25 @@ def openflux_create_dialog(path, csrf):
     return markup[markup.index('<dialog id="newOpenFlux"'):]
 
 
-def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_profiles=None, expires=None):
-    records=client_records(subs,profiles,traffic,domain,proxy_link,expires)
+def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_profiles=None, expires=None, node_summary=None, warp_ready=False, warp_ids=None, reality_link=None, limit_info=None, limit_data=None, sparks=None, invites=None, plans=(), trial=None):
+    records=client_records(subs,profiles,traffic,domain,proxy_link,expires,node_summary=node_summary,warp_ids=warp_ids if warp_ready else None)
+    # The WARP toggle appears only when WARP is configured on the routing tab;
+    # web/mtproto/awg traffic does not pass through Xray, so those clients
+    # have no toggle at all.
+    warp_ready=bool(warp_ready)
     # The primary WEB Proxy is the installation core, not a managed client: it
     # keeps working as before but is not listed, so counts match what the
     # operator actually manages.
     records=[r for r in records if r['id']!='primary']
+    trial=trial if isinstance(trial,dict) else {}
+    _plan_opts=[]
+    if trial.get("enabled"):
+        _plan_opts.append(f'<option value="trial" data-days="{int(trial.get("days",3))}" data-devices="{int(trial.get("max_devices",1))}" data-limit="0" data-vless="1" data-hysteria="0" data-tuic="0">✦ Триал — {int(trial.get("days",3))} дн.</option>')
+    for _p in (plans or []):
+        if not isinstance(_p,dict) or not _p.get("enabled",True): continue
+        _protos=_p.get("protocols") or ["vless"]
+        _plan_opts.append(f'<option value="{esc(_p.get("id",""))}" data-days="{int(_p.get("days",30))}" data-devices="{int(_p.get("max_devices",0))}" data-limit="{int(_p.get("limit_gb",0))}" data-vless="{1 if "vless" in _protos else 0}" data-hysteria="{1 if "hysteria" in _protos else 0}" data-tuic="{1 if "tuic" in _protos else 0}">{esc(_p.get("name",""))} — {int(_p.get("days",30))} дн.</option>')
+    plan_options=''.join(_plan_opts)
     rows=[]; dialogs=[]
     for r in records:
         uid=r['id']; sid=esc(uid); name=esc(r['name']); t=r['totals']; enabled=r['enabled']; total=t['up']+t['down']
@@ -761,7 +1237,13 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
                 'port':r['source'].get('backend_port',443) if proto in ('hysteria','mtproto') else 443}))
         disabled='disabled title="Основное подключение установки"' if primary else ''
         state=f'<button class="access-switch" type="button" role="switch" aria-label="Доступ — {name}" aria-checked="{str(bool(enabled)).lower()}" data-state="{sid}" data-kind="{kind}" {disabled}></button>'
-        action=f'<button class="icon-btn" {qr_attributes(qr,r["name"],r["link"],r["protocols"],kind,user_port=r["source"].get("backend_port"))} aria-label="QR — {name}" title="QR">{icon("qr")}</button><button class="icon-btn" data-copy="{esc(r["link"])}" aria-label="Скопировать — {name}" title="Копировать">{icon("copy")}</button><button class="icon-btn" data-open-client="{sid}" aria-label="Настройки — {name}" title="Настройки">{icon("edit")}</button>'
+        warp_btn=''
+        if warp_ready and set(r['protocols']) & {'vless','hysteria'} and r.get('warp') is not None:
+            on=' on' if r.get('warp') else ''
+            warp_btn=(f'<button type="button" class="icon-btn warp-btn{on}" data-warp="{sid}"'
+                      f' aria-pressed="{str(bool(r.get("warp"))).lower()}" aria-label="Выход через WARP — {name}"'
+                      f' title="Выход через WARP">{icon("warp")}</button>')
+        action=warp_btn+f'<button class="icon-btn" {qr_attributes(qr,r["name"],r["link"],r["protocols"],kind,user_port=r["source"].get("backend_port"))} aria-label="QR — {name}" title="QR">{icon("qr")}</button><button class="icon-btn" data-copy="{esc(r["link"])}" aria-label="Скопировать — {name}" title="Копировать">{icon("copy")}</button><button class="icon-btn" data-open-client="{sid}" aria-label="Настройки — {name}" title="Настройки">{icon("edit")}</button>'
         if not primary:
             route='subscription-action' if sub else 'delete-user'
             action+=f'<form method="post" action="{esc(path)}/{route}" data-confirm="Удалить клиента {name} и его ключи?">{hidden(csrf,id=uid,**({"operation":"delete"} if sub else {}))}<button class="icon-btn danger" aria-label="Удалить — {name}" title="Удалить">{icon("trash")}</button></form>'
@@ -769,15 +1251,25 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
         device_hint='HWID' if r['limit'] else 'Без привязки' if sub else 'Отдельная ссылка'
         share=t['up']/total*100 if total else 0
         split=f'<div class="traffic-split" title="Доля отправки и получения, не лимит"><i class="up" style="width:{share:.2f}%"></i><i class="down" style="width:{100-share if total else 0:.2f}%"></i></div>'
-        rows.append(f'''<tr data-client data-id="{sid}" data-kind="{kind}" data-protocols="{esc(' '.join(r['protocols']))}" data-name="{name}" data-enabled="{int(bool(enabled))}" data-active="{int(bool(t['active']))}" data-created="{int(r['created'])}" data-traffic="{int(total)}" data-link="{esc(r['link'])}"><td class="select-col"><input type="checkbox" data-select-client aria-label="Выбрать — {name}" {'disabled' if primary else ''}></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial" aria-hidden="true">{esc(r['name'].strip()[:1].upper() or '•')}</span><div><strong>{name}</strong><small>{'Подписка' if sub else 'Основное подключение' if primary else 'Отдельная ссылка'}</small>{badge(t['active'],enabled)}{exp_pill}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(t['active'],enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(r['protocols'])}</td><td class="traffic-cell" data-label="Трафик"><b>{size(total)}</b><small>↑ {size(t['up'])} · ↓ {size(t['down'])}</small>{split}</td><td class="hwid-cell" data-label="Устройства">{used}<small>{device_hint}</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
-        detail=subscription_card(r['source'],path,domain,csrf,traffic) if sub else direct_card(r['source'],path,csrf,traffic,proxy_link)
+        rows.append(f'''<tr data-client data-id="{sid}" data-kind="{kind}" data-protocols="{esc(' '.join(r['protocols']))}" data-name="{name}" data-enabled="{int(bool(enabled))}" data-active="{int(bool(t['active']))}" data-created="{int(r['created'])}" data-traffic="{int(total)}" data-link="{esc(r['link'])}"><td class="select-col"><input type="checkbox" data-select-client aria-label="Выбрать — {name}" {'disabled' if primary else ''}></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial" aria-hidden="true">{esc(r['name'].strip()[:1].upper() or '•')}</span><div><strong>{name}</strong><small>{'Подписка' if sub else 'Основное подключение' if primary else 'Отдельная ссылка'}</small>{badge(t['active'],enabled)}{exp_pill}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(t['active'],enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(r['protocols'])}{node_pills(r)}</td><td class="traffic-cell" data-label="Трафик"><b>{size(total)}</b><small>↑ {size(t['up'])} · ↓ {size(t['down'])}</small>{split}<div class="limit-wrap">{(limit_info or {}).get(uid) or ''}{spark_svg((sparks or {}).get(uid, []))}</div></td><td class="hwid-cell" data-label="Устройства">{used}<small>{device_hint}</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
+        detail=subscription_card(r['source'],path,domain,csrf,traffic) if sub else direct_card(r['source'],path,csrf,traffic,proxy_link,reality_link=(reality_link(r['source']['secret'],name+' · Reality') if (reality_link and r['source'].get('protocol')=='vless') else None))
         detail=detail.replace('<details>','<details open>')
         if not sub and not primary:
             rename=f'<form method="post" action="{esc(path)}/client-action" data-client-action>{hidden(csrf,id=uid,kind=kind,operation="rename")}<label for="rename-{sid}">Имя клиента</label><input id="rename-{sid}" name="name" value="{name}" required maxlength="80"><button style="margin:12px 0" class="primary">Сохранить имя</button><p data-form-status role="status"></p></form>'
             detail=detail.replace('<details open>','<details open>'+rename,1)
         if not primary:
+            used_month,limit_gb=(limit_data or {}).get(uid,(0,0))
+            check_label='Проверить доступ'
+            check_uid=uid
+            if sub:
+                vless_profile=next((p for p in r['source'].get('profile_ids',[]) if any(u.get('id')==str(p) and u.get('protocol')=='vless' for u in profiles)),None)
+                if vless_profile: check_uid=str(vless_profile)
+                else: check_uid=''
+            check_html=(f'<div class="actions"><button type="button" class="btn" data-client-check="{esc(check_uid)}" {"" if check_uid else "hidden"}>{extra_icon("activity")} {check_label}</button><span class="check-status" data-check-status="{esc(uid)}" role="status"></span></div>' if not sub or check_uid else '')
+            limit_block=f'''<form method="post" action="{esc(path)}/client-action" data-client-action style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">{hidden(csrf,id=uid,kind=kind,operation="limit")}<label for="limit-{sid}">Месячный лимит трафика, ГБ · 0 — без лимита</label><div class="limit-field"><input id="limit-{sid}" name="limit_gb" type="number" min="0" max="1000000" value="{int(limit_gb)}"><button class="primary">Сохранить лимит</button></div><small>Когда клиент исчерпает лимит, доступ отключится сам и вернётся в начале нового месяца или после повышения лимита. О предупреждении и отключении придёт уведомление.</small><p data-form-status role="status"></p></form>'''
+            detail=detail+limit_block+check_html
             expiry_value=time.strftime("%Y-%m-%d",time.localtime(r["expires"])) if r.get("expires") else ""
-            expiry=f'<form method="post" action="{esc(path)}/client-action" data-client-action style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">{hidden(csrf,id=uid,kind=kind,operation="expiry")}<label for="expiry-{sid}">Дата автоотключения</label><div class="onyx-cal" id="expiry-{sid}"><input type="hidden" name="expires" value="{expiry_value}" autocomplete="off"><button type="button" class="onyx-cal-field" aria-label="Выбрать дату автоотключения"><svg class="onyx-cal-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="onyx-cal-value"></span><svg class="onyx-cal-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="onyx-cal-pop" role="dialog" aria-label="Календарь"><div class="onyx-cal-head"><button type="button" class="onyx-cal-nav" data-cal-prev aria-label="Предыдущий месяц">‹</button><div class="onyx-cal-title"></div><button type="button" class="onyx-cal-nav" data-cal-next aria-label="Следующий месяц">›</button></div><div class="onyx-cal-week"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div><div class="onyx-cal-grid"></div><div class="onyx-cal-foot"><button type="button" class="onyx-cal-clear" data-cal-clear>Без даты окончания</button></div></div></div><button style="margin:12px 0" class="primary">Сохранить срок</button><p data-form-status role="status"></p></form>'
+            expiry=f'<form method="post" action="{esc(path)}/client-action" data-client-action style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">{hidden(csrf,id=uid,kind=kind,operation="expiry")}<label for="expiry-{sid}">Дата автоотключения</label><div class="expiry-row"><div class="onyx-cal" id="expiry-{sid}"><input type="hidden" name="expires" value="{expiry_value}" autocomplete="off"><button type="button" class="onyx-cal-field" aria-label="Выбрать дату автоотключения"><svg class="onyx-cal-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="onyx-cal-value"></span><svg class="onyx-cal-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="onyx-cal-pop" role="dialog" aria-label="Календарь"><div class="onyx-cal-head"><button type="button" class="onyx-cal-nav" data-cal-prev aria-label="Предыдущий месяц">‹</button><div class="onyx-cal-title"></div><button type="button" class="onyx-cal-nav" data-cal-next aria-label="Следующий месяц">›</button></div><div class="onyx-cal-week"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div><div class="onyx-cal-grid"></div><div class="onyx-cal-foot"><button type="button" class="onyx-cal-clear" data-cal-clear>Без даты окончания</button></div></div></div><button class="primary">Сохранить срок</button></div><p data-form-status role="status"></p></form>'
             detail=detail+expiry
         dialogs.append(f'<dialog class="client-detail" id="client-{sid}"><div class="dialog-head"><h2>Профиль клиента</h2><button data-close-dialog aria-label="Закрыть профиль">×</button></div>{detail}</dialog>')
     flux_profiles=openflux_profiles or []
@@ -792,18 +1284,51 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
         action=f'''<button class="icon-btn" {qr_attributes(qr,profile.get('name','OpenFlux'),document_url,['openflux'],'direct')} aria-label="QR ссылки — {name}" title="QR ссылки на документ">{icon('qr')}</button><button class="icon-btn" data-copy="{esc(document_url)}" aria-label="Скопировать ссылку — {name}" title="Копировать ссылку на документ">{icon('copy')}</button><form method="post" action="{esc(path)}/openflux-profile" data-confirm="Удалить профиль OpenFlux «{name}» и остановить его службу?">{hidden(csrf,operation='delete',id=pid)}<button class="icon-btn danger" aria-label="Удалить — {name}" title="Удалить">{icon('trash')}</button></form>'''
         rows.append(f'''<tr data-client data-id="{sid}" data-kind="openflux" data-protocols="openflux" data-name="{name}" data-enabled="{int(enabled)}" data-active="{int(active)}" data-created="{created}" data-traffic="0" data-link="{esc(document_url)}"><td class="select-col"><input type="checkbox" data-select-client aria-label="OpenFlux управляется отдельно" disabled></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial" aria-hidden="true">OF</span><div><strong>{name}</strong><small>Отдельное подключение · {esc(platform)}</small>{badge(active,enabled)}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(active,enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(['openflux'])}</td><td class="traffic-cell" data-label="Трафик"><b>—</b><small>Счётчики OpenFlux недоступны</small></td><td class="hwid-cell" data-label="Устройства">{esc(platform)}<small>{esc(provider)} Docs</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
     summary_records=records+[{'kind':'direct','totals':{'active':bool(p.get('active',False)),'up':0,'down':0}} for p in flux_profiles]
-    controls='''<div class="clients-toolbar"><div class="search-field">'''+icon('search')+'''<input type="search" id="accountSearch" aria-label="Поиск клиентов" placeholder="Поиск клиентов"></div><select id="clientFilter" aria-label="Фильтр клиентов"><option value="all">Все клиенты</option><option value="subscription">Подписки</option><option value="direct">Отдельные подключения</option><option value="openflux">OpenFlux</option><option value="active">Передают данные</option><option value="enabled">Доступ включён</option><option value="disabled">Отключены</option></select><select id="protocolFilter" aria-label="Фильтр протоколов"><option value="all">Все протоколы</option><option value="web">WEB Proxy</option><option value="mtproto">MTProto</option><option value="vless">VLESS XHTTP</option><option value="hysteria">Hysteria2</option><option value="awg20">AWG 2.0</option><option value="awg31">AWG 3.1</option><option value="openflux">OpenFlux</option></select><select id="clientSort" aria-label="Сортировка клиентов"><option value="default">По порядку</option><option value="name">По имени</option><option value="traffic">По трафику</option><option value="active">По активности</option><option value="newest">Сначала новые</option></select></div>'''
-    content=f'''<div class="page-head"><div><h1>Клиенты</h1><p>Доступ, подписки и OpenFlux</p></div><div class="actions"><button class="primary" id="newAccount">＋ Добавить клиента</button></div></div>{client_summary(summary_records)}<p id="clientNotice" class="note" role="status" hidden></p><section class="clients-panel">{controls}<div id="bulkBar" class="bulk-bar" hidden><strong id="selectedCount"></strong><button data-bulk="1">Включить</button><button data-bulk="0">Отключить</button><button id="copySelected">Копировать ссылки</button><button id="clearSelected">Снять выбор</button></div><div class="table-scroll"><table class="clients-table"><thead><tr><th class="select-col"><input type="checkbox" id="selectAllClients" aria-label="Выбрать видимых клиентов"></th><th>Клиент</th><th>Доступ</th><th class="activity-col">Активность · 90 с</th><th>Протоколы</th><th>Трафик</th><th class="hwid-cell">Устройства</th><th>Действия</th></tr></thead><tbody id="clientRows">{''.join(rows)}</tbody></table><p id="noAccounts" class="empty" hidden>Ничего не найдено. Измените поиск или фильтр.</p><div id="loadMoreWrap" class="load-more" hidden><button type="button" id="loadMoreClients">{icon('chevron-down')}<span>Загрузить ещё</span></button></div></div><div class="list-footer"><span id="visibleCount"></span><span>↑ Отправка · ↓ Получение · OpenFlux показывает состояние службы</span></div></section><details class="note client-help"><summary>Что означают доступ, активность и HWID?</summary><p>Переключатель управляет разрешением доступа, а активность означает передачу данных за последние 90 секунд — не точное присутствие онлайн. Для OpenFlux показывается состояние отдельной службы профиля.</p><p>Лимит HWID ограничивает регистрацию идентификаторов клиента. HWID и ключ можно скопировать: это не аппаратная защита. Квоты гигабайтов и срок действия здесь не настроены. Основное подключение установки защищено от отключения и удаления.</p><p>Изменение доступа может кратковременно перезапустить службы. При массовом действии клиенты обрабатываются последовательно; OpenFlux управляется отдельно своим переключателем.</p></details>'''
+    controls='''<div class="clients-toolbar"><div class="search-field">'''+icon('search')+'''<input type="search" id="accountSearch" aria-label="Поиск клиентов" placeholder="Поиск клиентов"></div><select id="clientFilter" aria-label="Фильтр клиентов"><option value="all">Все клиенты</option><option value="subscription">Подписки</option><option value="direct">Отдельные подключения</option><option value="openflux">OpenFlux</option><option value="active">Передают данные</option><option value="enabled">Доступ включён</option><option value="disabled">Отключены</option></select><select id="protocolFilter" aria-label="Фильтр протоколов"><option value="all">Все протоколы</option><option value="web">WEB Proxy</option><option value="mtproto">MTProto</option><option value="vless">VLESS XHTTP</option><option value="hysteria">Hysteria2</option><option value="tuic">TUIC 5</option><option value="awg20">AWG 2.0</option><option value="awg31">AWG 3.1</option><option value="openflux">OpenFlux</option></select><select id="clientSort" aria-label="Сортировка клиентов"><option value="default">По порядку</option><option value="name">По имени</option><option value="traffic">По трафику</option><option value="active">По активности</option><option value="newest">Сначала новые</option></select></div>'''
+    invite_cards=[]
+    for invite in (invites or []):
+        iid=esc(invite.get('id',''))
+        itoken=esc(invite.get('token',''))
+        iname=esc(invite.get('name','Гость'))
+        iuses=str(int(invite.get('uses',0)))+' / '+str(invite.get('max_uses',1) or '∞')
+        iuntil=time.strftime('%d.%m.%Y',time.localtime(int(invite.get('expires_at',0)))) if invite.get('expires_at') else 'бессрочно'
+        ion=' on' if invite.get('enabled',True) else ''
+        ilink='https://'+domain+'/onyx-invite/'+itoken
+        invite_cards.append(f'''<div class="invite-card"><div><b>{iname}</b><small>{iuses} активаций · до {iuntil} · {esc(' + '.join({'vless':'VLESS','hysteria':'Hysteria2','tuic':'TUIC 5'}.get(p,p) for p in invite.get('protocols',[])))}</small><small class="muted">{ilink}</small></div><div class="actions"><button type="button" class="icon-btn" {qr_attributes(path+'/invite-qr?'+urlencode({'id':invite.get('id','')}),invite.get('name','Гость'),'https://'+domain+'/onyx-invite/'+invite.get('token',''),invite.get('protocols') or ['vless'],'subscription')} aria-label="QR приглашения" title="QR">{icon('qr')}</button><button type="button" class="icon-btn" data-copy="{esc(ilink)}" aria-label="Скопировать приглашение" title="Копировать">{icon('copy')}</button><form method="post" action="{esc(path)}/invite-action" data-confirm="Удалить приглашение?">{hidden(csrf,operation='delete',id=iid)}<button class="icon-btn danger" aria-label="Удалить приглашение" title="Удалить">{icon('trash')}</button></form></div><span class="badge{ion}" title="{'Активно' if invite.get('enabled',True) else 'Отключено'}"></span></div>''')
+    content=f'''<div class="page-head"><div><h1>Клиенты</h1><p>Доступ, подписки и OpenFlux</p></div><div class="actions"><button class="primary" id="newAccount">＋ Добавить клиента</button></div></div>{client_summary(summary_records)}<p id="clientNotice" class="note" role="status" hidden></p><section class="clients-panel">{controls}<div id="bulkBar" class="bulk-bar" hidden><strong id="selectedCount"></strong><button data-bulk="1">Включить</button><button data-bulk="0">Отключить</button><button id="copySelected">Копировать ссылки</button><button id="clearSelected">Снять выбор</button><button id="deleteSelected" class="danger">Удалить</button></div><div class="table-scroll"><table class="clients-table"><thead><tr><th class="select-col"><input type="checkbox" id="selectAllClients" aria-label="Выбрать видимых клиентов"></th><th>Клиент</th><th>Доступ</th><th class="activity-col">Активность · 90 с</th><th>Протоколы</th><th>Трафик</th><th class="hwid-cell">Устройства</th><th>Действия</th></tr></thead><tbody id="clientRows">{''.join(rows)}</tbody></table><p id="noAccounts" class="empty" hidden>Ничего не найдено. Измените поиск или фильтр.</p><div id="loadMoreWrap" class="load-more" hidden><button type="button" id="loadMoreClients">{icon('chevron-down')}<span>Загрузить ещё</span></button></div></div><div class="list-footer"><span id="visibleCount"></span><span>↑ Отправка · ↓ Получение · OpenFlux показывает состояние службы</span></div></section><section class="card"><div class="card-title"><div><h2>Приглашения</h2><p>Одноразовые ссылки: гость сам активирует себе доступ</p></div><button class="primary" type="button" id="newInvite">＋ Приглашение</button></div><div class="invite-list">{invite_cards if invites else '<p class="empty">Приглашений пока нет. Создайте ссылку — гость получит подписку сам, без ручного копирования ключей.</p>'}</div></section><details class="note client-help"><summary>Что означают доступ, активность и HWID?</summary><p>Переключатель управляет разрешением доступа, а активность означает передачу данных за последние 90 секунд — не точное присутствие онлайн. Для OpenFlux показывается состояние отдельной службы профиля.</p><p>Лимит HWID ограничивает регистрацию идентификаторов клиента. HWID и ключ можно скопировать: это не аппаратная защита. Месячные квоты гигабайтов и срок действия настраиваются в профиле клиента. Основное подключение установки защищено от отключения и удаления.</p><p>Изменение доступа может кратковременно перезапустить службы. При массовом действии клиенты обрабатываются последовательно; OpenFlux управляется отдельно своим переключателем.</p></details>'''
     creation=f'''<dialog id="createAccount" class="create-dialog"><div class="dialog-head"><div><h2>Новый клиент</h2><small>Настройте доступ за два понятных шага</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="createClientForm" method="post" action="{esc(path)}/create-account">{hidden(csrf)}<input type="hidden" id="accountKind" name="kind" value="subscription"><label for="accountName">Имя клиента</label><input id="accountName" name="name" placeholder="Например, Александр или Телефон" maxlength="80" required autocomplete="off"><section class="create-step"><div class="create-step-title"><i>1</i><span>Как клиент будет получать доступ?</span></div><div class="create-mode-grid"><label class="choice-card"><input type="radio" name="access_mode" value="subscription" checked><span><strong>Одна подписка</strong><small>Одна ссылка для проверенных VLESS и Hysteria2.</small></span></label><label class="choice-card"><input type="radio" name="access_mode" value="direct"><span><strong>Отдельное подключение</strong><small>WEB Proxy, MTProto или один выбранный VPN-протокол.</small></span></label></div></section><section class="create-step" id="subscriptionFields"><div class="create-step-title"><i>2</i><span>Выберите протоколы подписки</span></div><div class="protocol-picker"><label class="choice-card"><input type="checkbox" name="vless" value="1" checked><span><strong>VLESS XHTTP</strong><small>TLS через домен · TCP 443</small><em>УНИВЕРСАЛЬНЫЙ</em></span></label><label class="choice-card"><input type="checkbox" name="hysteria" value="1" checked><span><strong>Hysteria2</strong><small>Быстрый QUIC · UDP 8443</small><em>ДЛЯ НЕСТАБИЛЬНЫХ СЕТЕЙ</em></span></label></div><div class="device-row"><p class="note">Лимит HWID относится к подписке. Значение 0 создаёт общую подписку без привязки.</p><div><label for="deviceLimit">Устройств</label><input id="deviceLimit" name="max_devices" type="number" min="0" max="20" value="2" inputmode="numeric"></div></div></section><section class="create-step" id="directFields" hidden><div class="create-step-title"><i>2</i><span>Выберите один протокол</span></div><div class="protocol-picker"><label class="choice-card"><input type="radio" name="direct_protocol" value="web" checked><span><strong>WEB Proxy</strong><small>Готовая ссылка для Telegram через HTTPS</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="mtproto"><span><strong>MTProto</strong><small>Прямое подключение Telegram · отдельный TCP-порт</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="vless"><span><strong>VLESS XHTTP</strong><small>TLS через домен · TCP 443</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="hysteria"><span><strong>Hysteria2</strong><small>QUIC · UDP 8443</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg20"><span><strong>AWG 2.0</strong><small>Совместимость с роутерами и прежними клиентами · уникальный UDP-порт</small><em>ОТДЕЛЬНЫЙ ОТПЕЧАТОК</em></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg31"><span><strong>AWG 3.1</strong><small>Защита заголовков и дополнительное заполнение · безопасный MTU</small><em>РЕКОМЕНДУЕТСЯ</em></span></label></div><p class="note">Каждый AWG-клиент получает собственные ключи, порт, подсеть и параметры маскировки. Если у провайдера VPS есть облачный firewall, разрешите показанный UDP-порт.</p></section><div class="create-summary"><span>Будет создано</span><b id="createSummary">Подписка · VLESS XHTTP + Hysteria2 · 2 устройства</b></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="createClientSubmit">Создать клиента</button></div></form></dialog>'''
     creation=creation.replace('type="radio" name="hysteria"','type="radio" name="direct_protocol" value="hysteria"')
     creation=creation.replace('<label class="choice-card"><input type="checkbox" name="web" value="1"><span><strong>WEB Proxy</strong><small>Telegram через HTTPS · отдельный секрет устройству</small><em>С ЛИМИТОМ HWID</em></span></label>','')
     creation=creation.replace('Одна ссылка для VPN и WEB Proxy с общим лимитом устройств.','Одна ссылка для VLESS и Hysteria2 с общим лимитом устройств.')
     creation=creation.replace('Лимит работает по X-HWID и распространяется на все выбранные протоколы, включая WEB Proxy.','Лимит работает по X-HWID для VLESS и Hysteria2.')
     creation=creation.replace('Для ограничения WEB Proxy выберите «Одна подписка» и отметьте WEB Proxy. ','')
-    creation=f'''<dialog id="createAccount" class="create-dialog"><div class="dialog-head"><div><h2>Новый доступ</h2><small>Выберите, что получит клиент</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="createClientForm" method="post" action="{esc(path)}/create-account">{hidden(csrf)}<input type="hidden" id="accountKind" name="kind" value="subscription"><div class="access-kind-grid"><label class="choice-card"><input type="radio" name="access_mode" value="subscription" checked><span><strong>Подписка</strong><small>Несколько протоколов в одной ссылке</small><span class="compatible-protocols"><i>VLESS</i><i>Hysteria2</i></span></span></label><label class="choice-card"><input type="radio" name="access_mode" value="direct"><span><strong>Отдельное подключение</strong><small>Один протокол или сервис для конкретного устройства</small><span class="compatible-protocols"><i>VPN</i><i>Telegram</i><i>OpenFlux</i></span></span></label></div><section class="create-step"><label for="accountName">Имя клиента или устройства</label><input id="accountName" name="name" placeholder="Например, Анна или Apple TV" maxlength="80" required autocomplete="off"></section><section class="create-step" id="subscriptionFields"><div class="create-step-title"><i>1</i><span>Протоколы подписки</span></div><div class="protocol-picker"><label class="choice-card"><input type="checkbox" name="vless" value="1" checked><span><strong>VLESS XHTTP</strong><small>Универсальное TLS-подключение</small></span></label><label class="choice-card"><input type="checkbox" name="hysteria" value="1" checked><span><strong>Hysteria2</strong><small>Быстрое подключение через QUIC</small></span></label></div><div class="device-row"><p class="note">Одна ссылка для выбранных протоколов и всех подключённых нод.</p><div><label for="deviceLimit">Устройств · 0 без лимита</label><input id="deviceLimit" name="max_devices" type="number" min="0" max="20" value="2" inputmode="numeric"></div></div></section><section class="create-step" id="directFields" hidden><div class="create-step-title"><i>1</i><span>Выберите одно подключение</span></div><div class="protocol-picker"><label class="choice-card"><input type="radio" name="direct_protocol" value="vless" checked><span><strong>VLESS XHTTP</strong><small>Универсальное TLS-подключение</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="hysteria"><span><strong>Hysteria2</strong><small>Быстрое подключение через QUIC</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg20"><span><strong>AWG 2.0</strong><small>Совместимость с прежними клиентами</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg31"><span><strong>AWG 3.1</strong><small>Новая маскировка и собственные параметры</small></span></label></div><div class="quick-access-title">Сервисы</div><div class="quick-access-grid"><button type="button" class="quick-access" data-quick-protocol="mtproto"><span class="quick-radio" aria-hidden="true"></span><span><b>MTProto</b><small>Прямое подключение для Telegram</small></span></button><button type="button" class="quick-access" data-quick-protocol="web"><span class="quick-radio" aria-hidden="true"></span><span><b>Web Proxy</b><small>Ссылка Telegram через HTTPS</small></span></button><button type="button" class="quick-access" data-open-openflux><span class="quick-radio" aria-hidden="true"></span><span><b>OpenFlux</b><small>Отдельный профиль для iOS или Android</small></span></button></div><p class="quick-access-note">Выберите VPN-протокол или один отдельный сервис.</p></section><section class="create-step quick-fields" id="quickFields" hidden><b id="quickTitle"></b><p id="quickDescription"></p></section><section class="create-step" id="expiryField"><div class="create-step-title"><i>2</i><span>Дата отключения — необязательно</span></div><div class="onyx-cal" id="accountExpiresCal"><input type="hidden" id="accountExpires" name="expires" value="" autocomplete="off"><button type="button" class="onyx-cal-field" aria-label="Выбрать дату отключения"><svg class="onyx-cal-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="onyx-cal-value"></span><svg class="onyx-cal-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="onyx-cal-pop" role="dialog" aria-label="Календарь"><div class="onyx-cal-head"><button type="button" class="onyx-cal-nav" data-cal-prev aria-label="Предыдущий месяц">‹</button><div class="onyx-cal-title"></div><button type="button" class="onyx-cal-nav" data-cal-next aria-label="Следующий месяц">›</button></div><div class="onyx-cal-week"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div><div class="onyx-cal-grid"></div><div class="onyx-cal-foot"><button type="button" class="onyx-cal-clear" data-cal-clear>Без даты окончания</button></div></div></div><p class="note">Клиент работает до конца выбранного дня, затем доступ отключится автоматически. Кнопка «Без даты окончания» убирает ограничение по сроку.</p></section><div class="create-summary"><span>Будет создано</span><b id="createSummary">Подписка · VLESS XHTTP + Hysteria2 · 2 устройства</b></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="createClientSubmit">Создать доступ</button></div></form></dialog>'''
+    creation=f'''<dialog id="createAccount" class="create-dialog"><div class="dialog-head"><div><h2>Новый доступ</h2><small>Выберите, что получит клиент</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="createClientForm" method="post" action="{esc(path)}/create-account">{hidden(csrf)}<input type="hidden" id="accountKind" name="kind" value="subscription"><div class="access-kind-grid"><label class="choice-card"><input type="radio" name="access_mode" value="subscription" checked><span><strong>Подписка</strong><small>Несколько протоколов в одной ссылке</small><span class="compatible-protocols"><i>VLESS</i><i>Hysteria2</i><i>TUIC 5</i></span></span></label><label class="choice-card"><input type="radio" name="access_mode" value="direct"><span><strong>Отдельное подключение</strong><small>Один протокол или сервис для конкретного устройства</small><span class="compatible-protocols"><i>VPN</i><i>Telegram</i><i>OpenFlux</i></span></span></label></div><section class="create-step"><label for="accountName">Имя клиента или устройства</label><input id="accountName" name="name" placeholder="Например, Анна или Apple TV" maxlength="80" required autocomplete="off"></section><section class="create-step" id="subscriptionFields"><div class="create-step-title"><i>1</i><span>Протоколы подписки</span></div><div class="protocol-picker"><label class="choice-card"><input type="checkbox" name="vless" value="1" checked><span><strong>VLESS XHTTP</strong><small>Универсальное TLS-подключение</small></span></label><label class="choice-card"><input type="checkbox" name="hysteria" value="1" checked><span><strong>Hysteria2</strong><small>Быстрое подключение через QUIC</small></span></label><label class="choice-card"><input type="checkbox" name="tuic" value="1"><span><strong>TUIC 5</strong><small>QUIC + BBR · UDP 9443</small></span></label></div><div><label for="accountPlan">Тариф</label><select id="accountPlan" name="plan_id"><option value="">Без тарифа</option>{plan_options}</select></div><div class="device-row"><p class="note">Одна ссылка для выбранных протоколов и всех подключённых нод. Устройств · 0 без лимита</p><div><input id="deviceLimit" name="max_devices" type="number" min="0" max="20" value="2" inputmode="numeric" aria-label="Устройств"></div></div><div class="device-row"><p class="note">Месячная квота трафика на подписку: при исчерпании доступ отключится сам. Лимит, ГБ/мес · 0 без лимита</p><div><input id="createLimitGb" name="limit_gb" type="number" min="0" max="1000000" value="0" inputmode="numeric" aria-label="Лимит, ГБ в месяц"></div></div></section><section class="create-step" id="directFields" hidden><div class="create-step-title"><i>1</i><span>Выберите одно подключение</span></div><div class="protocol-picker"><label class="choice-card"><input type="radio" name="direct_protocol" value="vless" checked><span><strong>VLESS XHTTP</strong><small>Универсальное TLS-подключение</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="hysteria"><span><strong>Hysteria2</strong><small>Быстрое подключение через QUIC</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="tuic"><span><strong>TUIC 5</strong><small>QUIC + BBR · UDP 9443</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg20"><span><strong>AWG 2.0</strong><small>Совместимость с прежними клиентами</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg31"><span><strong>AWG 3.1</strong><small>Новая маскировка и собственные параметры</small></span></label></div><div class="quick-access-title">Сервисы</div><div class="quick-access-grid"><button type="button" class="quick-access" data-quick-protocol="mtproto"><span class="quick-radio" aria-hidden="true"></span><span><b>MTProto</b><small>Прямое подключение для Telegram</small></span></button><button type="button" class="quick-access" data-quick-protocol="web"><span class="quick-radio" aria-hidden="true"></span><span><b>Web Proxy</b><small>Ссылка Telegram через HTTPS</small></span></button><button type="button" class="quick-access" data-open-openflux><span class="quick-radio" aria-hidden="true"></span><span><b>OpenFlux</b><small>Отдельный профиль для iOS или Android</small></span></button></div><p class="quick-access-note">Выберите VPN-протокол или один отдельный сервис.</p></section><section class="create-step quick-fields" id="quickFields" hidden><b id="quickTitle"></b><p id="quickDescription"></p></section><section class="create-step" id="expiryField"><div class="create-step-title"><i>2</i><span>Дата отключения — необязательно</span></div><div class="onyx-cal" id="accountExpiresCal"><input type="hidden" id="accountExpires" name="expires" value="" autocomplete="off"><button type="button" class="onyx-cal-field" aria-label="Выбрать дату отключения"><svg class="onyx-cal-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="onyx-cal-value"></span><svg class="onyx-cal-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="onyx-cal-pop" role="dialog" aria-label="Календарь"><div class="onyx-cal-head"><button type="button" class="onyx-cal-nav" data-cal-prev aria-label="Предыдущий месяц">‹</button><div class="onyx-cal-title"></div><button type="button" class="onyx-cal-nav" data-cal-next aria-label="Следующий месяц">›</button></div><div class="onyx-cal-week"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div><div class="onyx-cal-grid"></div><div class="onyx-cal-foot"><button type="button" class="onyx-cal-clear" data-cal-clear>Без даты окончания</button></div></div></div><p class="note">Клиент работает до конца выбранного дня, затем доступ отключится автоматически. Кнопка «Без даты окончания» убирает ограничение по сроку.</p></section><div class="create-summary"><span>Будет создано</span><b id="createSummary">Подписка · VLESS XHTTP + Hysteria2 · 2 устройства</b></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="createClientSubmit">Создать доступ</button></div></form></dialog>'''
     creation=creation.replace('<input type="hidden" id="accountKind"', '<div id="createError" class="create-error" role="alert" hidden></div><input type="hidden" id="accountKind"',1)
+    invite_dialog=f'''<dialog id="inviteDialog" class="create-dialog"><div class="dialog-head"><div><h2>Новое приглашение</h2><small>Гость откроет ссылку и сам получит подписку</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="inviteForm" action="{esc(path)}/invite-action">{hidden(csrf)}<input type="hidden" name="operation" value="create"><label for="inviteName">Имя гостя</label><input id="inviteName" name="name" maxlength="80" required placeholder="Например, Подписчик #1"><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label></div><div class="form-grid"><div><label for="inviteDevices">Устройств (HWID)</label><input id="inviteDevices" name="max_devices" type="number" min="0" max="20" value="1"></div><div><label for="inviteTtl">Срок ссылки, дней</label><input id="inviteTtl" name="ttl_days" type="number" min="1" max="365" value="7"></div></div><div class="form-grid"><div><label for="inviteUses">Активаций</label><input id="inviteUses" name="max_uses" type="number" min="1" max="50" value="1"></div></div><p class="note">Каждая активация создаёт отдельную подписку с именем гостя. Когда активации кончатся или истечёт срок, ссылка перестанет работать.</p><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="inviteSubmit">Создать приглашение</button></div></form><div class="invite-result" id="inviteResult" hidden><label>Ссылка приглашения</label><div class="link-row-style"><input id="inviteLink" readonly></div><div class="actions create-actions"><button type="button" class="btn" id="inviteCopy">Скопировать</button><button type="button" class="btn primary" id="inviteDone">Готово</button></div></div></dialog>'''
     confirmation='''<dialog id="accessConfirm"><div class="dialog-head"><h2>Изменить доступ?</h2></div><p data-access-message></p><form method="dialog"><div class="actions"><button value="cancel">Отмена</button><button class="primary" value="apply">Подтвердить</button></div></form></dialog>'''
-    return '<div class="clients-layout"><div class="clients-content">'+content+'</div><div class="connection-slot">'+qr_dialog()+'</div></div>'+openflux_create_dialog(path,csrf)+''.join(dialogs)+creation+confirmation+CLIENTS_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))
+    return '<div class="clients-layout"><div class="clients-content">'+content+'</div><div class="connection-slot">'+qr_dialog()+'</div></div>'+openflux_create_dialog(path,csrf)+''.join(dialogs)+creation+confirmation+invite_dialog+INVITE_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))+CLIENTS_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))
+
+INVITE_JS="""<script>
+(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
+const dialog=document.getElementById("inviteDialog");
+if(!dialog)return;
+const form=document.getElementById("inviteForm"),result=document.getElementById("inviteResult"),link=document.getElementById("inviteLink");
+document.getElementById("newInvite").addEventListener("click",()=>{form.hidden=false;result.hidden=true;form.reset();dialog.showModal();setTimeout(()=>document.getElementById("inviteName").focus(),30)});
+form.addEventListener("submit",async e=>{e.preventDefault();
+const b=document.getElementById("inviteSubmit");b.disabled=true;b.textContent="Создаю…";
+try{const fd=new FormData(form),payload={};fd.forEach((v,k)=>payload[k]=v);
+const r=await fetch(PATH+"/invite-action",{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(payload)});
+let res;try{res=await r.json()}catch(err){throw new Error("Панель вернула некорректный ответ.")}
+if(!r.ok||!res.ok)throw new Error(res.message||"Не удалось создать приглашение.");
+const url="https://"+location.host+"/onyx-invite/"+res.invite.token;
+link.value=url;form.hidden=true;result.hidden=false;
+if(window.onyxToast)onyxToast("Приглашение создано.")}
+catch(err){if(window.onyxToast)onyxToast(err.message,"err")}
+finally{b.disabled=false;b.textContent="Создать приглашение"}});
+document.getElementById("inviteCopy").addEventListener("click",()=>{link.select();try{navigator.clipboard.writeText(link.value)}catch(e){document.execCommand("copy")}});
+document.getElementById("inviteDone").addEventListener("click",()=>{dialog.close();location.reload()});
+})();
+</script>"""
 
 
 NODE_COUNTRIES = [
@@ -829,6 +1354,159 @@ def node_flag_image(code, path):
     return f'<img src="{esc(path)}/__flag/{esc(code)}.svg" alt="{esc(node_flag(code))}" width="48" height="36">'
 
 
+def nodes_live_block(snapshot, path, uptime=None):
+    """Server-rendered live fragment injected into one node card on the nodes page."""
+    s=snapshot if isinstance(snapshot,dict) else {}
+    if not s.get('enabled',True):
+        return '<p class="node-live-note">Нода отключена в этой панели.</p>'
+    if not s.get('online'):
+        cls='err' if 'не отвечает' in str(s.get('error','')) else 'warn'
+        return f'<p class="node-live-note {cls}">{esc(s.get("error") or "Нода не отвечает.")}</p>'
+    rates=s.get('rates') or {}; totals=s.get('totals') or {}; users=s.get('users') or []
+    active=sum(1 for u in users if u.get('active'))
+    def rate(v): return size(int(v))+'/с' if v is not None else '—'
+    traffic=size((totals.get('up',0) or 0)+(totals.get('down',0) or 0))
+    shown=users[:3]
+    user_items=''.join(('<span class="on"><i></i>' if u.get('active') else '<span><i></i>')+esc(u['name'])+' · '+esc(u['device'])+'</span>' for u in shown)
+    more=f'<span class="more">+{len(users)-len(shown)}</span>' if len(users)>len(shown) else ''
+    user_line=f'<div class="node-live-users">{user_items}{more}</div>' if users else '<p class="node-live-note">Профили этой панели на ноде не активированы.</p>'
+    ping=s.get('latency_ms')
+    ping_text=f'{int(ping)} мс' if isinstance(ping,(int,float)) and ping else '—'
+    up_text=('%d%%'%int(uptime)) if isinstance(uptime,(int,float)) else '—'
+    note=f'''<div class="node-live-stats"><div><span>↓ Сейчас</span><b>{rate(rates.get('down'))}</b></div><div><span>↑ Сейчас</span><b>{rate(rates.get('up'))}</b></div><div><span>Трафик</span><b>{traffic}</b></div><div><span>Активны</span><b>{active} из {len(users)}</b></div><div><span>Пинг</span><b>{ping_text}</b></div><div><span>Аптайм 24ч</span><b>{up_text}</b></div></div>{user_line}'''
+    if s.get('outdated'):
+        note+=f'<p class="node-live-note warn">Нода на версии {esc(s.get("version") or "?")} — обновите Onyx Panel на ноде: SSH → onyx-panel-update.</p>'
+    return note
+
+
+def node_state_script(path):
+    """Polls /nodes-state and patches the NETWORK MAP cards in place."""
+    return f'''<script>
+(()=>{{const PATH={json.dumps(path)};
+const cards=()=>document.querySelectorAll('[data-node-id]');
+let timer=null;
+function patch(nodes){{
+  const byId={{}};(nodes||[]).forEach(s=>{{if(s&&s.id)byId[s.id]=s}});
+  cards().forEach(card=>{{
+    const s=byId[card.dataset.nodeId];if(!s)return;
+    const badge=card.querySelector('[data-node-badge]');
+    // Патчим бейдж только когда срез содержит поля состояния: ответ без
+    // enabled не должен переписывать рабочий бейдж на «Отключена».
+    if(badge&&typeof s.enabled==='boolean'){{
+      const [cls,label]=!s.enabled?['','Отключена']:!s.online?['','Нет связи']:s.outdated?['warn','Требуется обновление']:['on','Подключена'];
+      badge.className='badge'+(cls?' '+cls:'');badge.textContent=label;
+    }}
+    // Кнопка обновления нужна только нодам с устаревшей версией; во время
+    // собственного обновления её не прячем, чтобы не сбивать поллинг.
+    const btn=card.querySelector('[data-node-update]');
+    if(btn&&typeof s.outdated==='boolean'&&!btn.classList.contains('busy'))btn.hidden=!s.outdated;
+    const ver=card.querySelector('[data-node-version]');
+    if(ver&&typeof s.version==='string'&&s.version)ver.textContent=s.version;
+    const live=card.querySelector('[data-node-live]');
+    if(live&&typeof s.html==='string'){{
+      if(live.innerHTML!==s.html)live.innerHTML=s.html;
+    }}
+  }});
+}}
+async function tick(){{
+  try{{const r=await fetch(PATH+'/nodes-state',{{cache:'no-store'}});if(!r.ok)return;patch((await r.json()).nodes)}}catch(e){{}}
+}}
+tick();timer=setInterval(tick,5000);
+document.addEventListener('visibilitychange',()=>{{if(!document.hidden)tick()}});
+const dform=document.querySelector('[data-node-delete-form]');
+if(dform)dform.addEventListener('submit',async e=>{{
+  e.preventDefault();
+  if(dform.dataset.busy)return;dform.dataset.busy='1';
+  const del=async force=>{{
+    const r=await fetch(dform.getAttribute('action'),{{method:'POST',headers:{{'X-Onyx-Async':'1'}},
+      body:new URLSearchParams({{csrf:dform.querySelector('[name=csrf]').value,operation:'delete',
+        id:dform.querySelector('[name=id]').value,force:force?'1':'0'}})}});
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
+    if(!r.ok||!d.ok){{const err=new Error(d.message||'Не удалось удалить ноду.');err.canForce=!!d.can_force;throw err}}
+    return d;
+  }};
+  try{{
+    if(!(await onyxConfirm('Удалить ноду из этой панели?',{{danger:true}})))return;
+    try{{await del(false);
+      if(window.onyxToast)onyxToast('Нода удалена.');setTimeout(()=>location.reload(),600)}}
+    catch(err){{
+      if(!err.canForce)throw err;
+      if(!(await onyxConfirm('Нода не отвечает: '+err.message+' Удалить принудительно? Профили на этой ноде останутся.',{{danger:true}})))return;
+      await del(true);
+      if(window.onyxToast)onyxToast('Нода удалена принудительно.');setTimeout(()=>location.reload(),600);
+    }}
+  }}catch(err){{if(window.onyxToast)onyxToast(err.message||'Не удалось удалить ноду.','err')}}
+  finally{{delete dform.dataset.busy}}
+}});
+const uOverlay=document.createElement('div');uOverlay.className='move-overlay';uOverlay.hidden=true;
+uOverlay.innerHTML='<div class="move-card" id="nodeUpdCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="nodeUpdMark">…</b></div><h3 id="nodeUpdTitle">Обновление ноды</h3><p id="nodeUpdText">Связываемся с нодой…</p><div class="node-add-steps" id="nodeUpdSteps"><span>Связь с нодой</span><span>Запуск обновления</span><span>Ожидание версии</span></div><div class="actions upd-actions" id="nodeUpdActions" hidden><button type="button" class="primary" id="nodeUpdClose">Закрыть</button></div></div>';
+document.body.append(uOverlay);
+const uCard=uOverlay.querySelector('#nodeUpdCard'),uMark=uOverlay.querySelector('#nodeUpdMark'),uTitle=uOverlay.querySelector('#nodeUpdTitle'),uText=uOverlay.querySelector('#nodeUpdText'),uSteps=[...uOverlay.querySelectorAll('#nodeUpdSteps span')],uActions=uOverlay.querySelector('#nodeUpdActions'),uCloseBtn=uOverlay.querySelector('#nodeUpdClose');
+let uStageTimer=null,uHideTimer=null;
+function uSetStage(i){{uSteps.forEach((s,j)=>{{s.classList.toggle('done',j<i);s.classList.toggle('active',j===i)}})}}
+function uCloseModal(){{clearInterval(uStageTimer);clearTimeout(uHideTimer);uOverlay.classList.remove('show');setTimeout(()=>{{uOverlay.hidden=true}},260)}}
+uCloseBtn.addEventListener('click',uCloseModal);
+function uResult(ok,title,message){{
+ clearInterval(uStageTimer);uCard.classList.remove('spin');
+ if(ok){{
+  uSteps.forEach(s=>{{s.classList.remove('active');s.classList.add('done')}});
+  uCard.classList.add('upd-done');uMark.textContent='✓';
+  uTitle.textContent=title;uText.textContent=message||'';
+  uHideTimer=setTimeout(uCloseModal,1800);
+ }}else{{
+  uSteps.forEach(s=>s.classList.remove('active'));
+  uCard.classList.add('upd-err');uMark.textContent='!';
+  uTitle.textContent=title;uText.textContent=message||'';
+  uActions.hidden=false;
+ }}
+}}
+function uBegin(){{
+ uCard.classList.remove('upd-done','upd-err');uCard.classList.add('spin');uMark.textContent='…';
+ uTitle.textContent='Обновление ноды';uText.textContent='Связываемся с нодой…';
+ uActions.hidden=true;uOverlay.hidden=false;requestAnimationFrame(()=>uOverlay.classList.add('show'));
+ uSetStage(0);uStageTimer=setInterval(()=>uSetStage(1),700);
+}}
+document.addEventListener('click',async e=>{{
+  const b=e.target.closest('[data-node-update]');if(!b)return;
+  if(b.classList.contains('busy'))return;b.classList.add('busy');
+  uBegin();
+  try{{
+    const r=await fetch(PATH+'/node-action',{{method:'POST',headers:{{'X-Onyx-Async':'1'}},
+      body:new URLSearchParams({{csrf:b.dataset.csrf,operation:'update',id:b.dataset.nodeUpdate}})}});
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
+    if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось запустить обновление ноды.');
+    clearInterval(uStageTimer);uSetStage(2);
+    uText.textContent='Обновление запущено — ждём новую версию…';
+    const started=Date.now();let misses=0;
+    while(Date.now()-started<15*60*1000){{
+      await new Promise(res=>setTimeout(res,2500));
+      const sec=Math.floor((Date.now()-started)/1000);
+      const clock=Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+      try{{
+        const nr=await fetch(PATH+'/nodes-state',{{cache:'no-store'}});
+        if(nr.ok){{
+          const n=((await nr.json()).nodes||[]).find(x=>x&&x.id===b.dataset.nodeUpdate);
+          if(n&&n.version&&!n.outdated){{
+            uResult(true,'Нода обновлена','Версия '+n.version+' — нода в строю.');
+            if(window.onyxToast)onyxToast('Нода обновлена.');return;
+          }}
+          if(n&&n.online===false)uText.textContent='Нода перезапускается — ждём возвращения… '+clock;
+          else uText.textContent='Нода обновляется… '+clock;
+          misses=0;continue;
+        }}
+      }}catch(e2){{}}
+      misses++;
+      uText.textContent=(misses<4?'Нода обновляется… ':'Связь с нодой пропала, ждём… ')+' '+clock;
+    }}
+    uResult(false,'Не дождались обновления','Нода не подтвердила новую версию за 15 минут — проверьте её позже.');
+  }}catch(err){{
+    uResult(false,'Обновить ноду не удалось',err.message||'Неизвестная ошибка.');
+  }}finally{{b.classList.remove('busy')}}
+}});
+}})();
+</script>'''
+
+
 def node_country_select(local):
     current=str(local.get('country_code','UN')).upper()
     countries=list(NODE_COUNTRIES)
@@ -841,15 +1519,74 @@ def node_country_select(local):
     return ''.join(options)
 
 
+def node_add_script(path):
+    """Beautiful check-and-add overlay for the node connect form: staged
+    progress with the spinning ring, then a green or red final state."""
+    return f'''<script>
+(()=>{{const form=document.querySelector('[data-node-add-form]');if(!form)return;
+const PATH={json.dumps(path)};
+const overlay=document.createElement('div');overlay.className='move-overlay';overlay.hidden=true;
+overlay.innerHTML='<div class="move-card" id="nodeAddCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="nodeAddMark">…</b></div><h3 id="nodeAddTitle">Добавление ноды</h3><p id="nodeAddText">Проверяем данные…</p><div class="node-add-steps" id="nodeAddSteps"><span>Токен</span><span>Связь с нодой</span><span>Локация и версия</span></div><div class="actions upd-actions" id="nodeAddActions" hidden><button type="button" class="primary" id="nodeAddDismiss">Закрыть</button></div></div>';
+document.body.append(overlay);
+const card=overlay.querySelector('#nodeAddCard'),mark=overlay.querySelector('#nodeAddMark'),title=overlay.querySelector('#nodeAddTitle'),text=overlay.querySelector('#nodeAddText'),steps=[...overlay.querySelectorAll('#nodeAddSteps span')],actions=overlay.querySelector('#nodeAddActions'),dismiss=overlay.querySelector('#nodeAddDismiss'),submit=form.querySelector('button.primary');
+let stageTimer=null,hideTimer=null;
+function setStage(i){{steps.forEach((s,j)=>{{s.classList.toggle('done',j<i);s.classList.toggle('active',j===i)}})}}
+function begin(){{
+ card.classList.remove('upd-done','upd-err');card.classList.add('spin');mark.textContent='…';
+ title.textContent='Добавление ноды';text.textContent='Проверяем данные…';
+ actions.hidden=true;overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('show'));
+ setStage(0);let stage=0;
+ stageTimer=setInterval(()=>{{stage=Math.min(stage+1,steps.length-1);setStage(stage);
+  if(stage===1)text.textContent='Связываемся с нодой — проверяем API и домен…';
+  if(stage===2)text.textContent='Читаем локацию и версию панели…';}},1100);
+}}
+function result(ok,message){{
+ clearInterval(stageTimer);
+ card.classList.remove('spin');
+ if(ok){{
+  steps.forEach(s=>{{s.classList.remove('active');s.classList.add('done')}});
+  card.classList.add('upd-done');mark.textContent='✓';
+  title.textContent='Нода добавлена';text.textContent=message||'Готово — нода подключена к общей подписке.';
+  hideTimer=setTimeout(()=>{{close();location.reload()}},1700);
+ }}else{{
+  steps.forEach(s=>s.classList.remove('active'));
+  card.classList.add('upd-err');mark.textContent='!';
+  title.textContent='Нода не добавлена';text.textContent=message||'Неизвестная ошибка.';
+  actions.hidden=false;dismiss.focus();
+ }}
+}}
+function close(){{
+ clearInterval(stageTimer);clearTimeout(hideTimer);
+ overlay.classList.remove('show');setTimeout(()=>{{overlay.hidden=true}},260);
+}}
+dismiss.addEventListener('click',close);
+form.addEventListener('submit',async e=>{{
+ e.preventDefault();
+ if(form.dataset.busy)return;form.dataset.busy='1';submit.disabled=true;
+ begin();
+ try{{
+  const r=await fetch(form.getAttribute('action'),{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams(new FormData(form))}});
+  let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель не отвечает')}}
+  if(!r.ok||!d.ok)throw new Error(d.message||'Панель отклонила запрос.');
+  const n=d.node||{{}};
+  result(true,[n.country_name,n.version?'версия '+n.version:''].filter(Boolean).join(' · ')||'Готово — нода подключена.');
+ }}catch(err){{result(false,err.message||'Не удалось связаться с панелью.')}}
+ finally{{delete form.dataset.busy;submit.disabled=false}}
+}});
+}})();
+</script>'''
+
+
 def nodes_ui(nodes, local, connection_token, path, csrf):
     cards=[]
     for node in nodes:
         icon_flag=node_flag_image(node.get('country_code','UN'),path)
-        cards.append(f'''<article class="card node-card">
-<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><span class="badge {'on' if node.get('enabled',True) else ''}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
+        cards.append(f'''<article class="card node-card" data-node-id="{esc(node.get('id',''))}">
+<div class="node-card-head"><span class="node-flag">{icon_flag}</span><div class="node-card-name"><h2>{esc(node.get('name','Локация'))}</h2><span>{esc(node.get('country_name','Сервер'))}</span></div><button type="button" class="node-update-btn" hidden data-node-update="{esc(node.get('id',''))}" data-csrf="{esc(csrf)}" title="Обновить ноду" aria-label="Обновить ноду">{icon('refresh')}</button><span class="badge {'on' if node.get('enabled',True) else ''}" data-node-badge="{esc(node.get('id',''))}">{'Подключена' if node.get('enabled',True) else 'Отключена'}</span></div>
 <div class="node-endpoint">{icon('link')}<span>{esc(node.get('url',''))}</span></div>
-<div class="node-card-meta"><div><span>Версия</span><strong>{esc(node.get('version','—'))}</strong></div><div><span>Подключения</span><strong>VLESS · Hysteria2</strong></div></div>
-<form class="node-remove" method="post" action="{esc(path)}/node-action" data-confirm="Удалить ноду из этой панели?"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(node.get('id',''))}"><button class="danger">Удалить ноду</button></form></article>''')
+<div class="node-card-meta"><div><span>Версия</span><strong data-node-version="{esc(node.get('id',''))}">{esc(node.get('version','—'))}</strong></div><div><span>Подключения</span><strong>VLESS · Hysteria2 · TUIC 5</strong></div></div>
+<div class="node-live" data-node-live="{esc(node.get('id',''))}"><p class="node-live-note">Запрашиваем состояние ноды…</p></div>
+<form class="node-remove" method="post" action="{esc(path)}/node-action" data-node-delete-form><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(node.get('id',''))}"><button class="danger">Удалить ноду</button></form></article>''')
     local_flag=node_flag_image(local.get('country_code','UN'),path)
     country_options=node_country_select(local)
     local_country=local.get('country_name','Сервер')
@@ -862,18 +1599,42 @@ def nodes_ui(nodes, local, connection_token, path, csrf):
 <div class="nodes-grid">
 <section class="card local-node-card"><div class="local-node-head"><span class="local-node-flag">{local_flag}</span><div><span class="eyebrow">ТЕКУЩАЯ НОДА</span><h2>{esc(local_city)}</h2><small>{esc(local_country)}</small></div><span class="badge on">Активна</span></div>
 <form class="node-location-form" method="post" action="{esc(path)}/node-action"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="location"><input id="nodeCountryName" type="hidden" name="country_name" value="{esc(local.get('country_name','Сервер'))}"><div class="location-fields"><div class="country-flag-field"><label>Страна ноды</label><select id="nodeCountry" name="country_code" required>{country_options}</select></div><div><label>Город / название локации</label><input name="name" maxlength="80" value="{esc(local.get('name','Основная локация'))}" placeholder="Хельсинки" required></div></div><div class="location-actions"><small>Страна и город определяются по IP автоматически. Здесь их можно исправить вручную.</small><button class="primary">Сохранить</button></div></form><script>(()=>{{const select=document.getElementById('nodeCountry'),name=document.getElementById('nodeCountryName');if(select&&name)select.addEventListener('change',()=>{{name.value=select.selectedOptions[0].dataset.countryName||'Сервер'}})}})();</script>
-<div class="node-token-box"><div class="node-token-title"><span>{icon('link')}</span><div><strong>Node API token</strong><small>Адрес и защищённый ключ подключения этой ноды</small></div></div><div class="node-token-copy"><input value="{esc(connection_token)}" readonly spellcheck="false" aria-label="Node API token"><button type="button" data-copy="{esc(connection_token)}">{icon('copy')}<span>Копировать</span></button></div><p>Храните токен как пароль. Он нужен только администратору другой Onyx-панели.</p><details><summary>Доступные методы API</summary><div class="api-methods"><code>GET · /status</code><code>GET · /profiles</code><code>GET · /metrics</code><code>POST · /profiles/create</code><code>POST · /profiles/delete</code></div></details></div></section>
-<section class="card node-connect-card"><div class="connect-mark">{icon('nodes')}</div><span class="eyebrow">НОВАЯ ЛОКАЦИЯ</span><h2>Подключить удалённую ноду</h2><p>Добавьте ещё один VPS в общую подписку. Все параметры загрузятся автоматически.</p><ol class="node-connect-steps"><li><i>1</i><span>Скопируйте Node API token на другом сервере</span></li><li><i>2</i><span>Вставьте его в поле ниже</span></li><li><i>3</i><span>Панель проверит домен, страну и доступность API</span></li></ol><form method="post" action="{esc(path)}/node-action"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="add"><label>Node API token</label><div class="node-connect-input"><input name="connection_token" autocomplete="off" spellcheck="false" placeholder="onyxnode1_…" required><button class="primary">Проверить и добавить</button></div><small class="secure-hint">Соединение проверяется через HTTPS. Токен не передаётся сторонним сервисам.</small></form></section></div>
-<section class="nodes-section"><div class="nodes-section-head"><div><span class="eyebrow">NETWORK MAP</span><h2>Подключённые ноды</h2></div><span class="pill">{len(nodes)} / 16</span></div><div class="nodes-list">{''.join(cards) if cards else empty}</div></section>'''
+<div class="node-token-box"><div class="node-token-title"><span>{icon('link')}</span><div><strong>Node API token</strong><small>Адрес и защищённый ключ подключения этой ноды</small></div></div><div class="node-token-copy"><input value="{esc(connection_token)}" readonly spellcheck="false" aria-label="Node API token"><button type="button" data-copy="{esc(connection_token)}">{icon('copy')}<span>Копировать</span></button></div><p>Храните токен как пароль. Он нужен только администратору другой Onyx-панели.</p><details><summary>Доступные методы API</summary><div class="api-methods"><code>GET · /status</code><code>GET · /profiles</code><code>GET · /metrics</code><code>POST · /profiles/create</code><code>POST · /profiles/delete</code><code>POST · /panel-update</code></div></details></div></section>
+<section class="card node-connect-card"><div class="connect-mark">{icon('nodes')}</div><span class="eyebrow">НОВАЯ ЛОКАЦИЯ</span><h2>Подключить удалённую ноду</h2><p>Добавьте ещё один VPS в общую подписку. Все параметры загрузятся автоматически.</p><ol class="node-connect-steps"><li><i>1</i><span>Скопируйте Node API token на другом сервере</span></li><li><i>2</i><span>Вставьте его в поле ниже</span></li><li><i>3</i><span>Панель проверит домен, страну и доступность API</span></li></ol><form method="post" action="{esc(path)}/node-action" data-node-add-form><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="add"><label>Node API token</label><div class="node-connect-input"><input name="connection_token" autocomplete="off" spellcheck="false" placeholder="onyxnode1_…" required><button class="primary">Проверить и добавить</button></div><small class="secure-hint">Соединение проверяется через HTTPS. Токен не передаётся сторонним сервисам.</small></form></section></div>
+<section class="nodes-section"><div class="nodes-section-head"><div><span class="eyebrow">NETWORK MAP</span><h2>Подключённые ноды</h2></div><span class="pill">{len(nodes)} / 16</span></div><div class="nodes-list">{''.join(cards) if cards else empty}</div></section>{node_add_script(path)}{node_state_script(path)}'''
 
 
 CSS += '''
-.nodes-page-head{padding-bottom:22px;border-bottom:1px solid var(--line)}.nodes-pill b{font:600 12px var(--font-mono);color:var(--text)}.nodes-pill small{font-size:10px}.nodes-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.85fr);gap:18px;align-items:start}.local-node-card,.node-connect-card{margin:0}.local-node-card{padding:0;overflow:hidden}.local-node-head{display:flex;align-items:center;gap:14px;padding:22px 23px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,var(--tint),transparent 60%)}.local-node-flag,.node-flag{display:grid;place-items:center;flex:0 0 auto;width:48px;height:48px;border:1px solid var(--line);border-radius:14px;background:var(--input);font-size:25px}.local-node-head>div{min-width:0}.local-node-head h2{font-size:19px}.local-node-head small{display:block;margin-top:4px}.local-node-head>.badge{margin-left:auto}.node-location-form{padding:20px 23px 22px}.location-fields{display:grid;grid-template-columns:90px 1fr 1fr;gap:11px}.location-fields label{margin-top:0}.location-fields input{text-overflow:ellipsis}.country-code-field input{text-align:center;text-transform:uppercase;font:600 14px ui-monospace,monospace}.location-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px}.location-actions small{max-width:480px;font-size:10px}.location-actions button{min-width:110px}.node-token-box{margin:0 23px 23px;padding:18px;border:1px solid color-mix(in srgb,var(--accent) 36%,var(--line));border-radius:13px;background:linear-gradient(135deg,var(--tint),var(--input))}.node-token-title{display:flex;align-items:center;gap:11px;margin-bottom:13px}.node-token-title>span{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--on-accent)}.node-token-title .ico{width:16px}.node-token-title strong{display:block;font-size:12px}.node-token-title small{display:block;font-size:9px;margin-top:2px}.node-token-copy{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.node-token-copy input{font:10px ui-monospace,monospace}.node-token-copy button{white-space:nowrap}.node-token-box>p{margin:10px 0 0;font-size:10px;color:var(--muted)}.node-token-box details{margin-top:10px}.node-token-box summary{width:max-content;cursor:pointer;font-size:10px;color:var(--accent)}.api-methods{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}.api-methods code{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--surface);font-size:9px;color:var(--muted)}.node-connect-card{position:relative;padding:28px;overflow:hidden;background:radial-gradient(circle at 100% 0,var(--tint),transparent 42%),var(--surface)}.connect-mark{display:grid;place-items:center;width:52px;height:52px;margin-bottom:24px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--line));border-radius:15px;background:var(--tint);color:var(--accent)}.connect-mark .ico{width:25px;height:25px}.node-connect-card h2{font-size:22px}.node-connect-card>p{max-width:460px;margin:8px 0 22px;color:var(--muted);font-size:12px}.node-connect-steps{display:grid;gap:10px;margin:0 0 24px;padding:0;list-style:none}.node-connect-steps li{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px}.node-connect-steps i{display:grid;place-items:center;flex:0 0 23px;height:23px;border:1px solid var(--line);border-radius:50%;color:var(--accent);font:600 10px ui-monospace,monospace}.node-connect-card form{padding-top:20px;border-top:1px solid var(--line)}.node-connect-card form label{margin-top:0;color:var(--text)}.node-connect-input{display:grid;gap:9px}.node-connect-input input{font:10px ui-monospace,monospace}.node-connect-input button{width:100%;padding:12px}.secure-hint{display:block;margin-top:10px;font-size:9px}.nodes-section{margin-top:27px}.nodes-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.nodes-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.node-card{display:flex;flex-direction:column;margin:0;padding:19px}.node-card-head{display:flex;align-items:center;gap:11px}.node-flag{width:41px;height:41px;border-radius:11px;font-size:21px}.node-card-name{min-width:0}.node-card-name h2{font-size:15px}.node-card-name span{display:block;margin-top:2px;color:var(--muted);font-size:10px}.node-card-head>.badge{margin-left:auto}.node-endpoint{display:flex;align-items:center;gap:7px;margin:16px 0;padding:9px 10px;border-radius:8px;background:var(--input);color:var(--muted);font:9px ui-monospace,monospace}.node-endpoint .ico{width:13px}.node-endpoint span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.node-card-meta{display:grid;grid-template-columns:.7fr 1.3fr;gap:9px}.node-card-meta>div{padding:10px;border:1px solid var(--line);border-radius:8px}.node-card-meta span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.node-card-meta strong{display:block;margin-top:4px;font-size:10px}.node-remove{margin-top:auto;padding-top:14px}.node-remove button{width:100%;font-size:10px}.nodes-empty{grid-column:1/-1;display:grid;justify-items:center;padding:43px 20px;border:1px dashed var(--line);border-radius:14px;text-align:center;background:var(--surface)}.nodes-empty>span{display:grid;place-items:center;width:45px;height:45px;border-radius:13px;background:var(--tint);color:var(--accent)}.nodes-empty h3{margin-top:14px}.nodes-empty p{max-width:440px;margin:6px 0 0;color:var(--muted);font-size:11px}@media(max-width:1000px){.nodes-grid{grid-template-columns:1fr}.nodes-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.local-node-head{align-items:flex-start;padding:19px}.local-node-head>.badge{margin-left:auto}.node-location-form{padding:18px 19px}.location-fields{grid-template-columns:76px 1fr}.location-fields>div:last-child{grid-column:1/-1}.location-actions{align-items:stretch;flex-direction:column}.location-actions button{width:100%}.node-token-box{margin:0 19px 19px;padding:15px}.node-token-copy{grid-template-columns:1fr}.node-token-copy button span{display:inline}.api-methods{grid-template-columns:1fr}.node-connect-card{padding:21px}.nodes-list{grid-template-columns:1fr}}'''
+.nodes-page-head{padding-bottom:22px;border-bottom:1px solid var(--line)}.nodes-pill b{font:600 12px var(--font-mono);color:var(--text)}.nodes-pill small{font-size:10px}.nodes-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.85fr);gap:18px;align-items:start}.local-node-card,.node-connect-card{min-width:0;margin:0}.local-node-card{padding:0;overflow:hidden}.local-node-head{display:flex;align-items:center;gap:14px;padding:22px 23px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,var(--tint),transparent 60%)}.local-node-flag,.node-flag{display:grid;place-items:center;flex:0 0 auto;width:48px;height:48px;border:1px solid var(--line);border-radius:14px;background:var(--input);font-size:25px}.local-node-head>div{min-width:0}.local-node-head h2{font-size:19px}.local-node-head small{display:block;margin-top:4px}.local-node-head>.badge{margin-left:auto}.node-location-form{padding:20px 23px 22px}.location-fields{display:grid;grid-template-columns:90px 1fr 1fr;gap:11px}.location-fields label{margin-top:0}.location-fields input{text-overflow:ellipsis}.country-code-field input{text-align:center;text-transform:uppercase;font:600 14px ui-monospace,monospace}.location-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px}.location-actions small{max-width:480px;font-size:10px}.location-actions button{min-width:110px}.node-token-box{margin:0 23px 23px;padding:18px;border:1px solid color-mix(in srgb,var(--accent) 36%,var(--line));border-radius:13px;background:linear-gradient(135deg,var(--tint),var(--input))}.node-token-title{display:flex;align-items:center;gap:11px;margin-bottom:13px}.node-token-title>span{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--on-accent)}.node-token-title .ico{width:16px}.node-token-title strong{display:block;font-size:12px}.node-token-title small{display:block;font-size:9px;margin-top:2px}.node-token-copy{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.node-token-copy input{font:10px ui-monospace,monospace}.node-token-copy button{white-space:nowrap}.node-token-box>p{margin:10px 0 0;font-size:10px;color:var(--muted)}.node-token-box details{margin-top:10px}.node-token-box summary{width:max-content;cursor:pointer;font-size:10px;color:var(--accent)}.api-methods{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}.api-methods code{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--surface);font-size:9px;color:var(--muted)}.node-connect-card{position:relative;padding:28px;overflow:hidden;background:radial-gradient(circle at 100% 0,var(--tint),transparent 42%),var(--surface)}.connect-mark{display:grid;place-items:center;width:52px;height:52px;margin-bottom:24px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--line));border-radius:15px;background:var(--tint);color:var(--accent)}.connect-mark .ico{width:25px;height:25px}.node-connect-card h2{font-size:22px}.node-connect-card>p{max-width:460px;margin:8px 0 22px;color:var(--muted);font-size:12px}.node-connect-steps{display:grid;gap:10px;margin:0 0 24px;padding:0;list-style:none}.node-connect-steps li{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px}.node-connect-steps i{display:grid;place-items:center;flex:0 0 23px;height:23px;border:1px solid var(--line);border-radius:50%;color:var(--accent);font:600 10px ui-monospace,monospace}.node-connect-card form{padding-top:20px;border-top:1px solid var(--line)}.node-connect-card form label{margin-top:0;color:var(--text)}.node-connect-input{display:grid;gap:9px}.node-connect-input input{font:10px ui-monospace,monospace}.node-connect-input button{width:100%;padding:12px}.secure-hint{display:block;margin-top:10px;font-size:9px}.nodes-section{margin-top:27px}.nodes-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.nodes-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.node-card{min-width:0;display:flex;flex-direction:column;margin:0;padding:19px}.node-card-head{display:flex;align-items:center;gap:11px}.node-flag{width:41px;height:41px;border-radius:11px;font-size:21px}.node-card-name{min-width:0}.node-card-name h2{font-size:15px}.node-card-name span{display:block;margin-top:2px;color:var(--muted);font-size:10px}.node-card-head>.badge{margin-left:auto}.node-endpoint{display:flex;align-items:center;gap:7px;margin:16px 0;padding:9px 10px;border-radius:8px;background:var(--input);color:var(--muted);font:9px ui-monospace,monospace}.node-endpoint .ico{width:13px}.node-endpoint span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.node-card-meta{display:grid;grid-template-columns:.7fr 1.3fr;gap:9px}.node-card-meta>div{padding:10px;border:1px solid var(--line);border-radius:8px}.node-card-meta span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.node-card-meta strong{display:block;margin-top:4px;font-size:10px}.node-live{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}.node-live-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px}.node-live-stats>div{padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:var(--input)}.node-live-stats span{display:block;font-size:8px;color:var(--muted)}.node-live-stats b{display:block;margin-top:3px;font:500 10px var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap}.node-live-users{display:flex;flex-wrap:wrap;gap:5px 12px;margin-top:10px;font-size:10.5px}.node-live-users span{display:inline-flex;align-items:center;gap:6px;min-width:0}.node-live-users i{width:6px;height:6px;border-radius:50%;background:var(--line);flex:0 0 auto}.node-live-users span.on{color:var(--text)}.node-live-users span.on i{background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 15%,transparent)}.node-live-users .more{color:var(--muted);font-size:9.5px}.node-live-note{margin:0;font-size:10.5px;line-height:1.55;color:var(--muted)}.node-live-note.warn{color:var(--amber)}.node-live-note.err{color:var(--red)}.node-remove{margin-top:auto;padding-top:14px}.node-remove button{width:100%;font-size:10px}.nodes-empty{grid-column:1/-1;display:grid;justify-items:center;padding:43px 20px;border:1px dashed var(--line);border-radius:14px;text-align:center;background:var(--surface)}.nodes-empty>span{display:grid;place-items:center;width:45px;height:45px;border-radius:13px;background:var(--tint);color:var(--accent)}.nodes-empty h3{margin-top:14px}.nodes-empty p{max-width:440px;margin:6px 0 0;color:var(--muted);font-size:11px}@media(max-width:1000px){.nodes-grid{grid-template-columns:1fr}.nodes-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.local-node-head{align-items:flex-start;padding:19px}.local-node-head>.badge{margin-left:auto}.node-location-form{padding:18px 19px}.location-fields{grid-template-columns:76px 1fr}.location-fields>div:last-child{grid-column:1/-1}.location-actions{align-items:stretch;flex-direction:column}.location-actions button{width:100%}.node-token-box{margin:0 19px 19px;padding:15px}.node-token-copy{grid-template-columns:1fr}.node-token-copy button span{display:inline}.api-methods{grid-template-columns:1fr}.node-connect-card{padding:21px}.nodes-list{grid-template-columns:1fr}}'''
+CSS += '''
+.node-card-head>.node-update-btn{margin-left:auto}
+.node-card-head>.node-update-btn:not([hidden])+.badge{margin-left:0}
+.node-update-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--amber) 45%,var(--line));border-radius:9px;background:var(--raised);color:var(--amber);cursor:pointer;flex:0 0 auto}
+.node-update-btn .ico{width:15px;height:15px}
+.node-update-btn:hover{border-color:var(--accent);color:var(--accent)}
+.node-update-btn.busy .ico{animation:onyx-spin 1s linear infinite}
+.node-update-btn[hidden]{display:none}'''
+CSS += '''
+.node-add-steps{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin:2px 0 6px}
+.node-add-steps span{padding:6px 11px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--muted);font-size:10.5px}
+.node-add-steps span.active{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));color:var(--accent);background:var(--tint)}
+.node-add-steps span.done{border-color:color-mix(in srgb,var(--green) 40%,transparent);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent)}
+.node-add-steps span.done:after{content:" ✓"}'''
+CSS += '''
+/* На телефоне три шага обязаны уместиться в одну строку: подписи ужимаются,
+   карточке уменьшается боковой padding, галочка done убирается — она лишь
+   расширяет самый длинный чип в момент, когда модалка уже закрывается. */
+@media(max-width:560px){
+  .move-card{padding:26px 14px}
+  .node-add-steps{flex-wrap:nowrap;gap:4px}
+  .node-add-steps span{padding:5px 6px;font-size:9px;white-space:nowrap}
+  .node-add-steps span.done:after{content:""}
+}'''
 
 
 CSS += '''
 .node-location-form .location-fields{grid-template-columns:1fr 1fr}.country-flag-field select{font-size:13px}.country-flag-field option{background:var(--surface);color:var(--text)}
-.openflux-users{margin-top:26px;padding-top:24px;border-top:1px solid var(--line)}.openflux-users .section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}.openflux-users .section-head h2{margin-top:4px}.openflux-users .section-head p{margin:5px 0 0;color:var(--muted);font-size:11px}.flux-profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.flux-profile{padding:18px;border:1px solid var(--line);border-radius:14px;background:radial-gradient(circle at 100% 0,var(--tint),transparent 42%),var(--surface)}.flux-profile-head{display:flex;align-items:center;gap:11px;margin-bottom:15px}.flux-profile-head>div{min-width:0}.flux-profile-head h3{font-size:14px}.flux-profile-head small{display:block;margin-top:3px}.flux-profile-head>.badge{margin-left:auto}.flux-platform{display:grid;place-items:center;width:43px;height:43px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:12px;background:var(--tint);color:var(--accent);font-weight:700;font-size:10px}.flux-profile-secret{display:grid;grid-template-columns:62px minmax(0,1fr) 36px;align-items:center;gap:8px;margin-top:8px}.flux-profile-secret>span{font-size:9px;color:var(--muted);text-transform:uppercase}.flux-profile-secret input{min-width:0;padding:9px;font:9px ui-monospace,monospace}.flux-profile-secret button{height:36px;padding:8px}.flux-profile>.actions{margin-top:15px}.flux-empty{grid-column:1/-1;display:grid;gap:5px;padding:30px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted)}.flux-empty b{color:var(--text)}.flux-platform-picker{margin-top:8px}
+.openflux-users{margin-top:26px;padding-top:24px;border-top:1px solid var(--line)}.openflux-users .section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}.openflux-users .section-head h2{margin-top:4px}.openflux-users .section-head p{margin:5px 0 0;color:var(--muted);font-size:11px}.flux-profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.flux-profile{padding:18px;border:1px solid var(--line);border-radius:14px;background:radial-gradient(circle at 100% 0,var(--tint),transparent 42%),var(--surface)}.flux-profile-head{display:flex;align-items:center;gap:11px;margin-bottom:15px}.flux-profile-head>div{min-width:0}.flux-profile-head h3{font-size:14px}.flux-profile-head small{display:block;margin-top:3px}.flux-profile-head>.badge{margin-left:auto}.flux-platform{display:grid;place-items:center;width:43px;height:43px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:12px;background:var(--tint);color:var(--accent);font-weight:700;font-size:10px}.flux-profile-secret{display:grid;grid-template-columns:62px minmax(0,1fr) 36px;align-items:center;gap:8px;margin-top:8px}.flux-profile-secret>span{font-size:9px;color:var(--muted);text-transform:uppercase}.flux-profile-secret input{min-width:0;padding:9px;font:9px ui-monospace,monospace}.flux-profile-secret button{height:36px;padding:8px}.flux-profile>.actions{margin-top:15px}.flux-empty{grid-column:1/-1;display:grid;gap:5px;padding:30px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted)}.flux-empty b{color:var(--text)}.flux-docgen .flux-status-ok{color:var(--green)}.flux-docgen .flux-status-err{color:var(--red)}.flux-busy{position:absolute;inset:0;z-index:9;display:grid;place-content:center;justify-items:center;gap:12px;background:color-mix(in srgb,var(--surface) 78%,transparent);backdrop-filter:blur(3px)}.flux-busy .onyx-ops-ring{margin:0}.flux-busy span{font-size:12px;color:var(--muted)}.flux-docgen img[data-flux-mailru-captcha-img]{margin:0}[data-flux-mailru-login]{display:grid;gap:8px}[data-flux-mailru-login]>.actions{margin:0}@media(min-width:761px){[data-flux-mailru-login]{grid-template-columns:1.1fr 1fr .9fr auto;align-items:end}[data-flux-mailru-login]>.note{grid-column:1/-1}[data-flux-mailru-login]>.actions{margin:0}}.flux-platform-picker{margin-top:8px}.flux-fallback{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.flux-fallback summary{cursor:pointer;color:var(--muted);font-size:11px}.flux-fallback form{display:grid;gap:8px;margin-top:10px}.flux-fallback input{min-width:0}.flux-fallback .actions{margin-top:0}.flux-fallback .note{margin:6px 0}.flux-docgen p{margin:8px 0}.flux-docgen input{min-width:0}.flux-docgen .actions{margin-top:8px}.flux-login-dialog .update-dialog-body{display:grid;gap:13px}.flux-login-busy{display:grid;justify-items:center;gap:12px;padding:10px 0 4px}.flux-login-busy span{font-size:12px;color:var(--muted)}.flux-login-retry{display:grid;gap:16px;justify-items:center;justify-content:center}.flux-login-retry p{margin:0}.flux-login-row{display:flex;gap:9px;align-items:center;justify-content:center}.flux-login-row input{width:260px}.flux-login-row .primary{height:40px}.flux-login-status{margin:0;color:var(--red);text-align:center}.flux-docgen .note{margin:8px 0 0}
 .client-detail{width:min(455px,calc(100vw - 32px));max-height:min(90dvh,calc(100dvh - 12px));overflow:auto}.client-detail .dialog-head{padding:20px 0 15px;border-bottom:1px solid var(--line)}
 .access-kind-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.access-kind-grid .choice-card{min-height:104px}.access-kind-grid .choice-card strong{font-size:14px}.compatible-protocols{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}.compatible-protocols i{padding:4px 6px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font:500 8px/1 ui-monospace,monospace;font-style:normal}.quick-access-title{display:flex;align-items:center;gap:11px;margin:20px 0 10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em}.quick-access-title:before,.quick-access-title:after{content:"";height:1px;flex:1;background:var(--line)}.quick-access-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.quick-access{display:flex;align-items:flex-start;justify-content:flex-start;gap:12px;min-width:0;min-height:76px;padding:15px;border:1px solid var(--line);border-radius:11px;background:var(--input);text-align:left;color:var(--text);cursor:pointer}.quick-access:hover,.quick-access.selected{border-color:var(--accent);background:var(--tint)}.quick-access.selected{box-shadow:inset 0 0 0 1px var(--accent)}.quick-access .quick-radio{display:block;width:16px;height:16px;flex:0 0 auto;margin-top:3px;border:1px solid var(--muted);border-radius:50%;background:transparent}.quick-access:hover .quick-radio{border-color:var(--accent)}.quick-access.selected .quick-radio{border-color:var(--accent);box-shadow:inset 0 0 0 4px var(--input);background:var(--accent)}.quick-access b{display:block;font-size:13px}.quick-access small{display:block;margin-top:4px;font-size:10px;line-height:1.45}.quick-access-note{margin:10px 0 0;color:var(--muted);font-size:9px}.quick-fields{padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--raised)}.quick-fields b{display:block;font-size:12px}.quick-fields p{margin:5px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
 @media(max-width:650px){.node-location-form .location-fields{grid-template-columns:1fr}.node-location-form .location-fields>div:last-child{grid-column:auto}}
@@ -909,12 +1670,28 @@ dialog{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 
 # Full mobile adaptation: dialogs must always scroll, inputs must not trigger
 # iOS focus zoom, and touch targets stay comfortable on every device.
+CSS += '''.reality-fields{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;margin-top:4px}.reality-fields input{font:11px ui-monospace,Consolas,monospace}
+'''
+
+CSS += '''.warp-btn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}.warp-btn.on .ico{filter:drop-shadow(0 0 4px color-mix(in srgb,var(--accent) 45%,transparent))}.warp-manual{margin-top:16px}.warp-manual summary{cursor:pointer;color:var(--accent);font-size:12px;width:max-content;padding:2px 0}.warp-manual textarea{margin:12px 0 10px;font:11px ui-monospace,Consolas,monospace}.warp-manual .actions{margin-top:0}
+'''
+
 CSS += '''
 @media(max-width:740px){
-  input,select,textarea{font-size:16px}
+  /* iOS auto-zooms a focused field whose effective font-size is under
+     16px; class rules elsewhere (.palette-dialog input, .search-field
+     input, mono token fields) beat a plain element selector, so this
+     one must stay important. TOTP cells keep their designed digits. */
+  input,select,textarea{font-size:16px!important}
+  .totp-cells input{font-size:22px!important}
   input[type=checkbox],input[type=radio]{width:17px;height:17px}
   .page-head{flex-wrap:wrap}
-  .page-head .actions{width:100%;justify-content:space-between}
+  .page-head .actions{width:100%;justify-content:flex-start}
+  .page-head .actions .head-cluster{margin-left:auto}
+  .page-head .actions:has(#updateFlag:not([hidden])) #refreshAll{display:none}
+  .page-head .actions .live-indicator{margin-left:0}
+  .page-head .actions #liveIndicator{margin-right:auto}
+  .page-head .actions:has(#liveIndicator) .head-cluster{margin-left:0}
   .page-head .actions .primary{flex:1 1 auto}
   .page-head .actions button{padding:11px 14px}
   .card{padding:16px}
@@ -962,7 +1739,7 @@ CSS += """
 }
 html{scroll-behavior:smooth;scrollbar-width:none}
 html::-webkit-scrollbar{width:0;height:0}
-body{font-family:var(--font-ui);font-weight:400;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;background:var(--bg)}
+body{font-family:var(--font-ui);font-weight:400;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;background:var(--bg);padding-top:env(safe-area-inset-top)}
 ::selection{background:color-mix(in srgb,var(--accent) 34%,transparent)}
 *{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text) 18%,transparent) transparent}
 ::-webkit-scrollbar{width:11px;height:11px}
@@ -983,7 +1760,7 @@ h3{font-weight:600}
 .shell{position:relative;min-height:calc(100dvh - 30px);max-width:1680px;margin:14px auto 16px;border-radius:27px;isolation:isolate;overflow:clip;
   background:radial-gradient(ellipse 490px 390px at 45% 32%,rgba(177,104,77,.55),transparent 100%),
              radial-gradient(ellipse 490px 560px at 22% 35%,rgba(108,100,137,.45),transparent 100%),var(--shell)}
-.sidebar{overflow:visible;position:fixed;top:28px;bottom:32px;left:max(12px,calc((100vw - 1680px)/2 + 12px));width:62px;border-radius:20px;background:var(--sidebar);border:1px solid color-mix(in srgb,var(--text) 7%,transparent);z-index:60;display:flex;align-items:center;flex-direction:column;padding:16px 0 14px;box-shadow:0 18px 44px -18px rgba(0,0,0,.5)}
+.sidebar{overflow:visible;position:fixed;top:28px;bottom:32px;left:max(12px,calc((100vw - 1680px)/2 + 12px));width:62px;border-radius:20px;background:var(--sidebar);border:1px solid color-mix(in srgb,var(--text) 7%,transparent);z-index:60;display:flex;align-items:center;flex-direction:column;padding:16px 0 14px;box-shadow:0 18px 44px -18px rgba(0,0,0,.5);opacity:.95}
 .brand{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;padding:0;margin:0}
 .brand img{width:30px;height:30px;border-radius:0}
 .nav-primary{display:flex;flex-direction:column;gap:7px;align-items:center;margin-top:34px}
@@ -1022,12 +1799,14 @@ option{background:#484646;color:#fff}
 .card,.account{border-radius:24px;border-color:var(--line-soft);background:var(--surface);box-shadow:0 18px 40px -30px rgba(0,0,0,.5)}
 .clients-panel,.clients-summary{border-radius:24px;border-color:var(--line-soft);background:var(--surface)}
 .note{border:1px solid var(--line-soft);border-left:3px solid var(--accent);border-radius:12px;background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--muted)}
-.note.warning{border-left-color:var(--amber);color:var(--amber)}.note.error{border-left-color:var(--red);color:var(--red)}
+.note.warning{border-left-color:var(--amber);color:var(--amber)}.note.error{border-left-color:var(--red);color:var(--red)}.note.success{border-left-color:var(--green);color:var(--green)}
 .badge{font-weight:500;letter-spacing:.01em}
 .pill{border-radius:8px;font-weight:400;background:color-mix(in srgb,var(--text) 8%,transparent);border-color:transparent;color:var(--muted)}
 .pill.proto-vless{color:var(--accent);background:var(--tint)}
 .pill.proto-hysteria{color:var(--amber)}
 .pill.proto-web{color:var(--green)}
+.pill.proto-awg20,.pill.proto-awg31{color:#b18cff;background:color-mix(in srgb,#b18cff 15%,transparent)}
+.pill.proto-openflux{color:#6aa5ff;background:color-mix(in srgb,#6aa5ff 15%,transparent)}
 dialog{border-radius:25px;background:linear-gradient(125deg,#514d52,#363a35);border:1px solid color-mix(in srgb,var(--text) 14%,transparent);color:var(--text);box-shadow:0 28px 100px rgba(0,0,0,.4);backdrop-filter:none;-webkit-backdrop-filter:none}
 dialog::backdrop{background:#15171999;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
 .dialog-head h2{font-size:21px}
@@ -1089,7 +1868,7 @@ input[type=date]{color-scheme:dark}
 .selx.open .selx-pop{opacity:1;visibility:visible;transform:translateY(0)}
 .selx.up .selx-pop{top:auto;bottom:calc(100% + 6px);transform:translateY(6px)}
 .selx.up.open .selx-pop{transform:translateY(0)}
-.selx-opt{display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:13px;color:var(--text);overflow-wrap:anywhere}
+.selx-opt{display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:13px;color:var(--text)}
 .selx-opt:hover,.selx-opt.act{background:color-mix(in srgb,var(--text) 9%,transparent)}
 .selx-opt.sel{color:var(--accent);font-weight:600}
 .selx-opt.sel:after{content:"✓";margin-left:auto;font-weight:700}
@@ -1111,6 +1890,9 @@ input[type=date]{color-scheme:dark}
 .onyx-cal:not(.filled) .onyx-cal-ico{color:var(--muted)}
 .onyx-cal.filled .onyx-cal-ico{color:var(--accent)}
 .onyx-cal-value{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Редактор клиента: поле + кнопка сохранения в одну строку (страница «Клиенты» и настройки) */
+.limit-field{display:flex;gap:8px;align-items:stretch}.limit-field input{max-width:130px;flex:1 1 110px}
+.expiry-row{display:flex;gap:8px;align-items:stretch}.expiry-row .onyx-cal{flex:1 1 auto;min-width:0}.expiry-row .onyx-cal-field{height:100%}
 .onyx-cal:not(.filled) .onyx-cal-value{color:var(--muted)}
 .onyx-cal-caret{position:absolute;right:11px;top:50%;width:16px;height:16px;flex:0 0 auto;color:var(--muted);transform:translateY(-50%);transition:transform .18s ease,color .18s ease;pointer-events:none}
 .onyx-cal.open .onyx-cal-caret{transform:translateY(-50%) rotate(180deg);color:var(--accent)}
@@ -1134,28 +1916,36 @@ input[type=date]{color-scheme:dark}
 .onyx-cal-clear{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 10px;border:1px dashed var(--line);border-radius:10px;background:transparent;color:var(--muted);font-size:12px}
 .onyx-cal-clear:hover{color:var(--text);border-color:var(--accent)}
 /* Move modal: shown while the panel changes its address */
-.move-overlay{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:16px;background:rgba(21,23,25,.6);backdrop-filter:blur(16px) saturate(1.2);-webkit-backdrop-filter:blur(16px) saturate(1.2);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}
-.move-overlay.show{opacity:1;visibility:visible}
+.move-overlay{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:16px;background:rgba(21,23,25,.6);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s}
+.move-overlay.show{opacity:1;visibility:visible}.move-overlay[hidden]{display:none!important}
 .move-card{width:min(460px,100%);padding:30px 26px;text-align:center;border:1px solid color-mix(in srgb,var(--text) 14%,transparent);border-radius:25px;background:linear-gradient(125deg,#514d52,#363a35);box-shadow:0 28px 100px rgba(0,0,0,.4);transform:scale(.92) translateY(12px);transition:transform .3s cubic-bezier(.2,.9,.3,1.25)}
 .move-overlay.show .move-card{transform:none}
 .move-ring{position:relative;width:104px;height:104px;margin:0 auto 16px}
-.move-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
-.move-ring-bg{fill:none;stroke:var(--line);stroke-width:6}
-.move-ring-fg{fill:none;stroke:var(--accent);stroke-width:6;stroke-linecap:round;stroke-dasharray:276.5;stroke-dashoffset:0;transition:stroke-dashoffset 1s linear;filter:drop-shadow(0 0 6px color-mix(in srgb,var(--accent) 55%,transparent))}
+.move-ring svg{width:100%;height:100%;display:block}
+.move-ring circle{fill:none;stroke-width:5;stroke-linecap:round}
+.move-ring .bg{stroke:var(--line)}
+.move-ring .fg{stroke:var(--accent);stroke-dasharray:150.8;stroke-dashoffset:0}
+.move-ring.spin svg,.move-card.spin .move-ring svg{animation:onyx-spin 1s linear infinite}
+.move-ring.spin .fg,.move-card.spin .move-ring .fg{stroke-dasharray:113;stroke-dashoffset:70}
 .move-ring b{position:absolute;inset:0;display:grid;place-items:center;font:600 30px/1 var(--font-mono);color:var(--accent)}
 .move-card h3{font-size:19px;font-weight:600;letter-spacing:.01em;margin:0 0 8px}
 .move-card p{margin:0 0 14px;color:var(--muted);font-size:12.5px;line-height:1.6}
 .move-card code{display:block;margin:0 0 16px;padding:9px 12px;border-radius:10px;border:1px solid var(--line-soft);background:var(--input);font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere}
 .move-card .btn{width:100%}
-/* Update modal states: spinning arc while installing, countdown before reload */
-.move-ring.spin svg{animation:updspin 1.1s linear infinite}
-@keyframes updspin{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
-.move-ring.spin .move-ring-fg{stroke-dasharray:64 212.5;stroke-dashoffset:0;transition:none}.move-card.spin .move-ring svg{animation:updspin 1.1s linear infinite}.move-card.spin .move-ring-fg{stroke-dasharray:64 212.5;stroke-dashoffset:0;transition:none}
-.move-ring.time b,.move-card.time .move-ring b{font-size:19px;letter-spacing:.04em}
+/* Update modal states: arc spins like the module-restart ring, countdown before reload */
+.move-card.time .move-ring b{font-size:19px;letter-spacing:.04em}
+.move-card.upd-done .move-ring .fg{stroke:var(--green)}
 .move-card.upd-done .move-ring b{color:var(--green)}
-.move-card.upd-done .move-ring-fg{stroke:var(--green)}
+.move-card.upd-err .move-ring .fg{stroke:var(--red)}
 .move-card.upd-err .move-ring b{color:var(--red)}
-.move-card.upd-err .move-ring-fg{stroke:var(--red)}
+/* Плавное появление всех модалок (dialog) */
+dialog[open]{animation:onyx-dialog-in .24s cubic-bezier(.2,.9,.3,1.08)}
+@keyframes onyx-dialog-in{from{opacity:0;transform:scale(.955) translateY(10px)}to{opacity:1;transform:none}}
+dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease}
+@keyframes onyx-backdrop-in{from{opacity:0}to{opacity:1}}
+/* Кнопка обновления дашборда: иконка крутится две секунды после клика */
+#refreshDashboard.spin2 .ico{animation:onyx-refresh-spin 2s linear}
+@keyframes onyx-refresh-spin{from{transform:rotate(0deg)}to{transform:rotate(720deg)}}
 .upd-actions{justify-content:center;margin-top:6px}
 .upd-actions[hidden],.upd-actions button[hidden]{display:none}
 /* "Update available" flag on the Updates page */
@@ -1175,7 +1965,7 @@ input[type=date]{color-scheme:dark}
 .settings-col>.card{margin:0}
 @media(max-width:1100px){.settings-grid{grid-template-columns:1fr}}
 /* Combined admin access block */
-.admin-access-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.admin-access-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.trial-check{display:flex;align-items:center;gap:9px;margin:0 0 12px;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--input);cursor:pointer;color:var(--text)}.trial-check:hover{border-color:var(--accent)}
 .admin-access-grid small{display:block;margin-top:5px;color:var(--muted);font-size:10px}
 @media(max-width:640px){.admin-access-grid{grid-template-columns:1fr}}
 /* Themed file picker */
@@ -1187,12 +1977,12 @@ input[type=date]{color-scheme:dark}
 .file-btn .ico{width:15px;height:15px}
 .file-name{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 /* Component cards in two columns inside settings */
-.settings-col .component-stack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(max-width:640px){.settings-col .component-stack{grid-template-columns:1fr}}
+.component-stack{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:640px){.component-stack{grid-template-columns:1fr}}
 /* ---------- Mobile: the rail becomes a floating bottom bar ---------- */
 @media(max-width:760px){
 .shell{border-radius:0;min-height:100dvh;margin:0;background:radial-gradient(ellipse 470px 420px at 45% 22%,rgba(120,88,77,.8),transparent 100%),var(--shell)}
-.sidebar{top:auto;bottom:10px;left:10px;right:10px;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:21px;box-shadow:none}
+.sidebar{top:auto;bottom:20px;left:10px;right:10px;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:30px;box-shadow:none}
 .brand{display:none}
 .nav-primary{flex-direction:row;gap:2px;margin:0;flex:1;justify-content:space-around}
 .nav-bottom{flex-direction:row;gap:2px;margin:0;padding-top:0}
@@ -1212,8 +2002,46 @@ main{padding:20px 12px 100px}
 .nav-bottom [data-service-restart]{display:none}
 .sidebar{padding:6px 7px}
 }
-@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+/* Короткая обратная связь по действию пользователя работает и при reduce motion */
+#refreshDashboard.spin2 .ico{animation:onyx-refresh-spin 2s linear!important}
+dialog[open]{animation:onyx-dialog-in .24s cubic-bezier(.2,.9,.3,1.08)!important}
+dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease!important}
+/* Прогресс-кольца перезапуска/обновления — функциональный отклик, крутятся и при reduce motion */
+.onyx-ops-ring{animation:onyx-spin 1s linear infinite!important}
+.move-ring.spin svg,.move-card.spin .move-ring svg,.del-spin{animation:onyx-spin 1s linear infinite!important}}
 """
+CSS += '''
+/* Модалка удаления клиентов: таймлайн шагов и финальная зелёная галка */
+.del-dialog{width:min(460px,calc(100vw - 28px))}
+.del-dialog .dialog-head h2{font-size:18px}
+.del-counter{display:flex;align-items:baseline;gap:9px;margin:16px 0 2px}
+.del-counter b{font:600 30px/1 "Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.del-counter span{font-size:11px;color:var(--muted)}
+.del-steps{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column}
+.del-step{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);transition:color .2s}
+.del-step:last-child{border-bottom:0}
+.del-step.is-active{color:var(--text)}
+.del-step.is-skip{opacity:.55}
+.del-mark{width:27px;height:27px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;flex:0 0 auto;color:var(--green);transition:border-color .2s,background .2s}
+.del-mark svg{width:14px;height:14px}
+.del-step.is-done .del-mark{border-color:var(--green);background:color-mix(in srgb,var(--green) 14%,transparent)}
+.del-step.is-error .del-mark{border-color:var(--red);color:var(--red)}
+.del-spin{width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,var(--line));border-top-color:var(--accent);animation:onyx-spin .8s linear infinite}
+.del-dash{width:11px;height:2px;border-radius:2px;background:var(--muted)}
+.del-label{flex:1;min-width:0}
+.del-count{font:600 12px ui-monospace,monospace;color:var(--muted);white-space:nowrap}
+.del-note{display:block;font-size:10px;color:var(--red);margin-top:2px}
+.del-done{display:flex;align-items:center;gap:14px;margin-top:16px;padding:15px 16px;border:1px solid color-mix(in srgb,var(--green) 40%,transparent);background:color-mix(in srgb,var(--green) 9%,transparent);border-radius:15px;animation:onyx-dialog-in .3s cubic-bezier(.2,.9,.3,1.08)}
+.del-done-mark{width:40px;height:40px;border-radius:50%;background:var(--green);color:#052a1e;display:grid;place-items:center;flex:0 0 auto;animation:onyx-pop .5s cubic-bezier(.2,1.5,.4,1)}
+.del-done-mark svg{width:21px;height:21px}
+.del-done b{display:block;font-size:14px;color:var(--text)}
+.del-done small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.del-done-partial{border-color:color-mix(in srgb,var(--red) 35%,transparent);background:color-mix(in srgb,var(--red) 7%,transparent)}
+.del-done-partial .del-done-mark{background:var(--red);color:#3a0d0a}
+.del-actions{margin-top:14px;justify-content:flex-end}
+@keyframes onyx-pop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+'''
 
 
 CLIENTS_JS='''<script>
@@ -1224,12 +2052,61 @@ function selection(){const n=selected().length,visible=allRows.filter(r=>!r.hidd
 const PAGE_SIZE=10;let shownCount=PAGE_SIZE;
 function list(){const q=search.value.trim().toLocaleLowerCase('ru'),mode=filter.value,p=proto.value;const matched=new Set;allRows.forEach(r=>{const d=r.dataset,match=(d.name+' '+d.id+' '+(d.kind==='subscription'?'подписка':'отдельная ссылка')).toLocaleLowerCase('ru').includes(q)&&(p==='all'||d.protocols.split(' ').includes(p))&&(mode==='all'||d.kind===mode||mode==='active'&&d.active==='1'||mode==='enabled'&&d.enabled==='1'||mode==='disabled'&&d.enabled==='0');if(match)matched.add(r);else{r.hidden=true;r.querySelector('[data-select-client]').checked=false}});const ordered=allRows.slice().sort((a,b)=>{const x=a.dataset,y=b.dataset;switch(sort.value){case'name':return x.name.localeCompare(y.name,'ru');case'traffic':return Number(y.traffic)-Number(x.traffic);case'active':return Number(y.active)-Number(x.active);case'newest':return Number(y.created)-Number(x.created)||allRows.indexOf(a)-allRows.indexOf(b);default:return Number(x.created)-Number(y.created)||allRows.indexOf(a)-allRows.indexOf(b)}});let visible=0;ordered.forEach(r=>{clientRows.appendChild(r);if(matched.has(r)){r.hidden=visible>=shownCount;visible++}else r.hidden=true});const more=document.getElementById('loadMoreWrap');if(more)more.hidden=shownCount>=visible;document.getElementById('visibleCount').textContent='Показано '+Math.min(shownCount,visible)+' из '+visible;document.getElementById('noAccounts').hidden=visible>0;selection();document.dispatchEvent(new Event('onyx-filtered'))}
 [search,filter,proto,sort].forEach(e=>e.addEventListener(e===search?'input':'change',()=>{shownCount=PAGE_SIZE;list()}));document.getElementById('loadMoreClients').addEventListener('click',()=>{shownCount+=PAGE_SIZE;list()});document.getElementById('selectAllClients').addEventListener('change',e=>{allRows.forEach(r=>{const c=r.querySelector('[data-select-client]');if(!r.hidden&&!c.disabled)c.checked=e.target.checked});selection()});allRows.forEach(r=>r.querySelector('[data-select-client]').addEventListener('change',selection));document.getElementById('clearSelected').addEventListener('click',()=>{allRows.forEach(r=>r.querySelector('[data-select-client]').checked=false);selection()});
+const DEL_CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const DEL_CROSS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+let delDlg=null,delRunning=false;
+function delMark(state){return state==='done'?DEL_CHECK:state==='error'?DEL_CROSS:state==='skip'?'<span class="del-dash"></span>':'<span class="del-spin"></span>'}
+function delPaint(key,state,count,note){if(!delDlg)return;const li=delDlg.querySelector('[data-step="'+key+'"]');if(!li)return;li.classList.remove('is-active','is-done','is-error','is-skip');if(state!=='pending')li.classList.add('is-'+state);li.querySelector('.del-mark').innerHTML=delMark(state);li.querySelector('.del-count').textContent=count||'';let n=li.querySelector('.del-note');if(note&&!n){n=document.createElement('small');n.className='del-note';li.querySelector('.del-label').append(n)}if(n)n.textContent=note||''}
+async function deleteViaJob(items,rows){
+lockClients(true);rows.forEach(r=>r&&r.classList.add('client-pending'));delRunning=true;
+if(!delDlg){delDlg=document.createElement('dialog');delDlg.id='onyxDeleteDlg';delDlg.className='del-dialog';delDlg.innerHTML='<div class="dialog-head"><div><h2 id="delTitle">Удаление</h2><small class="muted" id="delSub"></small></div></div><div class="del-counter"><b id="delCounter">0 / 0</b><span>удалено</span></div><ol class="del-steps" id="delSteps"></ol><div class="del-done" id="delDone" hidden><span class="del-done-mark">'+DEL_CHECK+'</span><div><b id="delDoneTitle">Готово</b><small id="delDoneText"></small></div></div><div class="actions del-actions"><button type="button" class="primary" id="delClose" hidden>Готово</button></div>';document.body.append(delDlg);delDlg.addEventListener('cancel',e=>{if(delRunning)e.preventDefault()});delDlg.querySelector('#delClose').addEventListener('click',()=>delDlg.close())}
+const single=items.length===1;
+delDlg.querySelector('#delTitle').textContent=single?'Удаление клиента':'Удаление клиентов';
+delDlg.querySelector('#delSub').textContent=single?(((rows[0]&&rows[0].dataset.name)||items[0].id).trim()):(items.length+' клиент(а/ов): '+rows.slice(0,3).map(r=>((r.dataset.name||'').trim()||r.dataset.id)).join(', ')+(items.length>3?'…':''));
+delDlg.querySelector('#delCounter').textContent='0 / '+items.length;
+delDlg.querySelector('#delSteps').innerHTML='<li class="del-step is-active" data-step="revoke"><span class="del-mark"><span class="del-spin"></span></span><span class="del-label">Отзыв ключей доступа</span><span class="del-count">0 / '+items.length+'</span></li><li class="del-step" data-step="nodes"><span class="del-mark"><span class="del-spin"></span></span><span class="del-label">Очистка профилей на нодах</span><span class="del-count"></span></li>';
+const doneBox=delDlg.querySelector('#delDone');doneBox.hidden=true;doneBox.classList.remove('del-done-partial');
+delDlg.querySelector('#delClose').hidden=true;
+delDlg.showModal();
+let job=null;
+try{
+const resp=await fetch(clientPath+'/client-delete-job',{method:'POST',headers:{'X-Onyx-Async':'1'},body:new URLSearchParams({csrf:clientCsrf,clients:JSON.stringify(items)})});
+if(resp.redirected)throw new Error('Сессия завершена. Войдите заново.');
+let start;try{start=await resp.json()}catch(e){throw new Error('Панель вернула некорректный ответ.')}
+if(!resp.ok||!start.ok)throw new Error(start.message||'Не удалось запустить удаление.');
+const t0=Date.now();
+while(Date.now()-t0<180000){
+await new Promise(rs=>setTimeout(rs,600));
+let d2;try{const r2=await fetch(clientPath+'/client-delete-status',{method:'POST',body:new URLSearchParams({csrf:clientCsrf,job:start.job})});if(!r2.ok)continue;d2=await r2.json()}catch(e){continue}
+if(!d2.ok)continue;job=d2.job;
+for(const st of job.steps){const state=st.status==='pending'?'pending':st.status==='skip'?'skip':st.status==='error'?'error':st.status==='done'?'done':'active';delPaint(st.key,state,st.total?(''+st.done+' / '+st.total):'',st.note)}
+delDlg.querySelector('#delCounter').textContent=''+job.done+' / '+job.total;
+if(job.status!=='running')break;
+}
+if(!job)throw new Error('Панель не сообщила статус удаления.');
+const deletedSet=new Set(job.deleted||[]),okCount=deletedSet.size,failCount=(job.failed||[]).length;
+rows.forEach((r,i)=>{if(!r)return;if(deletedSet.has(items[i].id))removeClientRow(r);else r.classList.remove('client-pending')});
+if(!okCount)throw new Error((job.failed&&job.failed[0]&&job.failed[0].message)||'Не удалось удалить клиентов.');
+doneBox.hidden=false;if(failCount)doneBox.classList.add('del-done-partial');
+delDlg.querySelector('#delDoneTitle').textContent=failCount?'Частично выполнено':'Готово';
+delDlg.querySelector('#delDoneText').textContent=job.message||'Готово';
+notice.hidden=!failCount;if(failCount)notice.textContent=job.message;
+delDlg.querySelector('#delClose').hidden=false;
+}catch(error){
+if(delDlg.open)delDlg.close();
+notice.hidden=false;notice.textContent=error.message;
+rows.forEach(r=>r&&r.classList.remove('client-pending'));
+}finally{delRunning=false;lockClients(false);selection()}}
+async function deleteSelected(){const rows=selected();if(!rows.length||changing)return;if(!await onyxConfirm('Удалить '+rows.length+' клиент(а/ов) и их ключи? Это действие необратимо.',{danger:true}))return;const items=rows.map(r=>r.dataset.kind==='subscription'?{kind:'subscription',id:r.dataset.id}:r.dataset.kind==='openflux'?{kind:'openflux',id:r.dataset.id.replace(/^openflux-/,'')}:{kind:'user',id:r.dataset.id});await deleteViaJob(items,rows)}
+document.getElementById('deleteSelected').addEventListener('click',deleteSelected);
 const createDialog=document.getElementById('createAccount'),createForm=document.getElementById('createClientForm'),kindField=document.getElementById('accountKind'),subFields=document.getElementById('subscriptionFields'),directFields=document.getElementById('directFields'),quickFields=document.getElementById('quickFields'),createSummary=document.getElementById('createSummary'),createError=document.getElementById('createError'),createSubmit=document.getElementById('createClientSubmit');let quickProtocol='';
 quickFields.insertAdjacentHTML('beforeend','<div class="mtproto-options" id="mtprotoOptions" hidden><label>TCP-порт<input name="mtproto_port" id="mtprotoPort" type="number" min="1024" max="65535" value="2399" inputmode="numeric" required><small>Панель проверит и откроет порт автоматически</small></label><label>Устройств<input name="mtproto_devices" id="mtprotoDevices" type="number" min="1" max="20" value="1" inputmode="numeric" required><small>Отдельный ключ и QR для каждого устройства</small></label></div>');const mtprotoOptions=document.getElementById('mtprotoOptions'),mtprotoPort=document.getElementById('mtprotoPort'),mtprotoDevices=document.getElementById('mtprotoDevices');
-const protocolNames={vless:'VLESS XHTTP',hysteria:'Hysteria2',mtproto:'MTProto',web:'WEB Proxy',awg20:'AWG 2.0',awg31:'AWG 3.1'};
+const protocolNames={vless:'VLESS XHTTP',hysteria:'Hysteria2',tuic:'TUIC 5',mtproto:'MTProto',web:'WEB Proxy',awg20:'AWG 2.0',awg31:'AWG 3.1'};
 function clearQuick(){quickProtocol='';createForm.querySelectorAll('[data-quick-protocol]').forEach(b=>b.classList.remove('selected'))}
 function updateCreate(){const mode=createForm.querySelector('[name=access_mode]:checked').value,isSub=mode==='subscription',isQuick=Boolean(quickProtocol),isMtproto=quickProtocol==='mtproto';subFields.hidden=!isSub;directFields.hidden=isSub;quickFields.hidden=!isQuick;mtprotoOptions.hidden=!isMtproto;mtprotoPort.disabled=!isMtproto;mtprotoDevices.disabled=!isMtproto;if(isSub){kindField.value='subscription';const chosen=Array.from(subFields.querySelectorAll('input[type=checkbox]:checked')).map(x=>protocolNames[x.name]),limit=document.getElementById('deviceLimit').value;createSummary.textContent='Подписка · '+(chosen.join(' + ')||'выберите протокол')+' · '+(limit==='0'?'без лимита':limit+' устр.')}else if(isQuick){kindField.value=quickProtocol;document.getElementById('quickTitle').textContent=protocolNames[quickProtocol];document.getElementById('quickDescription').textContent=isMtproto?'Выберите порт и количество отдельных ключей Telegram.':'Будет создана отдельная HTTPS-ссылка для Telegram.';createSummary.textContent='Отдельное подключение · '+protocolNames[quickProtocol]+(isMtproto?' · порт '+mtprotoPort.value+' · '+mtprotoDevices.value+' устр.':'')}else{let direct=createForm.querySelector('[name=direct_protocol]:checked');if(!direct){direct=createForm.querySelector('[name=direct_protocol][value=vless]');direct.checked=true}kindField.value=direct.value;createSummary.textContent='Отдельное подключение · '+protocolNames[direct.value]}}
-createForm.querySelectorAll('[name=access_mode]').forEach(x=>x.addEventListener('change',()=>{clearQuick();if(x.value==='direct'&&x.checked&&!createForm.querySelector('[name=direct_protocol]:checked'))createForm.querySelector('[name=direct_protocol][value=vless]').checked=true;updateCreate()}));createForm.querySelectorAll('[name=direct_protocol]').forEach(x=>x.addEventListener('change',()=>{clearQuick();updateCreate()}));createForm.querySelectorAll('#subscriptionFields input').forEach(x=>x.addEventListener('change',updateCreate));createForm.querySelectorAll('[data-quick-protocol]').forEach(button=>button.addEventListener('click',()=>{quickProtocol=button.dataset.quickProtocol;createForm.querySelector('[name=access_mode][value=direct]').checked=true;createForm.querySelectorAll('[name=direct_protocol]').forEach(input=>input.checked=false);createForm.querySelectorAll('[data-quick-protocol]').forEach(b=>b.classList.toggle('selected',b===button));updateCreate()}));const openFluxShortcut=createForm.querySelector('[data-open-openflux]');if(openFluxShortcut)openFluxShortcut.addEventListener('click',()=>{createDialog.close();document.getElementById('newOpenFlux').showModal()});document.getElementById('deviceLimit').addEventListener('input',updateCreate);createForm.addEventListener('submit',e=>{if(kindField.value==='subscription'&&!subFields.querySelector('input[type=checkbox]:checked')){e.preventDefault();createSummary.textContent='Выберите хотя бы один протокол';subFields.scrollIntoView({block:'center',behavior:'smooth'})}});document.getElementById('newAccount').addEventListener('click',()=>{createForm.reset();clearQuick();kindField.value='subscription';updateCreate();createDialog.showModal();setTimeout(()=>document.getElementById('accountName').focus(),30)});updateCreate();
+createForm.querySelectorAll('[name=access_mode]').forEach(x=>x.addEventListener('change',()=>{clearQuick();if(x.value==='direct'&&x.checked&&!createForm.querySelector('[name=direct_protocol]:checked'))createForm.querySelector('[name=direct_protocol][value=vless]').checked=true;updateCreate()}));createForm.querySelectorAll('[name=direct_protocol]').forEach(x=>x.addEventListener('change',()=>{clearQuick();updateCreate()}));createForm.querySelectorAll('#subscriptionFields input').forEach(x=>x.addEventListener('change',updateCreate));createForm.querySelectorAll('[data-quick-protocol]').forEach(button=>button.addEventListener('click',()=>{quickProtocol=button.dataset.quickProtocol;createForm.querySelector('[name=access_mode][value=direct]').checked=true;createForm.querySelectorAll('[name=direct_protocol]').forEach(input=>input.checked=false);createForm.querySelectorAll('[data-quick-protocol]').forEach(b=>b.classList.toggle('selected',b===button));updateCreate()}));const openFluxShortcut=createForm.querySelector('[data-open-openflux]');if(openFluxShortcut)openFluxShortcut.addEventListener('click',()=>{createDialog.close();document.getElementById('newOpenFlux').showModal()});document.getElementById('deviceLimit').addEventListener('input',updateCreate);
+const planSel=document.getElementById('accountPlan');
+if(planSel)planSel.addEventListener('change',()=>{const o=planSel.selectedOptions[0];if(!o||!o.dataset.days){updateCreate();return}document.getElementById('deviceLimit').value=o.dataset.devices||'0';const planLim=document.getElementById('createLimitGb');if(planLim)planLim.value=o.dataset.limit||'0';subFields.querySelector('[name=vless]').checked=o.dataset.vless==='1';subFields.querySelector('[name=hysteria]').checked=o.dataset.hysteria==='1';subFields.querySelector('[name=tuic]').checked=o.dataset.tuic==='1';updateCreate()});createForm.addEventListener('submit',e=>{if(kindField.value==='subscription'&&!subFields.querySelector('input[type=checkbox]:checked')){e.preventDefault();createSummary.textContent='Выберите хотя бы один протокол';subFields.scrollIntoView({block:'center',behavior:'smooth'})}});document.getElementById('newAccount').addEventListener('click',()=>{createForm.reset();clearQuick();kindField.value='subscription';updateCreate();createDialog.showModal();setTimeout(()=>document.getElementById('accountName').focus(),30)});updateCreate();
 document.querySelectorAll('[data-open-client]').forEach(b=>b.addEventListener('click',()=>document.getElementById('client-'+b.dataset.openClient).showModal()));
 mtprotoPort.addEventListener('input',updateCreate);mtprotoDevices.addEventListener('input',updateCreate);
 function showCreateError(message){createError.textContent=message||'Не удалось создать подключение.';createError.hidden=false;createError.scrollIntoView({block:'nearest',behavior:'smooth'})}
@@ -1244,13 +2121,32 @@ function lockClients(value){changing=value}
 function confirmClientAccess(message){const d=document.getElementById('accessConfirm');if(d.open)return Promise.resolve(false);d.querySelector('[data-access-message]').textContent=message;d.returnValue='';return new Promise(resolve=>{d.addEventListener('close',()=>resolve(d.returnValue==='apply'),{once:true});d.showModal()})}
 async function setAccess(rows,value,ask=false){if(changing||!rows.length)return;if(ask&&!await confirmClientAccess((value?'Включить':'Отключить')+' доступ для '+rows.length+' клиент(а/ов)? Соединения могут кратковременно прерваться.'))return;const previous=rows.map(r=>({enabled:r.dataset.enabled,active:r.dataset.active}));rows.forEach(r=>{paintAccess(r,Boolean(value),false);r.classList.add('client-pending')});lockClients(true);notice.hidden=false;let done=0;try{for(const r of rows){notice.textContent='Применение: '+(done+1)+' / '+rows.length;await requestClient({id:r.dataset.id,kind:r.dataset.kind,operation:'state',enabled:String(value)});done++}notice.textContent='Готово. Доступ изменён без перезагрузки страницы.';allRows.forEach(r=>{const c=r.querySelector('[data-select-client]');if(c)c.checked=false});selection()}catch(e){for(let i=done;i<rows.length;i++)paintAccess(rows[i],previous[i].enabled==='1',previous[i].active==='1');notice.textContent='Применено '+done+' из '+rows.length+'. '+e.message}finally{rows.forEach(r=>r.classList.remove('client-pending'));lockClients(false)}}
 document.querySelectorAll('[data-state]').forEach(b=>b.addEventListener('click',()=>setAccess([b.closest('[data-client]')],b.getAttribute('aria-checked')==='true'?0:1)));document.querySelectorAll('[data-bulk]').forEach(b=>b.addEventListener('click',()=>setAccess(selected(),Number(b.dataset.bulk),true)));
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-client-check]');if(!b||b.disabled)return;
+e.preventDefault();b.disabled=true;const status=document.querySelector('[data-check-status="'+b.dataset.clientCheck+'"]')||e.target.closest('.actions').querySelector('.check-status');
+const paint=(cls,text)=>{if(status){status.className='check-status '+cls;status.textContent=text}};
+try{const r=await fetch(clientPath+'/client-check',{method:'POST',body:new URLSearchParams({csrf:clientCsrf,id:b.dataset.clientCheck})});
+let d;try{d=await r.json()}catch(err){throw new Error('Панель вернула некорректный ответ.')}
+if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось запустить проверку.');
+paint('','Подключаюсь через профиль…');
+const t0=Date.now();
+while(Date.now()-t0<60000){await new Promise(rs=>setTimeout(rs,2000));
+const r2=await fetch(clientPath+'/client-check-status?id='+encodeURIComponent(b.dataset.clientCheck),{cache:'no-store'});
+if(!r2.ok||r2.redirected)continue;const d2=await r2.json();const c=d2.check||{};
+if(c.status==='ok'){paint('ok','✓ Работает: выход '+c.ip+' · задержка '+(c.delay||0)+' мс · '+(c.speed?bytes(c.speed)+'/с':'скорость не измерена'));break}
+if(c.status==='error'){paint('err','× '+((c.message||'Проверка не удалась').slice(0,140)));break}
+if(c.status!=='running'){paint('err','× Проверка не запустилась.');break}}
+if(Date.now()-t0>=60000)paint('err','× Проверка не завершилась за минуту.')
+}catch(err){paint('err','× '+err.message)}finally{b.disabled=false}});
 document.querySelectorAll('[data-secret-reveal]').forEach(b=>b.addEventListener('click',()=>{const field=document.getElementById(b.dataset.secretReveal),show=field.type==='password';field.type=show?'text':'password';b.textContent=show?'Скрыть':'Показать'}));
+async function requestWarp(fields){const r=await fetch(clientPath+'/warp-user',{method:'POST',body:new URLSearchParams({csrf:clientCsrf,...fields})});if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');let d;try{d=await r.json()}catch(e){throw new Error('Панель вернула некорректный ответ.')}if(!r.ok||!d.ok)throw new Error(d.message||'Изменение не применено');return d}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-warp]');if(!b||b.disabled)return;e.preventDefault();const on=b.getAttribute('aria-pressed')==='true';b.disabled=true;try{const d=await requestWarp({id:b.dataset.warp,enabled:on?'0':'1'});b.classList.toggle('on',!on);b.setAttribute('aria-pressed',String(!on));if(window.onyxToast)onyxToast(d.message||'Готово')}catch(err){if(window.onyxToast)onyxToast(err.message,'err')}finally{b.disabled=false}});
 document.querySelectorAll('form[data-client-action]').forEach(f=>f.addEventListener('submit',async e=>{e.preventDefault();if(changing||(f.dataset.clientConfirm&&!(await onyxConfirm(f.dataset.clientConfirm,{danger:true}))))return;const p=f.querySelector('[data-form-status]'),b=f.querySelector('button[type="submit"],button:not([type])'),fields=Object.fromEntries(new FormData(f));b.disabled=true;changing=true;try{await requestClient(fields);const row=allRows.find(r=>r.dataset.id===fields.id);if(fields.operation==='rename'&&row){row.dataset.name=fields.name.trim();row.querySelector('.client-name strong').textContent=fields.name.trim();list()}if(fields.operation==='expiry'&&row){const pill=row.querySelector('.expiry-pill');if(pill){if(fields.expires){pill.hidden=false;pill.textContent='до '+fields.expires.split('-').reverse().join('.');pill.classList.toggle('expired',new Date(fields.expires+'T23:59:59').getTime()<Date.now())}else{pill.hidden=true}}}p.textContent=fields.operation==='secret'?'Секрет сохранён.':'Изменение сохранено.'}catch(err){p.textContent=err.message}finally{b.disabled=false;changing=false}}));
-document.addEventListener('submit',async e=>{const form=e.target.closest('form');if(!form||form===createForm||form.matches('[data-client-action]'))return;const action=new URL(form.action,location.href).pathname;if(!['/delete-user','/subscription-action','/openflux-profile'].some(s=>action.endsWith(s)))return;e.preventDefault();e.stopImmediatePropagation();if(form.dataset.confirm&&!(await onyxConfirm(form.dataset.confirm,{danger:true})))return;const fields=Object.fromEntries(new FormData(form)),operation=String(fields.operation||''),rawId=String(fields.id||''),row=form.closest('[data-client]')||allRows.find(r=>r.dataset.id===(action.endsWith('/openflux-profile')?'openflux-'+rawId:rawId)),button=form.querySelector('button[type="submit"],button:not([type])');if(button)button.disabled=true;if(row)row.classList.add('client-pending');notice.hidden=false;notice.textContent=operation==='delete'||action.endsWith('/delete-user')?'Удаляем клиента…':'Применяем изменение…';try{await requestForm(form);const deleting=operation==='delete'||action.endsWith('/delete-user');if(deleting&&row){removeClientRow(row);notice.textContent='Клиент удалён.'}else if(row&&action.endsWith('/openflux-profile')&&(operation==='enable'||operation==='disable')){const enabled=operation==='enable';row.classList.remove('client-pending');paintAccess(row,enabled,enabled);const input=form.querySelector('[name=operation]');if(input)input.value=enabled?'disable':'enable';if(button)button.disabled=false;notice.textContent='Состояние OpenFlux изменено.'}else{notice.textContent='Готово. Обновляем список…';location.reload();return}}catch(error){if(row)row.classList.remove('client-pending');if(button)button.disabled=false;notice.textContent=error.message}},true);
-document.getElementById('copySelected').addEventListener('click',async()=>{const links=selected().map(r=>r.dataset.link).join('\\n');try{await navigator.clipboard.writeText(links);notice.textContent='Ссылки выбранных клиентов скопированы.'}catch(e){notice.textContent='Браузер не разрешил копирование. Используйте кнопки в строках.'}notice.hidden=false});list();if(location.hash.startsWith('#account-')){const a=document.getElementById(location.hash.slice(1));if(a&&a.closest('dialog'))a.closest('dialog').showModal()}
+document.addEventListener('submit',async e=>{const form=e.target.closest('form');if(!form||form===createForm||form.matches('[data-client-action]'))return;const action=new URL(form.action,location.href).pathname;if(!['/delete-user','/subscription-action','/openflux-profile'].some(s=>action.endsWith(s)))return;e.preventDefault();e.stopImmediatePropagation();if(form.dataset.confirm&&!(await onyxConfirm(form.dataset.confirm,{danger:true})))return;const fields=Object.fromEntries(new FormData(form)),operation=String(fields.operation||''),rawId=String(fields.id||''),row=form.closest('[data-client]')||allRows.find(r=>r.dataset.id===(action.endsWith('/openflux-profile')?'openflux-'+rawId:rawId)),button=form.querySelector('button[type="submit"],button:not([type])');if(button)button.disabled=true;if(row)row.classList.add('client-pending');const isFluxCreate=action.endsWith('/openflux-profile')&&operation==='create';try{const deleting=operation==='delete'||action.endsWith('/delete-user');if(deleting&&row){const kind=action.endsWith('/subscription-action')?'subscription':action.endsWith('/openflux-profile')?'openflux':'user';await deleteViaJob([{kind,id:rawId}],[row]);if(button)button.disabled=false;return}if(!isFluxCreate){notice.hidden=false;notice.textContent='Применяем изменение…'};await requestForm(form);if(row&&action.endsWith('/openflux-profile')&&(operation==='enable'||operation==='disable')){const enabled=operation==='enable';row.classList.remove('client-pending');paintAccess(row,enabled,enabled);const input=form.querySelector('[name=operation]');if(input)input.value=enabled?'disable':'enable';if(button)button.disabled=false;notice.textContent='Состояние OpenFlux изменено.'}else{notice.textContent='Готово. Обновляем список…';location.reload();return}}catch(error){if(row)row.classList.remove('client-pending');if(button)button.disabled=false;if(isFluxCreate){const fluxErr=document.getElementById('fluxCreateError');if(fluxErr){fluxErr.textContent=error.message;fluxErr.hidden=false;fluxErr.scrollIntoView({block:'nearest',behavior:'smooth'})}notice.hidden=true}else{notice.textContent=error.message;notice.hidden=false}}},true);
+document.getElementById('copySelected').addEventListener('click',async()=>{const links=selected().map(r=>r.dataset.link).join('\\n');try{await navigator.clipboard.writeText(links);notice.textContent='Ссылки выбранных клиентов скопированы.'}catch(e){notice.textContent='Браузер не разрешил копирование. Используйте кнопки в строках.'}notice.hidden=false});function openFromHash(){if(!location.hash.startsWith('#account-'))return;const a=document.getElementById(location.hash.slice(1));if(a&&a.closest('dialog'))a.closest('dialog').showModal()}
+list();openFromHash();window.addEventListener('hashchange',openFromHash);
 function bytes(value){let n=Math.max(0,Number(value)||0);for(const u of ['Б','КБ','МБ','ГБ','ТБ']){if(n<1024||u==='ТБ')return (u==='Б'?n.toFixed(0):n.toFixed(1))+' '+u;n/=1024}}
-let polling=false;async function pollClients(){if(polling||changing||selected().length||document.querySelector('dialog:modal'))return;polling=true;try{const response=await fetch(clientPath+'/clients-state',{cache:'no-store'});if(response.redirected)throw new Error('Сессия завершена. Войдите заново.');if(!response.ok)throw new Error('Статистика не обновляется. Проверьте связь с панелью.');const data=await response.json();if(changing||selected().length||document.querySelector('dialog:modal'))return;const records=data.clients;if(records.length!==allRows.length||records.some(c=>!allRows.some(r=>r.dataset.id===c.id&&r.dataset.name===c.name&&r.dataset.protocols===c.protocols.join(' ')))){notice.hidden=false;notice.textContent='Данные клиентов изменились. Обновите страницу.';return}for(const c of records){const row=allRows.find(r=>r.dataset.id===c.id),total=c.up+c.down,flux=c.kind==='openflux';if(c.kind==='subscription'){const cell=row.querySelector('.hwid-cell');cell.firstChild.textContent=c.limit?c.devices+' / '+c.limit:'Без лимита';cell.querySelector('small').textContent=c.limit?'HWID':'Без привязки'}row.dataset.enabled=c.enabled?'1':'0';row.dataset.active=c.active?'1':'0';row.dataset.traffic=String(total);const access=row.querySelector('[role=switch]');if(access)access.setAttribute('aria-checked',c.enabled?'true':'false');row.querySelectorAll('.badge').forEach(badge=>{badge.classList.toggle('on',c.active&&c.enabled);badge.textContent=!c.enabled?'Отключена':flux?(c.active?'Работает':'Остановлен'):(c.active?'Передаёт трафик':'Нет трафика')});if(!flux){row.querySelector('.traffic-cell b').textContent=bytes(total);row.querySelector('.traffic-cell small').textContent='↑ '+bytes(c.up)+' · ↓ '+bytes(c.down);row.querySelector('.traffic-split .up').style.width=(total?c.up/total*100:0)+'%';row.querySelector('.traffic-split .down').style.width=(total?c.down/total*100:0)+'%'}}const counts=[records.length,records.filter(c=>c.active).length,records.filter(c=>c.kind==='subscription').length,bytes(records.reduce((n,c)=>n+c.up+c.down,0))];document.querySelectorAll('.client-stat b').forEach((b,i)=>b.textContent=counts[i]);list()}catch(err){notice.hidden=false;notice.textContent=err.message}finally{polling=false}}
-setInterval(pollClients,30000);
+let polling=false;async function pollClients(){if(polling||changing||selected().length||document.querySelector('dialog:modal:not(.client-detail)'))return;polling=true;try{const response=await fetch(clientPath+'/clients-state',{cache:'no-store'});if(response.redirected)throw new Error('Сессия завершена. Войдите заново.');if(!response.ok)throw new Error('Статистика не обновляется. Проверьте связь с панелью.');const data=await response.json();if(changing||selected().length||document.querySelector('dialog:modal:not(.client-detail)'))return;const records=data.clients;if(records.length!==allRows.length||records.some(c=>!allRows.some(r=>r.dataset.id===c.id&&r.dataset.name===c.name&&r.dataset.protocols===c.protocols.join(' ')))){notice.hidden=false;notice.textContent='Данные клиентов изменились. Обновите страницу.';return}for(const c of records){const row=allRows.find(r=>r.dataset.id===c.id),total=c.up+c.down,flux=c.kind==='openflux';if(c.kind==='subscription'){const cell=row.querySelector('.hwid-cell');cell.firstChild.textContent=c.limit?c.devices+' / '+c.limit:'Без лимита';cell.querySelector('small').textContent=c.limit?'HWID':'Без привязки'}row.dataset.enabled=c.enabled?'1':'0';row.dataset.active=c.active?'1':'0';row.dataset.traffic=String(total);const access=row.querySelector('[role=switch]');if(access)access.setAttribute('aria-checked',c.enabled?'true':'false');row.querySelectorAll('.badge').forEach(badge=>{badge.classList.toggle('on',c.active&&c.enabled);badge.textContent=!c.enabled?'Отключена':flux?(c.active?'Работает':'Остановлен'):(c.active?'Передаёт трафик':'Нет трафика')});const wb=row.querySelector('[data-warp]');if(wb&&typeof c.warp==='boolean'){wb.classList.toggle('on',c.warp);wb.setAttribute('aria-pressed',String(c.warp))}const dlg=document.getElementById('client-'+c.id);if(dlg&&dlg.open){const db=dlg.querySelector('.account-head .badge');if(db){db.classList.toggle('on',c.active&&c.enabled);db.textContent=!c.enabled?'Отключена':flux?(c.active?'Работает':'Остановлен'):(c.active?'Передаёт трафик':'Нет трафика')}dlg.querySelectorAll('.account-metrics span').forEach(sp=>{const label=sp.textContent;if(label==='Получено')sp.nextElementSibling.textContent=bytes(c.down);else if(label==='Отправлено')sp.nextElementSibling.textContent=bytes(c.up);else if(label==='Всего')sp.nextElementSibling.textContent=bytes(total);else if(label.startsWith('Трафик:')){sp.textContent='Трафик: '+bytes(total);sp.nextElementSibling.textContent='↑ '+bytes(c.up)+' · ↓ '+bytes(c.down)}else if(label==='Устройства · HWID')sp.nextElementSibling.textContent=c.limit?c.devices+' / '+c.limit:'Без лимита'})}if(!flux){row.querySelector('.traffic-cell b').textContent=bytes(total);row.querySelector('.traffic-cell small').textContent='↑ '+bytes(c.up)+' · ↓ '+bytes(c.down);row.querySelector('.traffic-split .up').style.width=(total?c.up/total*100:0)+'%';row.querySelector('.traffic-split .down').style.width=(total?c.down/total*100:0)+'%';const lb=row.querySelector('.limit-bar');if(lb&&typeof c.limit_gb==='number'){if(!c.limit_gb){lb.remove();const ln=row.querySelector('.limit-note');if(ln)ln.remove()}else{const ceil=c.limit_gb*1073741824,used=c.month_used||0,share=Math.min(100,100*used/ceil);lb.classList.toggle('limit-bar-warn',share>=80&&share<100);lb.classList.toggle('limit-bar-over',share>=100);lb.querySelector('i').style.width=share.toFixed(1)+'%';const note=row.querySelector('.limit-note');if(note)note.textContent=bytes(used)+' из '+c.limit_gb+' ГБ в этом месяце'}}const sp=row.querySelector('.spark polyline');if(sp&&Array.isArray(c.spark)&&c.spark.length>1){const w=96,h=26,peak=Math.max.apply(null,c.spark)||1,st=w/(c.spark.length-1);sp.setAttribute('points',c.spark.map((v,i)=>(i*st).toFixed(1)+','+(h-2-(h-5)*v/peak).toFixed(1)).join(' '))}}}const counts=[records.length,records.filter(c=>c.active).length,records.filter(c=>c.kind==='subscription').length,bytes(records.reduce((n,c)=>n+c.up+c.down,0))];document.querySelectorAll('.client-stat b').forEach((b,i)=>b.textContent=counts[i]);list()}catch(err){notice.hidden=false;notice.textContent=err.message}finally{polling=false}}
+setInterval(pollClients,5000);
 (function(){
 const MONTHS=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
 function fmtISO(y,m,d){return y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0")}
@@ -1303,10 +2199,19 @@ document.querySelectorAll(".onyx-cal").forEach(wrap=>{
 PRESET_THUMBS_JS='''<script>
 (()=>{const presets=@@PRESETS@@,cards=[...document.querySelectorAll('.preset[data-preset-card]')];
 const fit=card=>{const f=card.querySelector('.preset-frame');if(f)card.style.setProperty('--s',(card.clientWidth/1280).toFixed(4))};
+// Песочница превью не исполняет скрипты (см. комментарий выше): вычищаем их до
+// вставки, чтобы Safari не писал "Blocked script execution in about:srcdoc".
+const clean=html=>{try{const doc=new DOMParser().parseFromString(html,'text/html');
+  doc.querySelectorAll('script').forEach(el=>el.remove());
+  doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]) if(/^on/i.test(a.name)) el.removeAttribute(a.name)});
+  return (doc.doctype?'<!doctype html>':'')+doc.documentElement.outerHTML}catch(e){return ''}};
 const load=card=>{const p=presets[card.dataset.presetId],f=card.querySelector('.preset-frame');
-  if(!p||!p.html||!f||f.dataset.loaded)return;f.dataset.loaded='1';f.srcdoc=p.html;card.classList.add('has-frame');fit(card)};
+  if(!p||!p.html||!f||f.dataset.loaded)return;const src=clean(p.html);if(!src)return;f.dataset.loaded='1';f.srcdoc=src;card.classList.add('has-frame');fit(card)};
 cards.forEach(fit);addEventListener('resize',()=>cards.forEach(fit));
-if('IntersectionObserver'in window){const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){io.unobserve(en.target);load(en.target)}})},{rootMargin:'240px'});cards.forEach(c=>io.observe(c))}
+// Закреплённая стандартная карточка всегда рендерится сразу, без ожидания
+// IntersectionObserver — первая карточка видна без прокрутки.
+document.querySelectorAll('.preset[data-preset-standard="1"]').forEach(load);
+if('IntersectionObserver'in window){const io=new IntersectionObserver(es=>{es.forEach(en=>{if(en.isIntersecting){io.unobserve(en.target);load(en.target)}})},{rootMargin:'240px'});cards.forEach(c=>{if(!c.dataset.presetStandard||c.dataset.presetStandard!=='1')io.observe(c)})}
 else cards.forEach(load);
 if(window.matchMedia&&!matchMedia('(hover: hover) and (pointer: fine)').matches){
   document.addEventListener('click',e=>{
@@ -1322,22 +2227,97 @@ if(window.matchMedia&&!matchMedia('(hover: hover) and (pointer: fine)').matches)
 
 
 def editor_ui(source, path, csrf, presets, has_draft):
-    art={'countdown':'◷','cars':'🏎','cats-repair':'🐱','loading':'↻'}
+    art={'standard':'◆','countdown':'◷','cars':'🏎','cats-repair':'🐱','loading':'↻'}
+    # The bundled standard stub leads the list and is pinned: it is the first
+    # card, marked with a fixed badge and can only be applied or previewed —
+    # never edited or removed — so the soft-start page the owner got right
+    # after installation can always be restored in one click.
     card_items=[]
-    for preset in presets:
+    custom_items=[p for p in presets if p['id']!='standard']
+    for preset in ([p for p in presets if p['id']=='standard']+custom_items):
+        standard=preset['id']=='standard'
         editable=bool(preset.get('custom') or str(preset.get('id','')).startswith('custom-'))
         edit=''
         if editable:
             edit=f'''<button type="button" class="preset-edit-btn" data-edit-preset="{esc(preset['id'])}">Редактировать</button><form class="preset-delete" method="post" action="{esc(path)}/custom-preset" data-confirm="Удалить свою заглушку «{esc(preset['name'])}»?"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="preset" value="{esc(preset['id'])}"><button class="danger">Удалить</button></form>'''
-        card_items.append(f'''<div class="preset" data-preset-card data-preset-id="{esc(preset['id'])}"><div class="preset-thumb"><div class="preset-art">{art.get(preset["id"],"✦")}</div><iframe class="preset-frame" aria-hidden="true" tabindex="-1" sandbox="" referrerpolicy="no-referrer" title=" "></iframe></div><div class="preset-veil"><b>{esc(preset["name"])}</b><p>{esc(preset["description"])}</p><div class="actions"><button type="button" data-preview-preset="{esc(preset['id'])}">Предпросмотр</button><form method="post" action="{esc(path)}/apply-preset" data-confirm="Заменить рабочую заглушку пресетом «{esc(preset['name'])}»?">{hidden(csrf,preset=preset["id"])}<button class="primary">Применить</button></form>{edit}</div></div></div>''')
+        pin='<span class="preset-pin" title="Всегда доступна — изменить или удалить её нельзя">Стандартная</span>' if standard else ''
+        css_class='preset pinned' if standard else 'preset'
+        card_items.append(f'''<div class="{css_class}" data-preset-card data-preset-id="{esc(preset['id'])}" data-preset-standard="{"1" if standard else "0"}"><div class="preset-thumb"><div class="preset-art">{art.get(preset["id"],"✦")}</div><iframe class="preset-frame" aria-hidden="true" tabindex="-1" sandbox="" referrerpolicy="no-referrer" title=" "></iframe></div><div class="preset-veil"><b>{esc(preset["name"])}{pin}</b><p>{esc(preset["description"])}</p><div class="actions"><button type="button" data-preview-preset="{esc(preset['id'])}">Предпросмотр</button><form method="post" action="{esc(path)}/apply-preset" data-confirm="Заменить рабочую заглушку «{esc(preset['name'])}»?">{hidden(csrf,preset=preset["id"])}<button class="primary">Применить</button></form>{edit}</div></div></div>''')
     cards=''.join(card_items)
     preset_data={p['id']:{'name':p['name'],'description':p.get('description',''),'html':p.get('html',''),'custom':bool(p.get('custom') or str(p.get('id','')).startswith('custom-'))} for p in presets}
     import json as _json
     presets_json=_json.dumps(preset_data,ensure_ascii=False).replace('</',r'<\/')
-    return f'''<div class="card editor-presets-card"><div class="card-title"><div><h2>Заглушка главной страницы</h2><p>Выберите готовую страницу, создайте свою или отредактируйте существующую</p></div><div class="actions"><button type="button" class="primary" id="openCustomPreset">{icon("plus")}Создать заглушку</button>{'<span class="pill">Черновик не опубликован</span>' if has_draft else ''}</div></div><div class="preset-grid">{cards}</div><p class="muted" style="font-size:12px;margin-bottom:0">«Применить» сразу публикует заглушку на сайте. Кнопка <b>Редактировать</b> открывает редактирование своей заглушки, <b>Предпросмотр</b> — предпросмотр без публикации.</p></div>
+    return f'''<div class="card editor-presets-card"><div class="card-title"><div><h2>Заглушка главной страницы</h2><p>Стандартная заглушка всегда первая и закреплена — её нельзя изменить или удалить. Остальные можно применять, просматривать и редактировать</p></div><div class="actions"><button type="button" class="primary" id="openCustomPreset">{icon("plus")}Создать заглушку</button>{'<span class="pill">Черновик не опубликован</span>' if has_draft else ''}</div></div><div class="preset-grid">{cards}</div><p class="muted" style="font-size:12px;margin-bottom:0">«Применить» сразу публикует заглушку на сайте. Кнопка <b>Редактировать</b> открывает редактирование своей заглушки, <b>Предпросмотр</b> — предпросмотр без публикации. Стандартная заглушка закреплена первой: доступны только «Применить» и «Предпросмотр».</p></div>
 <dialog id="customPresetDialog" class="create-dialog preset-create-dialog"><div class="dialog-head"><div><h2 id="customPresetTitle">Своя заглушка</h2><small>После сохранения она появится среди остальных заглушек</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="customPresetForm" method="post" action="{esc(path)}/custom-preset"><input type="hidden" name="csrf" value="{esc(csrf)}"><input type="hidden" name="operation" value="create" id="customPresetOp"><input type="hidden" name="preset" value="" id="customPresetId"><div class="form-grid"><div><label for="customPresetName">Название</label><input id="customPresetName" name="name" maxlength="80" required placeholder="Например, Скоро открытие"></div><div><label for="customPresetDescription">Краткое описание</label><input id="customPresetDescription" name="description" maxlength="180" placeholder="Что увидит посетитель"></div></div><label for="customPresetHtml">HTML заглушки</label><div class="editor-columns"><div class="editor-col"><div class="editor-bar"><span>index.html</span><i>до 1 МБ</i></div><textarea class="code-editor" id="customPresetHtml" name="html" spellcheck="false" required placeholder="<!doctype html>…"></textarea></div><div class="editor-col"><div class="preset-live-bar"><span>Предпросмотр</span><i>обновляется при вводе</i></div><iframe id="customPresetLive" class="preset-live-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Живой предпросмотр заглушки"></iframe></div></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="customPresetSave">Сохранить</button></div></form></dialog>
 <dialog id="previewDialog" class="preview-dialog"><div class="preview-top"><strong>Предпросмотр заглушки</strong><div class="actions"><div class="range"><button type="button" class="selected" id="previewDesktop">Компьютер</button><button type="button" id="previewPhone">Телефон</button></div><button type="button" data-close-dialog aria-label="Закрыть предпросмотр">×</button></div></div><div id="previewStage" class="preview-stage"><iframe id="landingPreview" title="Изолированный предпросмотр заглушки" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe></div><p class="preview-caption">Изолированный предпросмотр · рабочий сайт не изменён</p></dialog>
-<script>(()=>{{const presets={presets_json};const cp=document.getElementById('customPresetDialog'),cpf=document.getElementById('customPresetForm'),cpOp=document.getElementById('customPresetOp'),cpId=document.getElementById('customPresetId'),cpName=document.getElementById('customPresetName'),cpDesc=document.getElementById('customPresetDescription'),cpHtml=document.getElementById('customPresetHtml'),cpTitle=document.getElementById('customPresetTitle'),cpSave=document.getElementById('customPresetSave');document.getElementById('openCustomPreset').addEventListener('click',()=>{{cpOp.value='create';cpId.value='';cpTitle.textContent='Своя заглушка';cpSave.textContent='Создать заглушку';cpName.value='';cpDesc.value='';cpHtml.value='';cp.showModal();setTimeout(()=>cpName.focus(),30)}});document.querySelectorAll('[data-edit-preset]').forEach(b=>b.addEventListener('click',()=>{{const p=presets[b.dataset.editPreset];if(!p)return;cpOp.value='save';cpId.value=b.dataset.editPreset;cpTitle.textContent='Редактирование заглушки';cpSave.textContent='Сохранить изменения';cpName.value=p.name;cpDesc.value=p.description;cpHtml.value=p.html;cp.showModal();setTimeout(()=>cpName.focus(),30)}}));cpf.addEventListener('submit',e=>{{if(!cpName.value.trim()||!cpHtml.value.trim()){{e.preventDefault();return}}cpSave.disabled=true;cpSave.textContent='Сохраняем…'}});const pd=document.getElementById('previewDialog'),pf=document.getElementById('landingPreview');document.querySelectorAll('[data-preview-preset]').forEach(b=>b.addEventListener('click',async()=>{{const p=presets[b.dataset.previewPreset];if(!p||!p.html)return;b.disabled=true;try{{const r=await fetch('{esc(path)}/preview-html',{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}',html:p.html}})}});if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');if(!r.ok){{let msg='Ошибка предпросмотра ('+r.status+').';try{{msg=(await r.json()).message||msg}}catch(_){{}}throw new Error(msg)}}let d;try{{d=await r.json()}}catch(e){{throw new Error('Панель вернула некорректный ответ.')}}if(!d.document)throw new Error('Ошибка предпросмотра.');pf.srcdoc=d.document;pd.showModal()}}catch(err){{alert(err.message)}}finally{{b.disabled=false}}}}));['Desktop','Phone'].forEach(mode=>document.getElementById('preview'+mode).addEventListener('click',()=>{{document.getElementById('previewStage').classList.toggle('phone',mode==='Phone');['Desktop','Phone'].forEach(m=>document.getElementById('preview'+m).classList.toggle('selected',m===mode))}}));pd.addEventListener('close',()=>pf.removeAttribute('srcdoc'))}})();</script>''' + PRESET_THUMBS_JS.replace('@@PRESETS@@',presets_json) + PRESET_LIVE_JS
+<div class="move-overlay" id="applyPresetResult" hidden><div class="move-card" id="applyPresetCard"><div class="move-ring spin" id="applyPresetRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="applyPresetMark">…</b></div><h3 id="applyPresetResultTitle">Применяем заглушку…</h3><p id="applyPresetResultText">Публикуем на сайте…</p></div></div>
+<script>(()=>{{const presets={presets_json};
+const cp=document.getElementById('customPresetDialog'),cpf=document.getElementById('customPresetForm'),cpOp=document.getElementById('customPresetOp'),cpId=document.getElementById('customPresetId'),cpName=document.getElementById('customPresetName'),cpDesc=document.getElementById('customPresetDescription'),cpHtml=document.getElementById('customPresetHtml'),cpTitle=document.getElementById('customPresetTitle'),cpSave=document.getElementById('customPresetSave');
+const pd=document.getElementById('previewDialog'),pf=document.getElementById('landingPreview'),st=document.getElementById('previewStage');
+const toast=(msg)=>{{if(window.onyxToast)onyxToast(msg,'err')}};
+const editorOpen=()=>{{if(!cp){{toast('Редактор недоступен. Обновите страницу.');return false}}return true}};
+const openCreate=()=>{{if(!editorOpen())return;cpOp.value='create';cpId.value='';cpTitle.textContent='Своя заглушка';cpSave.textContent='Создать заглушку';cpName.value='';cpDesc.value='';cpHtml.value='';cp.showModal();setTimeout(()=>cpName.focus(),30)}};
+const openEdit=id=>{{const p=presets[id];
+if(!p||!p.html){{toast('Заглушка не найдена в списке. Обновите страницу.');return}}
+if(!editorOpen())return;
+cpOp.value='save';cpId.value=id;cpTitle.textContent='Редактирование заглушки';cpSave.textContent='Сохранить изменения';cpName.value=p.name;cpDesc.value=p.description;cpHtml.value=p.html;cp.showModal();setTimeout(()=>cpName.focus(),30)}};
+const launchPreview=async id=>{{const p=presets[id];
+if(!p||!p.html){{toast('Нет данных для предпросмотра. Обновите страницу.');return}}
+let b=null;document.querySelectorAll('[data-preview-preset]').forEach(el=>{{if(el.dataset.previewPreset===id)b=el}});
+if(b)b.disabled=true;
+try{{const r=await fetch('{esc(path)}/preview-html',{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}',html:p.html}})}});
+if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');
+if(!r.ok){{let msg='Ошибка предпросмотра ('+r.status+').';try{{msg=(await r.json()).message||msg}}catch(_){{
+}}throw new Error(msg)}}
+let d;try{{d=await r.json()}}catch(e){{throw new Error('Панель вернула некорректный ответ.')}}
+if(!d.document)throw new Error('Ошибка предпросмотра.');
+pf.srcdoc=d.document;pd.showModal()}}catch(err){{toast(err.message||'Ошибка предпросмотра.')}}finally{{if(b)b.disabled=false}}}};
+document.addEventListener('click',e=>{{
+const opener=e.target.closest('#openCustomPreset');if(opener){{openCreate();return}}
+const edit=e.target.closest('[data-edit-preset]');if(edit){{openEdit(edit.dataset.editPreset);return}}
+const prev=e.target.closest('[data-preview-preset]');if(prev){{launchPreview(prev.dataset.previewPreset);return}}
+const mode=e.target.closest('#previewDesktop,#previewPhone');
+if(mode&&st){{st.classList.toggle('phone',mode.id==='previewPhone');['previewDesktop','previewPhone'].forEach(m=>{{const el=document.getElementById(m);if(el)el.classList.toggle('selected',m===mode.id)}})}}}});
+if(cpf)cpf.addEventListener('submit',e=>{{if(!cpName.value.trim()||!cpHtml.value.trim()){{e.preventDefault();return}}cpSave.disabled=true;cpSave.textContent='Сохраняем…'}});
+if(pd)pd.addEventListener('close',()=>{{if(pf)pf.removeAttribute('srcdoc')}});
+}})();
+</script>
+<script>const applyOverlay=document.getElementById('applyPresetResult'),applyCard=document.getElementById('applyPresetCard'),applyRing=document.getElementById('applyPresetRing'),applyMark=document.getElementById('applyPresetMark'),applyTitle=document.getElementById('applyPresetResultTitle'),applyText=document.getElementById('applyPresetResultText');
+function applyShow(state,title,text){{
+  applyCard.classList.remove('spin','upd-done','upd-err');
+  applyRing.classList.remove('spin');
+  void applyRing.offsetWidth;
+  if(state==='success'){{applyCard.classList.add('upd-done');applyMark.textContent='✓';}}
+  else if(state==='error'){{applyCard.classList.add('upd-err');applyMark.textContent='!';}}
+  else{{applyCard.classList.add('spin');applyRing.classList.add('spin');applyMark.textContent='…';}}
+  applyTitle.textContent=title;applyText.textContent=text;
+  applyOverlay.hidden=false;
+  requestAnimationFrame(()=>applyOverlay.classList.add('show'));
+}}
+function applyHide(){{
+  applyOverlay.classList.remove('show');
+  setTimeout(()=>{{applyOverlay.hidden=true;}},250);
+}}
+document.querySelectorAll('form[action*="/apply-preset"]').forEach(f=>f.addEventListener('submit',async e=>{{
+  e.preventDefault();e.stopImmediatePropagation();
+  const btn=f.querySelector('button');if(btn){{btn.disabled=true;btn.textContent='Применяем…'}}
+  applyShow('spin','Применяем заглушку','Публикуем на сайте…');
+  try{{
+    const r=await fetch(f.action,{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams(new FormData(f))}});
+    if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');
+    let d;try{{d=await r.json()}}catch(err){{throw new Error('Панель вернула некорректный ответ.')}}
+    if(!r.ok||!d.ok)throw new Error(d.message||'Не удалось применить заглушку.');
+    applyShow('success','Заглушка применена',d.message||'Страница опубликована на сайте.');
+    if(applyOverlay._t)clearTimeout(applyOverlay._t);applyOverlay._t=setTimeout(()=>{{applyHide()}},1500);
+  }}catch(err){{
+    applyShow('error','Ошибка',err.message||'Не удалось применить заглушку.');
+    if(applyOverlay._t)clearTimeout(applyOverlay._t);applyOverlay._t=setTimeout(()=>{{applyHide()}},2600);
+  }}finally{{
+    if(btn){{btn.disabled=false;btn.textContent='Применить'}}
+  }}
+}}));
+applyOverlay.addEventListener('click',e=>{{if(e.target===applyOverlay&&!applyCard.classList.contains('spin'))applyHide()}});
+</script>''' + PRESET_THUMBS_JS.replace('@@PRESETS@@',presets_json) + PRESET_LIVE_JS
 
 
 # Live preview pane of the custom stub editor: re-renders the sandboxed
@@ -1354,34 +2334,64 @@ document.querySelectorAll('[data-edit-preset]').forEach(b=>b.addEventListener('c
 </script>'''
 
 
-def chart(history, hours):
+def _line_path(samples, key, start, span, ceiling, color, extra=''):
+    segments=[]; last=None
+    for p in samples:
+        value=p.get(key)
+        if value is None: last=None; continue
+        x=52+(p['time']-start)/span*738; y=184-min(1,max(0,value)/ceiling)*166
+        segments.append(('M' if last is None or p['time']-last>120 else 'L')+f'{x:.1f},{y:.1f}')
+        last=p['time']
+    return f'<path d="{" ".join(segments)}" fill="none" stroke="{color}" stroke-width="2" vector-effect="non-scaling-stroke"{extra}/>'
+
+
+def chart(history, hours, node_series=None):
+    node_series=[s for s in (node_series or []) if s.get('points')]
     end=int(time.time()); start=end-hours*3600
     points=[p for p in history if start<=p.get('time',0)<=end]
     valid=[p for p in points if p.get('up_rate') is not None and p.get('down_rate') is not None]
-    if len(valid)<2: return '<div class="chart-empty">'+icon('chart')+'<span>История ещё накапливается<br>Первые точки появятся примерно через минуту</span></div>'
+    node_samples={s['id']:[q for q in s['points'] if start<=q.get('time',0)<=end] for s in node_series}
+    has_nodes=any(len([q for q in qs if q.get('down') is not None or q.get('up') is not None])>=2 for qs in node_samples.values())
+    if len(valid)<2 and not has_nodes: return '<div class="chart-empty">'+icon('chart')+'<span>История ещё накапливается<br>Первые точки появятся примерно через минуту</span></div>'
     # A newly installed graph should not be an invisible line at the far right.
-    start=max(start,min(p['time'] for p in valid)-15)
+    times=[p['time'] for p in valid]+[q['time'] for qs in node_samples.values() for q in qs]
+    if times: start=max(start,min(times)-15)
     span=max(60,end-start)
-    ceiling=max(1,max(max(p['up_rate'],p['down_rate']) for p in valid))*1.15
-    paths=[]
-    for key,color in [('up_rate','var(--accent)'),('down_rate','var(--amber)')]:
-        segments=[]; last=None
-        for p in points:
-            value=p.get(key)
-            if value is None: last=None; continue
-            x=52+(p['time']-start)/span*738; y=184-min(1,max(0,value)/ceiling)*166
-            segments.append(('M' if last is None or p['time']-last>120 else 'L')+f'{x:.1f},{y:.1f}')
-            last=p['time']
-        paths.append(f'<path d="{" ".join(segments)}" fill="none" stroke="{color}" stroke-width="2" vector-effect="non-scaling-stroke"/>')
+    node_peaks=[max([0]+[q.get('up') or 0 for q in qs]+[q.get('down') or 0 for q in qs]) for qs in node_samples.values()]
+    ceiling=max([1]+[max(p['up_rate'],p['down_rate']) for p in valid]+node_peaks)*1.15
+    paths=[_line_path(points,'up_rate',start,span,ceiling,'var(--accent)'),
+           _line_path(points,'down_rate',start,span,ceiling,'var(--amber)')]
+    for s in node_series:
+        samples=node_samples[s['id']]
+        # Сплошная линия — приём ноды, пунктир — отправка; цвет свой у каждой ноды.
+        paths.append(_line_path(samples,'down',start,span,ceiling,s['color']))
+        paths.append(_line_path(samples,'up',start,span,ceiling,s['color'],' stroke-dasharray="4 3" opacity=".7"'))
     grid=''.join(f'<line x1="52" y1="{18+i*55.3:.1f}" x2="790" y2="{18+i*55.3:.1f}" stroke="var(--line)"/><text x="45" y="{22+i*55.3:.1f}" text-anchor="end">{size(ceiling*(1-i/3))}</text>' for i in range(4))
-    ticks=''.join(f'<text x="{52+i*246}" y="210" text-anchor="{"start" if i==0 else "end" if i==3 else "middle"}">{time.strftime("%H:%M",time.gmtime(start+i*span/3))}</text>' for i in range(4))
+    stamp="%H:%M" if hours<=24 else "%d.%m"
+    ticks=''.join(f'<text x="{52+i*246}" y="210" text-anchor="{"start" if i==0 else "end" if i==3 else "middle"}">{time.strftime(stamp,time.gmtime(start+i*span/3))}</text>' for i in range(4))
     return '<svg viewBox="0 0 810 220" role="img" aria-label="Скорость трафика прокси за выбранный период">'+grid+''.join(paths)+ticks+'</svg>'
 
 
+def nodes_glances_script():
+    """Toggle + state preservation for collapsible node rows; the nodes block
+    is re-rendered by patchLive every 5 s, so expanded state is kept in a Set
+    and re-applied through a MutationObserver after each patch."""
+    return '''<script>
+(()=>{const root=document.querySelector('[data-live-block="nodes"]');if(!root)return;
+const store=new Set;
+try{const saved=sessionStorage.getItem('onyx-nodes-expanded');if(saved)JSON.parse(saved).forEach(k=>store.add(k))}catch(e){}
+function apply(){root.querySelectorAll('.node-glance').forEach(el=>{const on=store.has(el.dataset.nodeKey||'');el.classList.toggle('expanded',on);const h=el.querySelector('.node-glance-head');if(h)h.setAttribute('aria-expanded',on?'true':'false')})}
+function toggle(card){const key=card.dataset.nodeKey||'';if(store.has(key))store.delete(key);else store.add(key);try{sessionStorage.setItem('onyx-nodes-expanded',JSON.stringify([...store]))}catch(e){}apply()}
+root.addEventListener('click',e=>{const head=e.target.closest('.node-glance-head');if(head)toggle(head.closest('.node-glance'))});
+root.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const head=e.target.closest('.node-glance-head');if(head){e.preventDefault();toggle(head.closest('.node-glance'))}});
+new MutationObserver(apply).observe(root,{childList:true});
+apply();
+})();
+</script>'''
 def nodes_glances(live, path):
     """Dashboard card body: proxy traffic and federated users on managed nodes."""
     nodes=(live or {}).get('nodes') or []
-    labels={'vless':'VLESS','hysteria':'Hysteria2'}
+    labels={'vless':'VLESS','hysteria':'Hysteria2','tuic':'TUIC 5'}
     def fmt_rate(value):
         return size(int(value))+'/с' if value is not None else '—'
     total_down_rate=sum(r['rates'].get('down') or 0 for r in nodes if r.get('online'))
@@ -1394,25 +2404,33 @@ def nodes_glances(live, path):
         flag_img=node_flag_image(node.get('country_code','UN'),path)
         title=esc(node.get('location') or node.get('country_name') or node.get('url',''))
         subtitle=esc(node.get('url','')) if node.get('location') else esc(node.get('country_name',''))
+        if node.get('version'): subtitle+=' · v'+esc(node.get('version'))
+        # Ключ для сохранения состояния «развёрнуто» между живыми обновлениями.
+        key=esc(node.get('url',''))
         if not node.get('online'):
-            rows.append(f'''<div class="node-glance offline"><div class="node-glance-head"><span class="node-flag">{flag_img}</span><div class="node-glance-name"><strong>{title}</strong><small>{subtitle}</small></div><span class="badge">Нет данных</span></div><p class="node-glance-error">{esc(node.get('error') or 'Нода не отвечает.')}</p></div>''')
-            continue
-        rates=node.get('rates') or {}; totals=node.get('totals') or {}
-        users=node.get('users') or []
-        active=sum(1 for u in users if u.get('active'))
-        traffic_value=size(totals.get('up',0)+totals.get('down',0))
-        shown=users[:6]
-        more=len(users)-len(shown)
-        user_rows=''.join(f'<div class="node-user{" on" if u.get("active") else ""}"><i></i><span>{esc(u["name"])} · {esc(u["device"])}</span><small>{esc(labels.get(u.get("protocol",""),u.get("protocol","")))}</small></div>' for u in shown)
-        more_row=f'<div class="node-user more"><span>+{more} подключений</span></div>' if more>0 else ''
-        empty_row='<p class="node-users-empty">Профили этой панели на ноде не активированы</p>' if not users else ''
-        rows.append(f'''<div class="node-glance"><div class="node-glance-head"><span class="node-flag">{flag_img}</span><div class="node-glance-name"><strong>{title}</strong><small>{subtitle}</small></div><span class="badge {'on' if active else ''}">{'Онлайн' if active else 'Без трафика'}</span></div><div class="node-glance-stats"><div><span>↓ Получение</span><b>{fmt_rate(rates.get('down'))}</b></div><div><span>↑ Отправка</span><b>{fmt_rate(rates.get('up'))}</b></div><div><span>Трафик ноды</span><b>{traffic_value}</b></div><div><span>Пользователи</span><b>{active} из {len(users)}</b></div></div><div class="node-glance-users">{user_rows}{more_row}{empty_row}</div></div>''')
+            body=f'<p class="node-glance-error">{esc(node.get("error") or "Нода не отвечает.")}</p>'
+            badge='<span class="badge">Нет данных</span>'
+        else:
+            rates=node.get('rates') or {}; totals=node.get('totals') or {}
+            users=node.get('users') or []
+            active=sum(1 for u in users if u.get('active'))
+            traffic_value=size(totals.get('up',0)+totals.get('down',0))
+            shown=users[:6]
+            more=len(users)-len(shown)
+            user_rows=''.join(f'<div class="node-user{" on" if u.get("active") else ""}"><i></i><span>{esc(u["name"])} · {esc(u["device"])}</span><small>{esc(labels.get(u.get("protocol",""),u.get("protocol","")))}</small></div>' for u in shown)
+            more_row=f'<div class="node-user more"><span>+{more} подключений</span></div>' if more>0 else ''
+            empty_row='<p class="node-users-empty">Профили этой панели на ноде не активированы</p>' if not users else ''
+            badge_class='on' if active else ''
+            badge_text='Онлайн' if active else 'Без трафика'
+            badge=f'<span class="badge {badge_class}">{badge_text}</span>'
+            body=f'''<div class="node-glance-stats"><div><span>↓ Получение</span><b>{fmt_rate(rates.get('down'))}</b></div><div><span>↑ Отправка</span><b>{fmt_rate(rates.get('up'))}</b></div><div><span>Трафик ноды</span><b>{traffic_value}</b></div><div><span>Пользователи</span><b>{active} из {len(users)}</b></div></div><div class="node-glance-users">{user_rows}{more_row}{empty_row}</div>'''
+        rows.append(f'''<div class="node-glance" data-node-key="{key}"><div class="node-glance-head" role="button" tabindex="0" aria-expanded="false" aria-label="Развернуть ноду {title}"><span class="node-flag">{flag_img}</span><div class="node-glance-name"><strong>{title}</strong><small>{subtitle}</small></div>{badge}<span class="node-glance-chevron" aria-hidden="true">{icon('chevron-down')}</span></div><div class="node-glance-body">{body}</div></div>''')
     empty='<p class="empty">Ноды не подключены — вся подписка обслуживается этой панелью. <a href="'+esc(path)+'/nodes">Подключить ноду →</a></p>' if not nodes else ''
     footer=f'<p class="note">Суммарно по нодам: ↓ {fmt_rate(total_down_rate or None)} · ↑ {fmt_rate(total_up_rate or None)} · {active_users} активных подключений из {total_users}. Активность — передача данных за последние 90 секунд.</p>' if nodes else ''
-    return ('<div class="dashboard-nodes">'+(empty or ''.join(rows))+'</div>'+footer)
+    return ('<div class="dashboard-nodes">'+(empty or ''.join(rows))+'</div>'+footer+nodes_glances_script())
 
 
-def _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None):
+def _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None, node_series=None, node_summary=None):
     subs = live_subscriptions(subs, profiles)
     latest=data.get('latest',{}); age=max(0,int(time.time())-latest.get('time',0)); fresh=bool(latest) and age<=120
     fault=data.get('collector_error',{})
@@ -1424,9 +2442,10 @@ def _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, pr
         health='<div class="note warning" role="status">'+reason+' Проверьте сборщик через SSH: <code>systemctl status onyx-panel-metrics.service onyx-panel-metrics.timer</code>. Журнал: <code>journalctl -u onyx-panel-metrics.service -n 30 --no-pager</code>.</div>'
     elif not traffic_fresh:
         health='<div class="note warning" role="status">Ресурсы VPS измеряются, но нет свежих счётчиков трафика. Проверьте через SSH: <code>systemctl status onyx-panel-traffic.service onyx-panel-traffic.timer</code>.</div>'
-    graph=chart(data.get('history',[]),hours)
+    graph=chart(data.get('history',[]),hours,node_series)
     if not fresh or not traffic_fresh:
         graph='<div class="chart-empty">'+icon('chart')+'<span>Нет свежих измерений<br>Диагностика сборщика указана выше</span></div>'
+    node_legend=''.join(f'<span class="legend-node" title="сплошная — приём · пунктир — отправка"><i style="background:{esc(s["color"])}"></i>{esc(s["name"])}</span>' for s in (node_series or []))
     resources=[]
     for key,label,used,total in [('cpu','Процессор',latest.get('cpu'),100),('ram','Память',latest.get('ram_used'),latest.get('ram_total')),('swap','Подкачка',latest.get('swap_used'),latest.get('swap_total')),('disk','Диск',latest.get('disk_used'),latest.get('disk_total'))]:
         percent=used/total*100 if used is not None and total and fresh else None
@@ -1434,21 +2453,26 @@ def _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, pr
         detail=f'Ядер: {latest.get("cores", "—")} · средняя загрузка' if key=='cpu' else ('Не используется' if key=='swap' and total==0 else size(used)+' / '+size(total))
         resources.append(f'<div class="resource"><div class="resource-ring" style="--value:{max(0,min(100,percent or 0)):.2f}%"><b>{text}</b></div><div class="resource-copy"><strong>{label}</strong><small>{detail}</small></div></div>')
     direct=[u for u in profiles if not u.get('subscription_id') and u.get('id')!='primary']
-    active=sum(aggregate(s['live_profile_ids'],traffic,s.get('enabled',True))['active'] for s in subs)+sum(aggregate([u['id']],traffic,u.get('enabled',True))['active'] for u in direct)
+    node_summary=node_summary or {}
+    # Клиент считается передающим, если трафик идёт локально ИЛИ через ноду.
+    active=sum(1 for s in subs if aggregate(s['live_profile_ids'],traffic,s.get('enabled',True))['active']
+               or (s.get('enabled',True) and node_summary.get(s['id'],{}).get('active')))
+    active+=sum(aggregate([u['id']],traffic,u.get('enabled',True))['active'] for u in direct)
     total_up=sum(max(0,int(v.get('up',0))) for v in traffic.values() if isinstance(v,dict)); total_down=sum(max(0,int(v.get('down',0))) for v in traffic.values() if isinstance(v,dict))
-    stats=''.join(f'<div class="overview-stat"><span>{label}</span><b>{value}</b></div>' for label,value in [('Клиенты',len(subs)+len(direct)),('Подписок',len(subs)),('Передают трафик',active),('Всего трафика',size(total_up+total_down))])
+    node_up=sum(rec['up'] for rec in node_summary.values()); node_down=sum(rec['down'] for rec in node_summary.values())
+    stats=''.join(f'<div class="overview-stat"><span>{label}</span><b>{value}</b></div>' for label,value in [('Клиенты',len(subs)+len(direct)),('Подписок',len(subs)),('Передают трафик',active),('Всего трафика',size(total_up+total_down+node_up+node_down))])
     services=latest.get('services',{}); names={'xray':'Xray · VLESS / Hysteria2','relay':'Telegram WEB Proxy / MTProto','awg':'AmneziaWG 2.0 / 3.1','openflux':'OpenFlux · Yandex Docs','caddy':'Caddy · HTTPS','panel':'Панель управления'}
     state_labels={'active':'Запущен','inactive':'Остановлен','failed':'Сбой','activating':'Запускается','deactivating':'Останавливается','reloading':'Перезагружается','unknown':'Нет данных'}
     services_html=''.join('<div class="service-line"><span>'+label+'</span><span class="badge '+('on' if fresh and services.get(key,{}).get('state')=='active' else '')+'">'+esc(state_labels.get(services.get(key,{}).get('state'),services.get(key,{}).get('state','Нет данных')) if fresh else 'Нет свежих данных')+'</span></div>' for key,label in names.items())
     xray=services.get('xray',{}); start=xray.get('start_us'); xu=max(0,latest.get('uptime',0)-start/1e6) if start and latest.get('uptime') else None
     detail=[('Время работы VPS',duration(latest.get('uptime'))),('Время работы Xray',duration(xu)),('Память Xray',size(xray.get('memory'))),('Задачи Xray',str(xray.get('tasks') if xray.get('tasks') is not None else '—')),('Нагрузка · 1 / 5 / 15 мин.',' / '.join(f'{v:.2f}' for v in latest.get('load',[])) or '—')]
     details=''.join(f'<div class="detail-line"><span>{k}</span><strong>{v}</strong></div>' for k,v in detail)
-    controls=''.join(f'<button data-range="{n}" class="{"selected" if n==hours else ""}">{n} ч</button>' for n in (1,6,24))
-    records=client_records(subs,profiles,traffic,domain,proxy_link)
+    controls=''.join(f'<button data-range="{n}" class="{"selected" if n==hours else ""}">{label}</button>' for n,label in ((1,'1 ч'),(6,'6 ч'),(24,'24 ч'),(168,'7 дн'),(720,'30 дн')))
+    records=client_records(subs,profiles,traffic,domain,proxy_link,node_summary=node_summary)
     records=[r for r in records if r['id']!='primary']
     shown=sorted(records,key=lambda r:(bool(r['totals']['active']),r['totals']['up']+r['totals']['down']),reverse=True)[:8]
     component_modal=COMPONENT_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))
-    return component_modal+f'''<div data-live-block="health" class="live-block">{health}</div><section class="card resource-deck live-block" data-live-block="resources"><div class="resource-grid">{''.join(resources)}</div></section><div class="overview-stats live-block" data-live-block="overview">{stats}</div><div class="dashboard-grid"><section class="card graph-card"><div class="card-title"><div><span class="eyebrow">TRAFFIC / LIVE HISTORY</span><h2>Трафик прокси</h2></div><div class="range">{controls}</div></div><div class="graph-speeds live-block" data-live-block="speeds"><div><span>↑ Отправка</span><b>{size(latest.get('up_rate')) if traffic_fresh else '—'}</b><small> / с</small></div><div><span>↓ Получение</span><b>{size(latest.get('down_rate')) if traffic_fresh else '—'}</b><small> / с</small></div></div><div class="chart-wrap live-block" data-live-block="chart">{graph}</div><div class="legend"><span><i></i>Отправка</span><span class="down"><i></i>Получение</span><span>До 24 часов · замер ~10 с · UTC</span></div></section><section class="card"><div class="card-title"><h2>Службы и версия</h2><span class="pill">{esc(current)}</span></div><div class="node-label"><i></i><div class="node-domain">{esc(domain)}</div></div><div class="service-list live-block" data-live-block="services">{services_html}</div><div class="update-box"><div class="actions"><button id="checkUpdate">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="panelRelease">Панель</label><select id="panelRelease" aria-label="Версия панели"><option>Сначала загрузите список</option></select><button class="primary" id="startUpdate" hidden>Установить</button></div><p id="updateStatus" role="status">Можно обновиться или вернуться на прежний стабильный релиз GitLab</p></div></section></div><section class="card version-manager"><div class="card-title"><div><h2>Версии компонентов</h2><p>Обновление и откат без выпуска новой версии панели</p></div><button id="checkComponents">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="xrayRelease">Xray</label><select id="xrayRelease"><option>Сначала загрузите список</option></select><button data-component-install="xray" class="primary" disabled>Установить</button><small class="version-state" id="xrayCurrent">Текущая версия определяется…</small></div><div class="version-row"><label for="openfluxRelease">OpenFlux</label><select id="openfluxRelease"><option>Сначала загрузите список</option></select><button data-component-install="openflux" class="primary" disabled>Установить</button><small class="version-state" id="openfluxCurrent">Текущая версия определяется…</small></div><p id="componentStatus" class="note" role="status">Перед заменой создаётся резервная копия. Если служба не запустится, прежний бинарник восстановится автоматически.</p></section><div class="two-col equal"><section class="card"><div class="card-title"><h2>Ресурсы сервера</h2><span class="pill">VPS</span></div><div class="detail-list live-block" data-live-block="server-details">{details}</div></section><section class="card"><div class="card-title"><h2>Накопленный трафик</h2></div><div class="detail-list live-block" data-live-block="traffic-details"><div class="detail-line"><span>Отправлено</span><strong>↑ {size(total_up)}</strong></div><div class="detail-line"><span>Получено</span><strong>↓ {size(total_down)}</strong></div><div class="detail-line"><span>Последнее измерение</span><strong>{str(age)+' с назад' if latest else 'Нет измерений'}</strong></div></div><p class="note">Только трафик прокси. Активность — передача данных за последние 90 секунд, не число устройств онлайн.</p></section></div><section class="card"><div class="card-title"><h2>Пользователи и подписки</h2><a href="{esc(path)}/users" class="btn quiet">Управление →</a></div><div class="live-block" data-live-block="clients">{client_glances(shown,path)}<small>Показано {len(shown)} из {len(records)} · сначала передающие данные</small></div></section><section class="card nodes-live-card"><div class="card-title"><div><h2>Ноды · трафик и пользователи</h2><p>Живые данные с подключённых нод, опрос раз в 15 секунд</p></div><span class="pill">{len((nodes or {}).get('nodes') or [])} / 16</span></div><div class="live-block" data-live-block="nodes">{nodes_glances(nodes,path)}</div></section>'''
+    return component_modal+f'''<div data-live-block="health" class="live-block">{health}</div><section class="card resource-deck live-block" data-live-block="resources"><div class="resource-grid">{''.join(resources)}</div></section><div class="overview-stats live-block" data-live-block="overview">{stats}</div><div class="dashboard-grid"><section class="card graph-card"><div class="card-title"><div><span class="eyebrow">TRAFFIC / LIVE HISTORY</span><h2>Трафик прокси</h2></div><div class="range">{controls}</div></div><div class="graph-speeds live-block" data-live-block="speeds"><div><span>↑ Отправка</span><b>{size(latest.get('up_rate')) if traffic_fresh else '—'}</b><small> / с</small></div><div><span>↓ Получение</span><b>{size(latest.get('down_rate')) if traffic_fresh else '—'}</b><small> / с</small></div></div><div class="chart-wrap live-block" data-live-block="chart">{graph}</div><div class="legend"><span><i></i>Отправка</span><span class="down"><i></i>Получение</span>{node_legend}<span>Замер ~10 с, для 7/30 дней — часовые средние · UTC</span></div></section><section class="card"><div class="card-title"><h2>Службы и версия</h2><span class="pill">{esc(current)}</span></div><div class="node-label"><i></i><div class="node-domain">{esc(domain)}</div></div><div class="service-list live-block" data-live-block="services">{services_html}</div><div class="update-box"><div class="actions"><button id="checkUpdate">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="panelRelease">Панель</label><select id="panelRelease" aria-label="Версия панели"><option>Сначала загрузите список</option></select><button class="primary" id="startUpdate" hidden>Установить</button></div><p id="updateStatus" role="status">Можно обновиться или вернуться на прежний стабильный релиз GitLab</p></div></section></div><section class="card version-manager"><div class="card-title"><div><h2>Версии компонентов</h2><p>Обновление и откат без выпуска новой версии панели</p></div><button id="checkComponents">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="xrayRelease">Xray</label><select id="xrayRelease"><option>Сначала загрузите список</option></select><button data-component-install="xray" class="primary" disabled>Установить</button><small class="version-state" id="xrayCurrent">Текущая версия определяется…</small></div><div class="version-row"><label for="openfluxRelease">OpenFlux</label><select id="openfluxRelease"><option>Сначала загрузите список</option></select><button data-component-install="openflux" class="primary" disabled>Установить</button><small class="version-state" id="openfluxCurrent">Текущая версия определяется…</small></div><p id="componentStatus" class="note" role="status">Перед заменой создаётся резервная копия. Если служба не запустится, прежний бинарник восстановится автоматически.</p></section><div class="two-col equal"><section class="card"><div class="card-title"><h2>Ресурсы сервера</h2><span class="pill">VPS</span></div><div class="detail-list live-block" data-live-block="server-details">{details}</div></section><section class="card"><div class="card-title"><h2>Накопленный трафик</h2></div><div class="detail-list live-block" data-live-block="traffic-details"><div class="detail-line"><span>Отправлено</span><strong>↑ {size(total_up)}</strong></div><div class="detail-line"><span>Получено</span><strong>↓ {size(total_down)}</strong></div><div class="detail-line"><span>Через ноды</span><strong>{size(node_up+node_down) if node_summary else '—'}</strong></div><div class="detail-line"><span>Последнее измерение</span><strong>{str(age)+' с назад' if latest else 'Нет измерений'}</strong></div></div><p class="note">Только трафик прокси. Активность — передача данных за последние 90 секунд, не число устройств онлайн.</p></section></div><section class="card"><div class="card-title"><h2>Пользователи и подписки</h2><a href="{esc(path)}/users" class="btn quiet">Управление →</a></div><div class="live-block" data-live-block="clients">{client_glances(shown,path)}<small>Показано {len(shown)} из {len(records)} · сначала передающие данные</small></div></section><section class="card nodes-live-card"><div class="card-title"><div><h2>Ноды · трафик и пользователи</h2><p>Живые данные с подключённых нод, опрос раз в 15 секунд</p></div><span class="pill">{len((nodes or {}).get('nodes') or [])} / 16</span></div><div class="live-block" data-live-block="nodes">{nodes_glances(nodes,path)}</div></section>'''
 
 
 def _top_consumers_card(path, profiles, traffic, limit=5):
@@ -1475,9 +2499,9 @@ def _top_consumers_card(path, profiles, traffic, limit=5):
             f'<div class="top-list">{items}</div></section>')
 
 
-def dashboard_body(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None):
+def dashboard_body(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None, node_series=None, node_summary=None):
     """Dashboard overview without version management controls."""
-    body = _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours, nodes=nodes)
+    body = _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours, nodes=nodes, node_series=node_series, node_summary=node_summary)
     replacement = (f'<div class="update-box"><div class="actions">'
                    f'<a class="btn quiet" href="{esc(path)}/updates">{icon("refresh")}Управление обновлениями</a>'
                    f'</div><p>Версии панели, Xray и OpenFlux находятся в отдельном разделе.</p></div>'
@@ -1499,9 +2523,21 @@ function maybeNotifyUpdate(d){{window.dispatchEvent(new CustomEvent('onyx-update
 function updateView(d){{if(!d)return;updating=['queued','running'].includes(d.phase);if(updating){{notice.hidden=false;notice.textContent='Изменение версии выполняется. Откройте раздел «Обновления», чтобы увидеть статус.'}}if(d.available)maybeNotifyUpdate(d)}}
 function patchLive(html){{const template=document.createElement('template');template.innerHTML=html;template.content.querySelectorAll('[data-live-block]').forEach(next=>{{const current=root.querySelector('[data-live-block="'+CSS.escape(next.dataset.liveBlock)+'"]');if(!current||current.innerHTML===next.innerHTML)return;current.classList.add('refreshing');requestAnimationFrame(()=>{{current.innerHTML=next.innerHTML;current.className=next.className;current.setAttribute('data-live-block',next.dataset.liveBlock)}})}});root.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('selected',Number(b.dataset.range)===range))}}
 function updateClock(){{const seconds=Math.floor((Date.now()-lastSuccess)/1000);liveAge.textContent=seconds<2?'сейчас':seconds+' с назад';live.classList.toggle('stale',seconds>20);live.classList.toggle('offline',seconds>45)}}
-async function refresh(){{if(busy||document.hidden)return;busy=true;try{{const r=await fetch('{esc(path)}/dashboard-data?hours='+range,{{cache:'no-store'}});if(r.redirected){{location.href='{esc(path)}/login';return}}if(!r.ok)throw new Error('Нет ответа от панели');const d=await r.json();patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(e){{live.classList.add('offline');notice.hidden=false;notice.textContent=updating?'Панель перезапускается во время обновления. Ожидаем восстановления связи…':'Нет связи с панелью. Данные на экране могут быть устаревшими.'}}finally{{busy=false}}}}
+async function refresh(){{if(busy||document.hidden)return;
+// Стрим должен приносить кадры сам; если он молчит дольше 10 с (плохой путь до
+// клиента), рвём его и обновляем обычным запросом — иначе живые блоки остаются
+// пустыми до ручной перезагрузки страницы.
+if(stream&&Date.now()-lastFrame<10000)return;
+if(stream){{stream.close();stream=null;setTimeout(startStream,5000)}}
+busy=true;try{{const r=await fetch('{esc(path)}/dashboard-data?hours='+range,{{cache:'no-store'}});if(r.redirected){{location.href='{esc(path)}/login';return}}if(!r.ok)throw new Error('Нет ответа от панели');const d=await r.json();patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(e){{live.classList.add('offline');notice.hidden=false;notice.textContent=updating?'Панель перезапускается во время обновления. Ожидаем восстановления связи…':'Нет связи с панелью. Данные на экране могут быть устаревшими.'}}finally{{busy=false}}}}
+let stream=null,lastFrame=0;
+function startStream(){{if(stream||!window.EventSource)return;
+try{{stream=new EventSource('{esc(path)}/dashboard-stream?hours='+range);lastFrame=Date.now();
+stream.onmessage=e=>{{lastFrame=Date.now();try{{const d=JSON.parse(e.data);patchLive(d.html);updateView(d.update);lastSuccess=Date.now();updateClock();if(!updating)notice.hidden=true}}catch(err){{}}}};
+stream.onerror=()=>{{if(stream){{stream.close();stream=null}}setTimeout(startStream,5000)}}}}catch(e){{stream=null}}}}
+startStream();
 async function automaticUpdateCheck(status){{if(status?.checked&&Date.now()/1000-Number(status.checked)<21600)return;try{{const r=await fetch('{esc(path)}/update-check',{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}'}})}});if(!r.ok||r.redirected)return;updateView(await r.json())}}catch(e){{}}}}
-document.getElementById('updateNoticeLater').addEventListener('click',()=>updateDialog.close());updateDialog.addEventListener('close',()=>{{if(updateDialog.dataset.version)dismissUpdate(updateDialog.dataset.version)}});document.getElementById('refreshDashboard').addEventListener('click',refresh);root.addEventListener('click',e=>{{const r=e.target.closest('[data-range]');if(r){{range=Number(r.dataset.range);refresh()}}}});setInterval(refresh,5000);setInterval(updateClock,1000);document.addEventListener('visibilitychange',()=>{{if(!document.hidden)refresh()}});fetch('{esc(path)}/update-status',{{cache:'no-store'}}).then(r=>r.ok&&!r.redirected?r.json():null).then(d=>{{if(d){{updateView(d);automaticUpdateCheck(d)}}}}).catch(()=>automaticUpdateCheck(null));
+document.getElementById('updateNoticeLater').addEventListener('click',()=>updateDialog.close());updateDialog.addEventListener('close',()=>{{if(updateDialog.dataset.version)dismissUpdate(updateDialog.dataset.version)}});document.getElementById('refreshDashboard').addEventListener('click',refresh);root.addEventListener('click',e=>{{const r=e.target.closest('[data-range]');if(r){{range=Number(r.dataset.range);if(stream){{stream.close();stream=null;startStream()}}else refresh()}}}});setInterval(refresh,5000);setInterval(updateClock,1000);document.addEventListener('visibilitychange',()=>{{if(!document.hidden)refresh()}});fetch('{esc(path)}/update-status',{{cache:'no-store'}}).then(r=>r.ok&&!r.redirected?r.json():null).then(d=>{{if(d){{updateView(d);automaticUpdateCheck(d)}}}}).catch(()=>automaticUpdateCheck(null));
 </script>'''
 
 
@@ -1511,9 +2547,10 @@ CSS += '''
 .cascade-mode{display:grid;grid-template-columns:1fr 1fr;gap:8px}.cascade-mode .choice-card{min-height:0;gap:9px;padding:12px 13px;border-radius:12px}.cascade-mode .choice-card strong{display:flex;align-items:center;gap:7px;font-size:12.5px}.cascade-mode .choice-card strong .ico{width:15px;height:15px;color:var(--accent)}.cascade-mode .choice-card small{font-size:10.5px;margin-top:3px}
 .cascade-clients{margin-top:13px}.cascade-clients-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;font-size:11px}.cascade-clients-head b{margin-right:auto;font-size:11px;font-weight:550;color:var(--muted)}.cascade-count{font:550 11px ui-monospace,monospace;color:var(--accent);white-space:nowrap}.cascade-clients-tools{display:flex;gap:4px}.cascade-clients-tools button{padding:3px 10px;font-size:10px}
 .cascade-clients-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:7px}.cascade-client{position:relative;display:flex;align-items:center;gap:9px;margin:0;padding:8px 11px;border:1px solid var(--line);border-radius:11px;background:var(--input);color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}.cascade-client:hover{border-color:var(--accent)}.cascade-client input{position:absolute;opacity:0;width:1px;height:1px}.cascade-client:has(input:checked){border-color:var(--accent);background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent)}.cascade-client:after{content:"";flex:0 0 auto;width:17px;height:17px;margin-left:auto;border:1.5px solid var(--line);border-radius:50%;transition:border .15s}.cascade-client:has(input:checked):after{border:5.5px solid var(--accent)}.cascade-client .client-initial{width:26px;height:26px;border-radius:8px;font-size:12px}.cascade-client-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:500}
-@media(max-width:560px){.cascade-mode{grid-template-columns:1fr}.cascade-clients-grid{grid-template-columns:1fr 1fr}}
+.cascade-delete-text{display:none}
+@media(max-width:560px){.cascade-mode{grid-template-columns:1fr}.cascade-clients-grid{grid-template-columns:1fr;justify-items:center}.cascade-head{flex-direction:column;align-items:stretch}.cascade-head .actions{justify-content:center;flex-wrap:wrap}.cascade-client{width:100%;max-width:320px}.cascade-head .actions form[data-cascade-delete]{width:100%}.cascade-delete-btn{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;font-size:11px;border-radius:9px}.cascade-delete-text{display:inline}}
 .cascade-section form>button.primary{margin-top:14px}
-.onyx-toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:140;display:grid;gap:8px;justify-items:center;pointer-events:none;width:min(480px,calc(100vw - 24px))}
+.onyx-toasts{position:fixed;top:max(14px,calc(env(safe-area-inset-top) + 8px));left:50%;transform:translateX(-50%);z-index:140;display:grid;gap:8px;justify-items:center;pointer-events:none;width:min(480px,calc(100vw - 24px))}
 .onyx-toast{display:flex;align-items:center;gap:9px;max-width:100%;padding:11px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow);font-size:12px;font-weight:550;opacity:0;transform:translateY(-14px) scale(.97);transition:opacity .25s,transform .25s}
 .onyx-toast.show{opacity:1;transform:translateY(0) scale(1)}
 .onyx-toast .ico{width:16px;height:16px;flex:0 0 auto;color:var(--green)}
@@ -1523,12 +2560,12 @@ CSS += '''
 .onyx-ops-card{width:min(380px,calc(100vw - 32px));padding:28px 26px;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow)}
 .onyx-ops-card h3{font-size:16px;margin:0 0 6px}
 .onyx-ops-card p{font-size:12px;color:var(--muted);margin:0;min-height:18px}
-.onyx-ops-ring{width:60px;height:60px;margin:0 auto 16px;display:block}
-.onyx-ops-ring circle{fill:none;stroke-width:5;stroke-linecap:round;transform-origin:center}
+.onyx-ops-ring{width:60px;height:60px;margin:0 auto 16px;display:block;animation:onyx-spin 1s linear infinite}
+.onyx-ops-ring circle{fill:none;stroke-width:5;stroke-linecap:round}
 .onyx-ops-ring .bg{stroke:var(--line)}
-.onyx-ops-ring .fg{stroke:var(--accent);stroke-dasharray:113;stroke-dashoffset:70;animation:onyx-spin 1s linear infinite}
+.onyx-ops-ring .fg{stroke:var(--accent);stroke-dasharray:113;stroke-dashoffset:70}
 @keyframes onyx-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.onyx-ops-ring .fg{animation:none}}
+
 .routing-row{display:grid;grid-template-columns:minmax(220px,320px) minmax(0,1fr);gap:20px;padding:20px 0;border-top:1px solid var(--line);align-items:start}.routing-row:first-of-type{border-top:0;padding-top:4px}.routing-row h3{font-size:14px;margin:0}.routing-row small{display:block;font-size:11px;color:var(--muted);margin-top:5px;line-height:1.55}@media(max-width:760px){.routing-row{grid-template-columns:1fr;gap:10px}}
 .routing-presets{display:flex;flex-wrap:wrap;gap:7px}
 .routing-preset{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px dashed var(--line);border-radius:10px;background:var(--raised);font-size:11px;font-weight:550;color:var(--muted)}
@@ -1542,6 +2579,8 @@ CSS += '''
 .routing-add{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:12px}
 .routing-add input{font:11px ui-monospace,monospace}
 .routing-switch-row{display:flex;justify-content:flex-end;align-items:center;gap:16px}
+.reality-actions{margin-top:16px;gap:10px}
+.reality-actions button{margin:0}
 '''
 
 ROUTING_IP_PRESETS=[
@@ -1625,6 +2664,55 @@ if(sw)sw.addEventListener('click',async()=>{
     if(window.onyxToast)onyxToast(res.message||'Сохранено — применяется в фоне…');}
   catch(e){sw.setAttribute('aria-checked',previous);if(window.onyxToast)onyxToast(e.message,'err')}
   finally{sw.disabled=false}});
+async function rPostReality(operation,extra){const body=new URLSearchParams({csrf:CSRF,operation,...(extra||{})});
+  const r=await fetch(PATH+'/reality-setup',{method:'POST',headers:{'X-Onyx-Async':'1'},body});
+  if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');
+  let res;try{res=await r.json()}catch(e){throw new Error('Панель вернула некорректный ответ.')}
+  if(!r.ok||!res.ok)throw new Error(res.message||'Операция не выполнена.');
+  return res}
+async function warpPost(operation,extra){const body=new URLSearchParams({csrf:CSRF,operation,...(extra||{})});
+  const r=await fetch(PATH+'/routing-warp',{method:'POST',headers:{'X-Onyx-Async':'1'},body});
+  if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');
+  let res;try{res=await r.json()}catch(e){throw new Error('Панель вернула некорректный ответ.')}
+  if(!r.ok||!res.ok)throw new Error(res.message||'Операция не выполнена.');
+  return res}
+const warpCard=document.getElementById('warpCard');
+if(warpCard){
+  warpCard.querySelectorAll('[data-warp-action]').forEach(b=>b.addEventListener('click',async()=>{
+    if(b.disabled)return;
+    const op=b.dataset.warpAction;
+    if(op==='disable'&&window.onyxConfirm&&!(await onyxConfirm('Удалить конфигурацию WARP? Включённым клиентам вернётся обычный выход с сервера.',{danger:true})))return;
+    b.disabled=true;const old=b.innerHTML;b.textContent='…';
+    try{const res=await warpPost(op);
+      if(op==='disable')location.reload();
+      else{const st=warpCard.querySelector('[data-warp-status]');
+        if(op==='test'&&res.exit_ip&&st)st.textContent='Выходной IP: '+res.exit_ip+' · проверено только что';
+        if(window.onyxToast)onyxToast(res.message||'Готово')}}
+    catch(e){if(window.onyxToast)onyxToast(e.message,'err')}
+    finally{b.disabled=false;b.innerHTML=old}}));
+  const apply=warpCard.querySelector('[data-warp-config-apply]');
+  if(apply)apply.addEventListener('click',async()=>{
+    const ta=warpCard.querySelector('[data-warp-config]');
+    if(!ta||!ta.value.trim()){if(window.onyxToast)onyxToast('Вставьте содержимое WireGuard-конфига.','err');return}
+    if(apply.disabled)return;apply.disabled=true;const old=apply.innerHTML;apply.textContent='Применяю…';
+    try{await warpPost('config',{config:ta.value});location.reload()}
+    catch(e){if(window.onyxToast)onyxToast(e.message,'err')}
+    finally{apply.disabled=false;apply.innerHTML=old}})}
+const realityCard=document.getElementById('realityCard');
+if(realityCard){
+  realityCard.querySelectorAll('[data-reality-action]').forEach(b=>b.addEventListener('click',async()=>{
+    if(b.disabled)return;
+    const op=b.dataset.realityAction;
+    if(op==='disable'&&window.onyxConfirm&&!(await onyxConfirm('Отключить Reality-вход? Reality-ссылки исчезнут из подписок клиентов.',{danger:true})))return;
+    const extra={};
+    if(op==='enable'||op==='test-mask'){extra.dest=realityCard.querySelector('[data-reality-dest]').value.trim()}
+    if(op==='enable'){extra.port=realityCard.querySelector('[data-reality-port]').value.trim()}
+    b.disabled=true;const old=b.innerHTML;b.textContent='…';
+    try{const res=await rPostReality(op,extra);
+      if(op==='enable'||op==='disable')location.reload();
+      else if(window.onyxToast)onyxToast(res.message||'Готово')}
+    catch(e){if(window.onyxToast)onyxToast(e.message,'err')}
+    finally{b.disabled=false;b.innerHTML=old}}));}
 })();
 </script>'''
 
@@ -1640,10 +2728,27 @@ def _chip_editor(list_key, presets, values, placeholder):
             f'<button type="button" class="routing-add-btn">Добавить</button></div></div>')
 
 
-def routing_ui(routing, path, csrf, domain):
+def routing_ui(routing, path, csrf, domain, warp=None, reality=None):
     routing = routing or {}
     torrents_enabled=bool(routing.get('block_torrents'))
-    banner='<p class="note"><b>Прямое соединение</b> означает, что определённый трафик не будет перенаправлен через другой сервер. Правила из этой вкладки проверяются <b>до</b> каскада: совпавший трафик всегда уходит с этого сервера напрямую.</p>'
+    warp = warp or {}
+    reality = reality or {}
+    reality_on=bool(reality.get('enabled'))
+    reality_port=int(reality.get('port') or 2053)
+    reality_dest=str(reality.get('dest') or 'www.wildberries.ru:443')
+    warp_ready=bool(warp.get('private_key'))
+    warp_exit_ip=str(warp.get('exit_ip','') or '')
+    checked=int(warp.get('checked_at') or 0)
+    if not warp_ready:
+        warp_status='WARP не настроен. Зарегистрируйте устройство Cloudflare или вставьте конфиг от wgcf.'
+        warp_pill='не настроен'
+    else:
+        age=(time.time()-checked) if checked else None
+        when=(' · проверено '+duration(int(age))+' назад') if age is not None and age>=0 else ''
+        warp_status=('Выходной IP: '+esc(warp_exit_ip)+when) if warp_exit_ip else 'Туннель зарегистрирован — нажмите «Проверить выход», чтобы увидеть IP Cloudflare.'
+        warp_pill=('выход '+warp_exit_ip) if warp_exit_ip else 'настроен'
+    warp_buttons=('<button type="button" class="primary" data-warp-action="register">{icon}Зарегистрировать WARP</button>').format(icon=icon('warp')) if not warp_ready else ('<button type="button" data-warp-action="test">{icon}Проверить выход</button><button type="button" class="danger" data-warp-action="disable">{icon}Отключить WARP</button>').format(icon=icon('refresh'))
+    banner='<p class="note"><b>Прямое соединение</b> означает, что определённый трафик не будет перенаправлен через другой сервер. Правила из этой вкладки проверяются <b>до</b> каскада: совпавший трафик всегда уходит с этого сервера напрямую. При сохранении правила автоматически применяются и к подключённым нодам — трафик, который выходит через ноду, следует той же политике.</p>'
     ip_editor=_chip_editor('direct_ips',ROUTING_IP_PRESETS,routing.get('direct_ips',[]),'geoip:cn, 1.2.3.4 или 10.0.0.0/8')
     domain_editor=_chip_editor('direct_domains',ROUTING_DOMAIN_PRESETS,routing.get('direct_domains',[]),'domain:example.com, geosite:cn')
     ipv4_editor=_chip_editor('ipv4_domains',ROUTING_DOMAIN_PRESETS,routing.get('ipv4_domains',[]),'domain:example.com')
@@ -1652,6 +2757,25 @@ def routing_ui(routing, path, csrf, domain):
 <div class="routing-row"><div><h3>Прямые IP-адреса</h3><small>Трафик на эти адреса и сети уходит напрямую, минуя каскад. Пресеты добавляют geoip-списки Xray.</small></div>{ip_editor}</div>
 <div class="routing-row"><div><h3>Прямые домены</h3><small>Домены в формате Xray: domain:example.com, geosite:cn или regexp:… Совпавшие запросы идут напрямую.</small></div>{domain_editor}</div>
 <div class="routing-row"><div><h3>Правила IPv4</h3><small>Эти параметры позволяют клиентам обращаться к перечисленным доменам только через IPv4.</small></div>{ipv4_editor}</div>
+</section>
+<section class="card" id="warpCard">
+<div class="card-title"><div><h2>Выход через WARP</h2><p>Не-хостинговый IP Cloudflare для выбранных клиентов</p></div><span class="pill" data-warp-pill>{esc(warp_pill)}</span></div>
+<p class="note" data-warp-status role="status">{warp_status}</p>
+<div class="actions">{warp_buttons}</div>
+<details class="warp-manual"><summary>Вставить WireGuard-конфиг вручную (wgcf)</summary><textarea data-warp-config rows="5" spellcheck="false" autocomplete="off" placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 172.16.0.2/32&#10;&#10;[Peer]&#10;PublicKey = …&#10;Endpoint = engage.cloudflareclient.com:2408"></textarea><div class="actions"><button type="button" class="primary" data-warp-config-apply>Применить конфиг</button></div></details>
+<p class="muted" style="font-size:10.5px;margin:12px 0 0">Включение по клиентам — кнопкой-облаком в списке «Клиенты» (VLESS и Hysteria2). Сила правил: блок торрентов и прямые списки → WARP → каскады. Действует для подключений к этой панели; на нодах WARP не применяется.</p>
+</section>
+<section class="card" id="realityCard">
+<div class="card-title"><div><h2>Reality-вход</h2><p>VLESS поверх TLS белого сайта — для сетей с белыми списками</p></div><span class="pill" data-reality-pill>{'включён · порт '+str(reality_port) if reality_on else 'выключен'}</span></div>
+<p class="note" data-reality-status role="status">{('Маска: '+esc(reality_dest)+' · Reality-ссылки добавлены в подписки vless-клиентов.') if reality_on else 'Укажите порт и сайт-маску из белого списка оператора, затем включите. Ссылки появятся в подписках автоматически.'}</p>
+<div class="reality-fields"><div><label>Порт</label><input data-reality-port value="{reality_port}" inputmode="numeric" autocomplete="off"></div><div><label>Сайт-маска (dest)</label><input data-reality-dest value="{esc(reality_dest)}" spellcheck="false" autocomplete="off" placeholder="www.wildberries.ru:443"></div></div>
+<div class="actions reality-actions">
+<button type="button" class="{'primary' if not reality_on else ''}" data-reality-action="enable">{icon('warp' if False else 'shield') if False else ''}{'Включить' if not reality_on else 'Включить заново (новые ключи)'}</button>
+<button type="button" data-reality-action="test-mask">Проверить маску</button>
+{'<button type="button" data-reality-action="selftest">Проверить подключение</button>' if reality_on else ''}
+{'<button type="button" class="danger" data-reality-action="disable">Отключить</button>' if reality_on else ''}
+</div>
+<p class="muted" style="font-size:10.5px;margin:12px 0 0">Сила правил: блок торрентов и прямые списки → WARP → каскады — Reality-трафик идёт через те же правила. Действует для подключений к этой панели; на нодах не создаётся. Смена маски или повторное включение генерирует новые ключи — старые ссылки клиентов обновятся после обновления подписки.</p>
 </section>
 <section class="card"><div class="card-title"><h2>Блокировки</h2></div><div class="routing-row" style="border-top:0;padding-top:4px"><div><h3>Заблокировать Торренты</h3><small>BitTorrent-трафик распознаётся сниффером Xray и блокируется. Работает для VLESS и Hysteria2.</small></div><div class="routing-switch-row"><button type="button" class="access-switch" data-routing-torrent role="switch" aria-label="Заблокировать торренты" aria-checked="{str(torrents_enabled).lower()}" title="{'Выключить блокировку торрентов' if torrents_enabled else 'Включить блокировку торрентов'}"></button></div></div></section>{ROUTING_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}'''
 
@@ -1856,7 +2980,7 @@ def cascade_card(item, vless_users, path, csrf):
                      '<div class="cascade-clients-grid">'+''.join(rows)+'</div></div>')
     else:
         users_block='<div class="cascade-clients" data-users-block><p class="sub">VLESS и Hysteria2 клиентов нет. Создайте их в разделе «Пользователи».</p></div>'
-    return f'''<div class="card cascade-card" data-cascade="{sid}" data-pending="{int(pending)}"><div class="cascade-head"><div><h2>{esc(item.get("name"))}</h2><div class="cascade-meta"><span class="pill">{esc(item.get("transport"))}</span><span class="cascade-endpoint">{esc(item.get("address"))}:{int(item.get("port",443))}</span><span class="badge {view["state_class"]}">{view["state_text"]}</span></div></div><div class="actions"><button type="button" data-cascade-ping>{icon("refresh")}Проверить</button><button type="button" data-cascade-speed>{icon("chart")}Замер скорости</button><form method="post" action="{esc(path)}/cascade-toggle" data-cascade-toggle>{hidden(csrf,id=item["id"],operation='disable' if enabled_bool else 'enable')}<button type="button" class="access-switch" role="switch" aria-label="Каскад {esc(item.get("name"))}" aria-checked="{view["switch_checked"]}" title="{view["switch_title"]}"></button></form><form method="post" action="{esc(path)}/cascade-delete" data-confirm="Удалить каскад «{esc(item.get("name"))}»? Клиенты мгновенно вернутся на прямое подключение.">{hidden(csrf,id=item["id"])}<button type="submit" class="icon-btn danger" aria-label="Удалить каскад {esc(item.get("name"))}" title="Удалить">{icon("trash")}</button></form></div></div><div class="cascade-check">{view["check_html"]}</div><div class="cascade-check" data-speed>{view["speed_html"]}</div><div class="cascade-check cascade-job" data-job>{view["job_html"]}</div><details class="cascade-section"><summary>Режим и клиенты</summary><form data-cascade-users>{hidden(csrf,id=item["id"])}<div class="cascade-mode"><label class="choice-card"><input type="radio" name="mode" value="all" {"checked" if mode=="all" else ""}><span><strong>{icon("cascade")}Все VLESS и Hysteria2</strong><small>Клиенты VLESS и Hysteria2 пойдут через каскад</small></span></label><label class="choice-card"><input type="radio" name="mode" value="users" {"checked" if mode=="users" else ""}><span><strong>{icon("users")}Только выбранные</strong><small>Через каскад пойдут отмеченные, остальные — напрямую</small></span></label></div>{users_block}<button class="primary">Сохранить</button><p class="cascade-status" data-form-status role="status"></p></form></details></div>'''
+    return f'''<div class="card cascade-card" data-cascade="{sid}" data-pending="{int(pending)}"><div class="cascade-head"><div><h2>{esc(item.get("name"))}</h2><div class="cascade-meta"><span class="pill">{esc(item.get("transport"))}</span><span class="cascade-endpoint">{esc(item.get("address"))}:{int(item.get("port",443))}</span><span class="badge {view["state_class"]}">{view["state_text"]}</span></div></div><div class="actions"><button type="button" data-cascade-ping>{icon("refresh")}Проверить</button><button type="button" data-cascade-speed>{icon("chart")}Замер скорости</button><form method="post" action="{esc(path)}/cascade-toggle" data-cascade-toggle>{hidden(csrf,id=item["id"],operation='disable' if enabled_bool else 'enable')}<button type="button" class="access-switch" role="switch" aria-label="Каскад {esc(item.get("name"))}" aria-checked="{view["switch_checked"]}" title="{view["switch_title"]}"></button></form><form method="post" action="{esc(path)}/cascade-delete" data-confirm="Удалить каскад «{esc(item.get("name"))}»? Клиенты мгновенно вернутся на прямое подключение.">{hidden(csrf,id=item["id"])}<button type="submit" class="icon-btn danger cascade-delete-btn" aria-label="Удалить каскад {esc(item.get("name"))}" title="Удалить">{icon("trash")}<span class="cascade-delete-text">Удалить каскад</span></button></form></div></div><div class="cascade-check">{view["check_html"]}</div><div class="cascade-check" data-speed>{view["speed_html"]}</div><div class="cascade-check cascade-job" data-job>{view["job_html"]}</div><details class="cascade-section"><summary>Режим и клиенты</summary><form data-cascade-users>{hidden(csrf,id=item["id"])}<div class="cascade-mode"><label class="choice-card"><input type="radio" name="mode" value="all" {"checked" if mode=="all" else ""}><span><strong>{icon("cascade")}Все VLESS и Hysteria2</strong><small>Клиенты VLESS и Hysteria2 пойдут через каскад</small></span></label><label class="choice-card"><input type="radio" name="mode" value="users" {"checked" if mode=="users" else ""}><span><strong>{icon("users")}Только выбранные</strong><small>Через каскад пойдут отмеченные, остальные — напрямую</small></span></label></div>{users_block}<button class="primary">Сохранить</button><p class="cascade-status" data-form-status role="status"></p></form></details></div>'''
 
 
 def cascade_ui(items, users, path, csrf, domain, failover=False):
@@ -1870,35 +2994,667 @@ def cascade_ui(items, users, path, csrf, domain, failover=False):
     return f'''<div class="page-head"><div><h1>Каскад</h1><p>Выпуск трафика через другие панели</p></div><div class="actions"><label class="failover-toggle" title="Автопереключение на резервный каскад при сбое активного"><button type="button" class="access-switch" data-failover-switch role="switch" aria-label="Автопереключение при сбое" aria-checked="{str(bool(failover)).lower()}"></button><span>Автопереключение</span></label><button class="primary" id="addCascade">＋ Добавить каскад</button></div></div>{help_note}{failover_note}{listing}{add_dialog}{CASCADE_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}'''
 
 
+COMPONENT_GRID_JS='<script>\n(()=>{\nconst compGrid=document.getElementById("componentGrid");\nif(compGrid){\n  const compCsrf=compGrid.dataset.csrf,checkUrl=compGrid.dataset.check,installUrl=compGrid.dataset.install,statusUrl=compGrid.dataset.status,verifyUrl=compGrid.dataset.verify;\n  const compRows={};\n  compGrid.querySelectorAll("[data-component]").forEach(row=>{compRows[row.dataset.component]={row,ver:row.querySelector("[data-ver]"),sel:row.querySelector("select"),btn:row.querySelector("button"),status:row.querySelector(".component-item-status")}});\n  async function compApi(url,body){let lastErr=null;for(let a=0;a<3;a++){if(a)await new Promise(r=>setTimeout(r,1500));try{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(body),signal:window.AbortSignal?AbortSignal.timeout(15000):undefined});let j;try{j=await r.json()}catch(e){lastErr=new Error("Панель не отвечает. Проверьте связь и попробуйте снова.");continue}if(!r.ok)throw new Error(j.message||"Не выполнено.");return j}catch(e){if(!String(e.message||e).startsWith("Панель не отвечает"))throw e;lastErr=e}}throw lastErr||new Error("Панель не отвечает.")}\n  const compOverlay=document.createElement("div");compOverlay.className="move-overlay";compOverlay.hidden=true;\n  compOverlay.innerHTML=\'<div class="move-card" id="compCard"><div class="move-ring" id="compRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="compRingText">↑</b></div><h3 id="compTitle">Обновление</h3><p id="compText"></p><div class="actions upd-actions" id="compActions" hidden><button type="button" class="primary" id="compGo">Установить</button><button type="button" id="compCancel">Отмена</button></div></div>\';\n  document.body.append(compOverlay);\n  const compCard=compOverlay.querySelector("#compCard"),compRing=compOverlay.querySelector("#compRing"),compRingText=compOverlay.querySelector("#compRingText"),compTitle=compOverlay.querySelector("#compTitle"),compText=compOverlay.querySelector("#compText"),compActions=compOverlay.querySelector("#compActions"),compCancel=compOverlay.querySelector("#compCancel"),compGo=compOverlay.querySelector("#compGo");let resolveCompActions=null;\n  function compShow(state,title,text){compCard.classList.remove("spin","upd-done","upd-err");compActions.hidden=true;compTitle.textContent=title;compText.textContent=text||"";if(state==="confirm"){compRingText.textContent="↑";compCard.classList.add("spin")}else if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}if(state==="running"){compCard.classList.add("spin");compRingText.textContent="↑"}else if(state==="done"){compCard.classList.add("upd-done");compRingText.textContent="✓"}else{compCard.classList.add("upd-err");compRingText.textContent="!";setTimeout(compHide,8000)}compOverlay.hidden=false;requestAnimationFrame(()=>compOverlay.classList.add("show"))}\n  function compHide(){compOverlay.classList.remove("show");setTimeout(()=>{compOverlay.hidden=true},260);resolveCompActions=null}function compConfirm(label,target){compShow("confirm",label,"Версия "+target+" установится поверх текущей. При ошибке — автоматический откат.");compActions.hidden=false;return new Promise(res=>{resolveCompActions=res})}compGo.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(true)}});compCancel.addEventListener("click",()=>{if(resolveCompActions){const r=resolveCompActions;resolveCompActions=null;r(false);compHide()}});\n  async function compRefresh(){const d=await compApi(checkUrl,{csrf:compCsrf});Object.keys(compRows).forEach(n=>{const item=compRows[n];item.ver.textContent=(d.current&&d.current[n])||"—";if(item.sel){const tags=(d.catalog&&d.catalog[n])||[];const cur=(d.current&&d.current[n])||"";const wanted="v"+cur;const bad=(n===\'openflux\'&&(d.unsuitable&&d.unsuitable[n]||[]))||[];const pre=(n===\'openflux\'&&d.prerelease&&d.prerelease[n]||[]).map(e=>typeof e==="string"?e:e.tag).slice(0,4);const list=tags.slice(0,6);bad.forEach(t=>{if(list.indexOf(t)<0)list.push(t)});if(wanted&&/^v\\d+(\\.\\d+){1,3}$/.test(wanted)&&list.indexOf(wanted)<0)list.push(wanted);list.sort((a,b)=>{const p=s=>s.replace(/^v/,"").split(".").map(Number),x=p(a),y=p(b);for(let i=0;i<4;i++){if((x[i]||0)!==(y[i]||0))return (y[i]||0)>(x[i]||0)?1:-1}return 0});const full=[];pre.concat(list).forEach(t=>{if(full.indexOf(t)<0)full.push(t)});item.sel.innerHTML="";full.forEach(t=>{const o=document.createElement("option");o.value=t;o.textContent=t===wanted?t+" — установлена":(pre.indexOf(t)>=0?t+" · пререлиз":(bad.indexOf(t)>=0?t+" · нет сборки для Linux":t));item.sel.appendChild(o)});if(wanted&&full.indexOf(wanted)>=0)item.sel.value=wanted}});return d}\n  async function compVerify(n,target,hint){if(n!=="openflux"||!target)return;hint.hidden=false;hint.className="component-hint";hint.textContent="Проверяю версию "+target.replace(/^v/,"")+"…";try{const r=await compApi(verifyUrl,{csrf:compCsrf,component:n,target});hint.className="component-hint "+(r.ok?"ok":"err");hint.textContent=r.ok?target.replace(/^v/,"")+" подходит для установки.":(r.message||"Версия не подходит для установки.")}catch(e){hint.hidden=true}}\n  Object.keys(compRows).forEach(n=>{if(n==="openflux"&&compRows[n].sel)compRows[n].sel.addEventListener("change",()=>compVerify(n,compRows[n].sel.value,compRows[n].status))});\n  compRefresh().catch(()=>{Object.values(compRows).forEach(item=>{item.ver.textContent="—"})});\n  Object.keys(compRows).forEach(n=>{const item=compRows[n];\n    item.btn.addEventListener("click",async()=>{\n      const target=n==="mtproto"?"refresh":(item.sel?item.sel.value:"");\n      if(!target){item.status.className="component-item-status err";item.status.textContent="Нет доступной версии.";return}\n      if(!(await compConfirm(item.row.dataset.label,target)))return;\n      item.btn.disabled=true;\n      compShow("running",item.row.dataset.label,"Скачиваем релиз и перезапускаем службу…");\n      const started=Date.now();\n      try{\n        try{await compApi(installUrl,{csrf:compCsrf,component:n,target})}\n        catch(e){if(!String(e.message).includes("уже выполняется"))throw e}\n        let misses=0;\n        while(Date.now()-started<30*60*1000){\n          await new Promise(r=>setTimeout(r,3000));\n          compRingText.textContent=Math.floor((Date.now()-started)/1000)+" с";\n          let st;\n          try{st=await compApi(statusUrl,{csrf:compCsrf});misses=0}\n          catch(e){misses++;compText.textContent=misses<5?"Связь прервалась — повторяем опрос…":"Связь с панелью кратко прерывается на время перезапуска Xray — ждём восстановления… ("+misses+")";continue}\n          if(st.phase==="done"){compShow("done",item.row.dataset.label+" обновлён",st.message||"Готово.");item.status.className="component-item-status ok";item.status.textContent=st.message||"Готово.";compRefresh().catch(()=>{});setTimeout(compHide,2600);return}\n          if(st.phase==="failed"){compShow("err",item.row.dataset.label,st.message||"Не удалось.");item.status.className="component-item-status err";item.status.textContent=st.message||"Не удалось.";return}\n          compText.textContent=st.message||"Устанавливаю… "+Math.floor((Date.now()-started)/1000)+" с";\n        }\n        throw new Error("Обновление идёт дольше 30 минут. Проверьте статус позже — установка продолжается в фоне.");\n      }catch(e){item.status.className="component-item-status err";item.status.textContent=e.message;compShow("err",item.row.dataset.label+" — не обновлён",e.message)}\n      finally{item.btn.disabled=false}\n    })\n  })\n}\n})();\n</script>'
+
+
 def updates_ui(path, csrf, current):
-    component_modal=COMPONENT_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))
-    return component_modal+f'''<div class="page-head"><div><span class="eyebrow">ONYX PANEL / RELEASE CONTROL</span><h1>Обновления</h1><p>Версии панели и системных компонентов в одном месте</p></div><div class="actions"><span class="update-flag" id="updateFlag" hidden><i class="update-flag-dot"></i>Доступно обновление&nbsp;<b id="updateFlagVer"></b></span><button id="refreshAll">{icon('refresh')}Проверить обновление</button></div></div>
+    return f'''<div class="page-head"><div><span class="eyebrow">ONYX PANEL / RELEASE CONTROL</span><h1>Обновления</h1><p>Версии панели и системных компонентов в одном месте</p></div><div class="actions"><span class="update-flag" id="updateFlag" hidden><i class="update-flag-dot"></i>Доступно обновление&nbsp;<b id="updateFlagVer"></b></span></div></div>
 <section class="card updates-hero"><div class="updates-hero-copy"><span class="updates-hero-icon">{icon('refresh')}</span><div><h2>Центр обновлений</h2><p>Можно установить новую версию или вернуться на предыдущую. Перед заменой автоматически создаётся резервная копия.</p></div></div><div class="actions"><span class="pill">RC · ручная установка</span></div></section>
 <div class="updates-grid">
-<section class="card updates-card"><div class="card-title"><div><h2>Onyx Panel</h2><p>Интерфейс, менеджер подключений и служебные модули</p></div><span class="pill">Панель</span></div><div class="update-installed"><span>Установленная версия</span><strong id="panelCurrent">{esc(current)}</strong></div><div class="update-control"><label for="panelRelease">Доступная версия</label><select id="panelRelease" aria-label="Версия панели"><option>Загрузите список версий</option></select><button class="primary" id="startUpdate" disabled>Установить</button></div><p id="updateStatus" class="note update-status" role="status">Проверяем опубликованные релизы…</p></section>
-<section class="card updates-card"><div class="card-title"><div><h2>Компоненты</h2><p>Xray и OpenFlux обновляются независимо от панели</p></div><span class="pill">Ядро</span></div><div class="component-stack"><div class="component-item"><div class="component-item-head"><strong>Xray</strong><small id="xrayCurrent">Версия определяется…</small></div><div class="update-control"><label for="xrayRelease">Версия</label><select id="xrayRelease"><option>Загрузите список версий</option></select><button class="primary" data-component-install="xray" disabled>Установить</button></div></div><div class="component-item"><div class="component-item-head"><strong>OpenFlux</strong><small id="openfluxCurrent">Версия определяется…</small></div><div class="update-control"><label for="openfluxRelease">Версия</label><select id="openfluxRelease"><option>Загрузите список версий</option></select><button class="primary" data-component-install="openflux" disabled>Установить</button></div><small class="component-hint" id="openfluxVerify" hidden></small></div></div><p id="componentStatus" class="note update-status" role="status">Проверяем версии компонентов…</p></section>
+<section class="card updates-card"><div class="card-title"><div><h2>Onyx Panel</h2><p>Интерфейс, менеджер подключений и служебные модули</p></div><span class="pill">Панель</span></div><div class="update-installed"><span>Установленная версия</span><strong id="panelCurrent">{esc(current)}</strong></div><div class="update-control panel-update-control"><label for="panelRelease">Доступная версия</label><select id="panelRelease" aria-label="Версия панели"><option>Загрузите список версий</option></select><button id="refreshAll">{icon('refresh')}Проверить обновление</button><button class="primary" id="startUpdate" disabled>Установить</button></div><p id="updateStatus" class="note update-status" role="status">Проверяем опубликованные релизы…</p></section>
+<section class="card updates-card"><div class="card-title"><div><h2>Компоненты</h2><p>Обновление Xray, OpenFlux, AmneziaWG и MTProto с их репозиториев</p></div><span class="pill">Ядро</span></div><div class="component-stack" id="componentGrid" data-csrf="{esc(csrf)}" data-check="{esc(path)}/component-check" data-install="{esc(path)}/component-install" data-status="{esc(path)}/component-status" data-verify="{esc(path)}/component-verify"><div class="component-item" data-component="xray" data-label="Xray"><div class="component-item-head"><strong>Xray</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия Xray"></select><button class="primary comp-icon" title="Обновить Xray" aria-label="Обновить Xray">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="openflux" data-label="OpenFlux"><div class="component-item-head"><strong>OpenFlux</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия OpenFlux"></select><button class="primary comp-icon" title="Обновить OpenFlux" aria-label="Обновить OpenFlux">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="awg" data-label="AmneziaWG"><div class="component-item-head"><strong>AmneziaWG</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия AmneziaWG"></select><button class="primary comp-icon" title="Обновить AmneziaWG" aria-label="Обновить AmneziaWG">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="mtproto" data-label="MTProto"><div class="component-item-head"><strong>MTProto</strong><small data-ver>…</small></div><div class="update-control"><button class="primary comp-icon" title="Пересобрать из исходников" aria-label="Пересобрать MTProto из исходников">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div></div><p class="muted" style="font-size:11px;margin:10px 0 0">Перед заменой бинарника создаётся его копия; если новая версия не запустится, предыдущая вернётся автоматически. MTProto собирается из исходников, закреплённых за версией панели. Пререлизы OpenFlux помечены отдельно.</p></section>
 </div><div class="update-safety"><div><b>Резервная копия</b><small>Создаётся до замены файлов и бинарников.</small></div><div><b>Проверка запуска</b><small>После установки служба проходит автоматическую проверку.</small></div><div><b>Автоматический откат</b><small>Если новая версия не запустится, прежняя будет восстановлена.</small></div></div>
-<div class="move-overlay" id="updOverlay" hidden><div class="move-card" id="updCard"><div class="move-ring"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" id="updRing" cx="50" cy="50" r="44"/></svg><b id="updSecs">↑</b></div><h3 id="updTitle">Обновить панель?</h3><p id="updText"></p><div class="actions upd-actions" id="updActions" hidden><button type="button" id="updCancel">Отмена</button><button type="button" class="primary" id="updGo">Обновить</button></div></div></div>
+<div class="move-overlay" id="updOverlay" hidden><div class="move-card" id="updCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" id="updRing" cx="28" cy="28" r="24"/></svg><b id="updSecs">↑</b></div><h3 id="updTitle">Обновить панель?</h3><p id="updText"></p><div class="actions upd-actions" id="updActions" hidden><button type="button" id="updCancel">Отмена</button><button type="button" class="primary" id="updGo">Обновить</button></div></div></div>
 <script>
-const panelSelect=document.getElementById('panelRelease'),panelButton=document.getElementById('startUpdate'),panelStatus=document.getElementById('updateStatus'),componentStatus=document.getElementById('componentStatus');let panelNoUpdatesText='';let panelBusy=false;
-function panelView(d){{if(!d)return;panelBusy=['queued','running'].includes(d.phase);document.getElementById('panelCurrent').textContent=d.current||'{esc(current)}';const flag=document.getElementById('updateFlag'),latest=String(d.latest||''),cur=String(d.current||'');const newerV=(a,b)=>{{const p=s=>s.replace(/^v/,'').split('.').map(Number);const x=p(a),y=p(b);for(let i=0;i<3;i++){{if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0)}}return false}};if(latest&&cur&&newerV(latest,cur)){{flag.hidden=false;document.getElementById('updateFlagVer').textContent=latest.replace(/^v/,'')}}else{{flag.hidden=true}}const releases=Array.isArray(d.releases)?d.releases:[];if(releases.length){{const old=panelSelect.value;panelSelect.innerHTML=releases.map(v=>'<option value="'+v+'">'+v.replace(/^v/,'')+(v.replace(/^v/,'')===(d.current||'').replace(/^v/,'')?' · установлена':'')+'</option>').join('');const installed='v'+String(d.current||'').replace(/^v/,'');panelSelect.value=releases.includes(old)&&old!==installed?old:(releases.includes(d.latest)?d.latest:(releases[0]||''))}}panelSelect.disabled=panelBusy||!releases.length;panelButton.disabled=panelBusy||!releases.length;panelButton.textContent=panelBusy?'Установка…':'Установить';const noUpdates=!!(d.checked&&!d.available&&d.phase==='checked'&&Array.isArray(d.releases)&&d.releases.length);panelNoUpdatesText=noUpdates?'Обновлений нет — установлена последняя версия '+cur+'.':'';panelStatus.classList.toggle('error',noUpdates);panelStatus.textContent=noUpdates?'Обновлений нет — установлена последняя версия '+cur+'.':(d.message||(d.checked?'Версии панели загружены.':'Нажмите «Проверить обновление».'))}}
-function componentView(d){{if(!d)return;const catalog=d.catalog||{{}},current=d.current||{{}},unsuitable=d.unsuitable||{{}},running=['queued','running'].includes(d.phase);for(const name of ['xray','openflux']){{const select=document.getElementById(name+'Release'),button=document.querySelector('[data-component-install="'+name+'"]');let versions=(catalog[name]||[]).slice();const bad=(name==='openflux'&&(unsuitable[name]||[]))||[];bad.forEach(t=>{{if(!versions.includes(t))versions.push(t)}});if(bad.length)versions.sort((a,b)=>{{const p=s=>s.replace(/^v/,'').split('.').map(Number),x=p(a),y=p(b);for(let i=0;i<4;i++){{if((x[i]||0)!==(y[i]||0))return (y[i]||0)>(x[i]||0)?1:-1}}return 0}});const installed=String(current[name]||'').replace(/^v/,''),old=select.value;if(versions.length){{select.innerHTML=versions.map(v=>'<option value="'+v+'">'+v.replace(/^v/,'')+(v.replace(/^v/,'')===installed?' · установлена':(bad.includes(v)?' · нет сборки для Linux':''))+'</option>').join('');if(versions.includes(old))select.value=old;else if(versions.map(v=>v.replace(/^v/,'')).includes(installed))select.value='v'+installed;else{{const fit=versions.find(v=>!bad.includes(v));select.value=fit||versions[0]||''}}}}select.disabled=running||!versions.length;button.disabled=running||!versions.length||bad.includes(select.value);document.getElementById(name+'Current').textContent='Установлено: '+(current[name]||'неизвестно')}}componentStatus.textContent=d.message||(d.checked?'Версии компонентов загружены.':'Нажмите «Проверить обновление».')}}
-const openfluxVerifySel=document.getElementById('openfluxRelease'),openfluxVerifyHint=document.getElementById('openfluxVerify'),openfluxVerifyBtn=document.querySelector('[data-component-install="openflux"]');
-if(openfluxVerifySel&&openfluxVerifyHint&&!openfluxVerifySel.dataset.verifyBound){{openfluxVerifySel.dataset.verifyBound='1';openfluxVerifySel.addEventListener('change',async()=>{{const target=openfluxVerifySel.value;if(!target.startsWith('v'))return;openfluxVerifyHint.hidden=false;openfluxVerifyHint.className='component-hint';openfluxVerifyHint.textContent='Проверяю версию '+target.replace(/^v/,'')+'…';try{{const r=await fetch('{esc(path)}/component-verify',{{method:'POST',headers:{{'X-Onyx-Async':'1'}},body:new URLSearchParams({{csrf:'{esc(csrf)}',component:'openflux',target}})}});const d=await r.json();openfluxVerifyHint.className='component-hint '+(d.ok?'ok':'err');openfluxVerifyHint.textContent=d.ok?target.replace(/^v/,'')+' подходит для установки.':(d.message||'Версия не подходит для установки.')}}catch(e){{openfluxVerifyHint.hidden=true}}}})}}
+const panelSelect=document.getElementById('panelRelease'),panelButton=document.getElementById('startUpdate'),panelStatus=document.getElementById('updateStatus');let panelNoUpdatesText='';let panelBusy=false;
+function panelView(d){{if(!d)return;panelBusy=['queued','running'].includes(d.phase);document.getElementById('panelCurrent').textContent=d.current||'{esc(current)}';const flag=document.getElementById('updateFlag'),latest=String(d.latest||''),cur=String(d.current||'');const newerV=(a,b)=>{{const p=s=>s.replace(/^v/,'').split('.').map(Number);const x=p(a),y=p(b);for(let i=0;i<3;i++){{if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0)}}return false}};const hasUpdate=!!(latest&&cur&&newerV(latest,cur));if(hasUpdate){{flag.hidden=false;document.getElementById('updateFlagVer').textContent=latest.replace(/^v/,'')}}else{{flag.hidden=true}}const releases=Array.isArray(d.releases)?d.releases:[];if(releases.length){{const old=panelSelect.value;panelSelect.innerHTML=releases.map(v=>'<option value="'+v+'">'+v.replace(/^v/,'')+(v.replace(/^v/,'')===(d.current||'').replace(/^v/,'')?' · установлена':'')+'</option>').join('');const installed='v'+String(d.current||'').replace(/^v/,'');panelSelect.value=releases.includes(old)&&old!==installed?old:(releases.includes(d.latest)?d.latest:(releases[0]||''))}}panelSelect.disabled=panelBusy||!releases.length;panelButton.disabled=panelBusy||!releases.length;panelButton.textContent=panelBusy?'Установка…':'Установить';const noUpdates=!!(d.checked&&!d.available&&d.phase==='checked'&&Array.isArray(d.releases)&&d.releases.length);panelNoUpdatesText=noUpdates?'Обновлений нет — установлена последняя версия '+cur+'.':'';panelStatus.classList.remove('success','warning');if(noUpdates){{panelStatus.classList.add('success');panelStatus.textContent='Обновлений нет — установлена последняя версия '+cur+'.'}}else if(hasUpdate){{panelStatus.classList.add('warning');panelStatus.textContent='Доступна новая версия '+latest.replace(/^v/,'')+'.'}}else{{panelStatus.textContent=d.message||(d.checked?'Версии панели загружены.':'Нажмите «Проверить обновление».')}}}}
 async function request(endpoint,data,status){{const r=await fetch('{esc(path)}/'+endpoint,{{method:'POST',body:new URLSearchParams({{csrf:'{esc(csrf)}',...data}})}});if(r.redirected)throw new Error('Сессия завершена. Войдите заново.');let result;try{{result=await r.json()}}catch(e){{throw new Error('Панель вернула некорректный ответ.')}}if(!r.ok)throw new Error(result.message||'Операция завершилась ошибкой.');return result}}
 
 async function loadPanel(check=false){{try{{const d=check?await request('update-check',{{}},panelStatus):await fetch('{esc(path)}/update-status',{{cache:'no-store'}}).then(r=>r.ok?r.json():null);if(!check&&!d)return;panelView(d)}}catch(e){{panelStatus.textContent=e.message}}}}
-async function loadComponents(check=false){{try{{const d=check?await request('component-check',{{}},componentStatus):await fetch('{esc(path)}/component-status',{{cache:'no-store'}}).then(r=>r.ok?r.json():null);if(!check&&!d)return;componentView(d)}}catch(e){{componentStatus.textContent=e.message}}}}
-document.getElementById('refreshAll').addEventListener('click',async e=>{{const b=e.currentTarget;b.disabled=true;b.textContent='Загрузка…';panelNoUpdatesText='';await Promise.all([loadPanel(true),loadComponents(true)]);if(panelNoUpdatesText&&window.onyxToast)onyxToast(panelNoUpdatesText);b.disabled=false;b.innerHTML='{icon('refresh')}Проверить обновление'}});
-const updOverlay=document.getElementById('updOverlay'),updCard=document.getElementById('updCard'),updRing=document.getElementById('updRing'),updSecs=document.getElementById('updSecs'),updTitle=document.getElementById('updTitle'),updText=document.getElementById('updText'),updActions=document.getElementById('updActions'),updGo=document.getElementById('updGo'),updCancel=document.getElementById('updCancel'),RING=276.5,sleep=ms=>new Promise(r=>setTimeout(r,ms));let updActive=false,updClock=null,updRun=0;
+document.getElementById('refreshAll').addEventListener('click',async e=>{{const b=e.currentTarget;b.disabled=true;b.textContent='Загрузка…';panelNoUpdatesText='';await loadPanel(true);if(panelNoUpdatesText&&window.onyxToast)onyxToast(panelNoUpdatesText);b.disabled=false;b.innerHTML='{icon('refresh')}Проверить обновление'}});
+const updOverlay=document.getElementById('updOverlay'),updCard=document.getElementById('updCard'),updRing=document.getElementById('updRing'),updSecs=document.getElementById('updSecs'),updTitle=document.getElementById('updTitle'),updText=document.getElementById('updText'),updActions=document.getElementById('updActions'),updGo=document.getElementById('updGo'),updCancel=document.getElementById('updCancel'),RING=150.8,sleep=ms=>new Promise(r=>setTimeout(r,ms));let updActive=false,updClock=null,updRun=0;
 function ringSet(f){{updRing.style.strokeDashoffset=(RING*(1-Math.max(0,Math.min(1,f)))).toFixed(1)}}
-function updShow(state,target,message){{updCard.classList.remove('spin','time','upd-done','upd-err');ringSet(1);updGo.dataset.mode=state==='failed'?'close':'go';updGo.textContent=state==='failed'?'Закрыть':'Обновить';updGo.disabled=false;updCancel.hidden=state!=='confirm';updActions.hidden=state!=='confirm'&&state!=='failed';if(state==='confirm'){{updTitle.textContent='Обновить панель?';updText.textContent='Версия '+target+' установится поверх текущей. Резервная копия создаётся автоматически, панель кратковременно уйдёт и вернётся.';updSecs.textContent='↑'}}else if(state==='running'){{updCard.classList.add('spin','time');updTitle.textContent='Обновляем панель';updText.textContent=message||'Создаём резервную копию и устанавливаем обновление…';updSecs.textContent='0:00'}}else if(state==='done'){{updCard.classList.add('upd-done');updTitle.textContent='Обновление установлено';updText.textContent='Панель вернулась. Обновляем страницу…';updSecs.textContent='✓'}}else{{updCard.classList.add('upd-err');updTitle.textContent='Обновление не удалось';updText.textContent=message||'Проверьте журнал через Onyx или SSH и попробуйте ещё раз.';updSecs.textContent='!'}}updOverlay.hidden=false;requestAnimationFrame(()=>updOverlay.classList.add('show'))}}
+function updShow(state,target,message){{updCard.classList.remove('spin','time','upd-done','upd-err');ringSet(1);updGo.dataset.mode=state==='failed'?'close':'go';updGo.textContent=state==='failed'?'Закрыть':'Обновить';updGo.disabled=false;updCancel.hidden=state!=='confirm';updActions.hidden=state!=='confirm'&&state!=='failed';if(state==='confirm'){{updTitle.textContent='Обновить панель?';updText.textContent='Версия '+target+' установится поверх текущей. Резервная копия создаётся автоматически, панель кратковременно уйдёт и вернётся.';updSecs.textContent='↑'}}else if(state==='running'){{updCard.classList.add('spin','time');updRing.style.strokeDashoffset='';updTitle.textContent='Обновляем панель';updText.textContent=message||'Создаём резервную копию и устанавливаем обновление…';updSecs.textContent='0:00'}}else if(state==='done'){{updCard.classList.add('upd-done');updTitle.textContent='Обновление установлено';updText.textContent='Панель вернулась. Обновляем страницу…';updSecs.textContent='✓'}}else{{updCard.classList.add('upd-err');updTitle.textContent='Обновление не удалось';updText.textContent=message||'Проверьте журнал через Onyx или SSH и попробуйте ещё раз.';updSecs.textContent='!'}}updOverlay.hidden=false;requestAnimationFrame(()=>updOverlay.classList.add('show'))}}
 function updHide(){{updOverlay.classList.remove('show');setTimeout(()=>{{updOverlay.hidden=true}},260);clearInterval(updClock);updRun++}}
 function updReloadCountdown(){{let left=5;updSecs.textContent=left;const my=updRun,iv=setInterval(()=>{{if(my!==updRun){{clearInterval(iv);return}}left-=1;if(left>0){{updSecs.textContent=left;ringSet(left/5)}}else{{clearInterval(iv);location.reload()}}}},1000)}}
 async function updWatch(){{const my=updRun,startedAt=Date.now();let down=false;updClock=setInterval(()=>{{if(my!==updRun)return;const s=Math.floor((Date.now()-startedAt)/1000);updSecs.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}},500);for(let i=0;i<450;i++){{await sleep(2000);if(my!==updRun)return;let d=null;try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(r.ok)d=await r.json()}}catch(e){{}}if(my!==updRun)return;if(!d){{if(!down){{down=true;updCard.classList.add('spin','time');updTitle.textContent='Панель перезапускается';updText.textContent='Обновление устанавливается. Ждём, когда панель вернётся…'}}continue}}if(down&&['queued','running'].includes(d.phase)){{down=false;if(d.message)updText.textContent=d.message;continue}}if(['queued','running'].includes(d.phase)){{if(d.message)updText.textContent=d.message;continue}}clearInterval(updClock);if(d.phase==='done'){{updShow('done');updReloadCountdown()}}else{{updShow('failed',null,d.message)}}return}}updShow('failed',null,'Обновление слишком долго не отвечает. Проверьте статус через SSH.')}}
 panelButton.addEventListener('click',()=>{{const target=panelSelect.value;if(!target)return;updActive=true;updShow('confirm',target)}});
 updGo.addEventListener('click',async()=>{{if(updGo.dataset.mode==='close'){{updHide();updActive=false;loadPanel(true);return}}const target=panelSelect.value;updGo.disabled=true;try{{panelView(await request('update-start',{{target}},panelStatus));updShow('running');updWatch()}}catch(e){{updShow('failed',null,e.message)}}finally{{updGo.disabled=false}}}});
 updCancel.addEventListener('click',()=>{{updHide();updActive=false}});
-document.querySelectorAll('[data-component-install]').forEach(button=>button.addEventListener('click',()=>{{const component=button.dataset.componentInstall,target=document.getElementById(component+'Release').value;window.ONYXCompModal&&ONYXCompModal.install(component,target)}}));
-loadPanel().then(()=>{{if(panelBusy&&!updActive){{updActive=true;updShow('running');updWatch()}}}});loadComponents();setInterval(()=>{{loadPanel();loadComponents()}},5000);window.addEventListener('onyx-components-changed',()=>{{loadComponents()}});
+loadPanel().then(()=>{{if(panelBusy&&!updActive){{updActive=true;updShow('running');updWatch()}}}});setInterval(loadPanel,15000);
+</script>'''+COMPONENT_GRID_JS
+
+
+# ---- Расширения 2.1: квоты, приглашения, живые логи, диагностика ----
+
+EXTRA_ICONS = {
+    'activity': '<path d="M3 12h4l2.5-7 4 14 2.5-7h5"/>',
+    'shield': '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
+    'cloud': '<path d="M7 18a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19.5 11 3.6 3.6 0 0 1 18.5 18Z"/><path d="M12 12v6m0 0-2.2-2.2M12 18l2.2-2.2"/>',
+    'terminal': '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/>',
+    'stetho': '<path d="M5 4v6a5 5 0 0 0 10 0V4"/><path d="M10 4v2m0-2h-2m2 0h2"/><path d="M10 15v2a4 4 0 0 0 8 0v-3"/><circle cx="18" cy="11" r="2"/>',
+    'ticket': '<path d="M4 8a2 2 0 0 0 2-2h12a2 2 0 0 0 2 2v3a2.5 2.5 0 0 0 0 5v3a2 2 0 0 0-2 2H6a2 2 0 0 0-2-2v-3a2.5 2.5 0 0 0 0-5Z" transform="translate(0 -1)"/><path d="M13 6v2m0 3v2m0 3v2" transform="translate(0 -1)" stroke-dasharray="2 3"/>',
+    'flame': '<path d="M12 3s5 4.5 5 9a5 5 0 0 1-10 0c0-1.8.9-3.4 1.9-4.7.3 1.5 1.2 2.4 2.1 2.4C12.5 9.7 13.5 6.5 12 3Z"/>',
+}
+
+
+def extra_icon(name):
+    paths = {'grid': EXTRA_ICONS['activity'], **EXTRA_ICONS}
+    return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+paths.get(name, paths['grid'])+'</svg>'
+
+
+def card_expand(label='Развернуть или свернуть карточку'):
+    """Стрелка в правом верхнем углу карточки: разворачивает и сворачивает её содержимое."""
+    return ('<button type="button" class="card-expand" aria-expanded="false" aria-label="'+label+'" title="'+label+'">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></button>')
+
+
+def spark_svg(values, limit=None, width=96, height=26):
+    """Мини-график почасового потребления клиента; values — байты по часам."""
+    data = [max(0, int(v or 0)) for v in (values or [])]
+    if len(data) < 2:
+        return ''
+    peak = max(data) or 1
+    step = width / (len(data) - 1)
+    points = ' '.join('%.1f,%.1f' % (i * step, height - 2 - (height - 5) * v / peak) for i, v in enumerate(data))
+    area = '0,%d %s %d,%d' % (height, points, width, height)
+    return ('<svg class="spark" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-label="Потребление за сутки">'
+            '<polygon points="%s" fill="var(--tint)" stroke="none"/>'
+            '<polyline points="%s" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>' % (width, height, width, height, area, points))
+
+
+def limit_bar(used, limit_gb):
+    """Полоса «израсходовано из месячного лимита» для карточки клиента."""
+    if not limit_gb:
+        return ''
+    ceiling = limit_gb * 2**30
+    share = min(100.0, 100.0 * used / ceiling) if ceiling else 0
+    state = ' limit-bar-over' if share >= 100 else (' limit-bar-warn' if share >= 80 else '')
+    return ('<div class="limit-bar%s" title="Месячный лимит: %s из %d ГБ">'
+            '<i style="width:%.1f%%"></i></div>'
+            '<small class="limit-note">%s из %d ГБ в этом месяце</small>'
+            % (state, size(used), limit_gb, share, size(used), limit_gb))
+
+
+PUBLIC_CSS = '''
+*{box-sizing:border-box;margin:0}body{min-height:100vh;background:#071116;color:#e9f4f6;font:15px/1.6 "Segoe UI",system-ui,sans-serif;display:flex;justify-content:center;padding:34px 16px 60px}
+body:before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at 18% 12%,#56decb14,transparent 55%),radial-gradient(ellipse at 85% 90%,#f5c9890e,transparent 50%);pointer-events:none}
+.wrap{width:min(660px,100%);position:relative}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:26px}.brand img{width:38px;height:38px;border-radius:12px}.brand b{font-size:13px;letter-spacing:.04em}.brand small{display:block;font:9px/1.6 ui-monospace,monospace;color:#91aeb8;letter-spacing:.14em}
+h1{font-size:27px;line-height:1.2;letter-spacing:-.04em;margin-bottom:6px}
+.sub{color:#91aeb8;font-size:13px;margin-bottom:26px}
+.card{background:#0f2028;border:1px solid #24404b;border-radius:18px;padding:22px;margin-bottom:16px}
+.card h2{font-size:15px;margin-bottom:4px}.card>p{color:#91aeb8;font-size:12px}
+.metrics{display:flex;gap:26px;flex-wrap:wrap;margin:16px 0 4px}.metrics div span{display:block;font-size:10px;color:#91aeb8;margin-bottom:3px}.metrics div b{font:500 18px ui-monospace,monospace}
+.bar{height:5px;background:#24404b;border-radius:6px;overflow:hidden;margin:14px 0 6px}.bar i{display:block;height:100%;background:#56decb;border-radius:6px}.bar.warn i{background:#f5c989}.bar.over i{background:#ff9993}
+.access{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid #1c323d}
+.access:first-of-type{border-top:0;padding-top:0}
+.access .qr{width:96px;height:96px;flex:0 0 auto;background:#fff;border-radius:10px;padding:5px}
+.access .qr img{display:block;width:100%;height:100%;image-rendering:pixelated}
+.access div{min-width:0}.access b{display:block;font-size:13px;margin-bottom:2px}.access small{display:block;color:#91aeb8;font-size:11px;margin-bottom:8px}
+.link-row{display:flex;gap:8px;margin-top:14px}.link-row input{flex:1;min-width:0;background:#0a1920;border:1px solid #24404b;color:#e9f4f6;border-radius:9px;padding:10px 12px;font:11px ui-monospace,monospace}
+button{display:inline-flex;align-items:center;padding:10px 15px;background:#152b35;color:#e9f4f6;border:1px solid #24404b;border-radius:9px;font-size:12px;font-weight:550;cursor:pointer}button.primary{background:#56decb;border-color:#56decb;color:#052820}
+ol{margin:14px 0 0;padding-left:20px;color:#91aeb8;font-size:13px}ol li{margin-bottom:9px}ol b{color:#e9f4f6;font-weight:550}
+.apps{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.apps span{padding:5px 10px;border:1px solid #24404b;border-radius:8px;font-size:11px;color:#91aeb8}
+.until{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid #24404b;border-radius:9px;background:#0a1920;font-size:12px;color:#91aeb8;margin-top:6px}
+footer{color:#5c7883;font-size:10px;text-align:center;margin-top:26px;letter-spacing:.06em}
+.dead{text-align:center;padding:46px 20px}.dead b{display:block;font-size:19px;margin-bottom:8px}.dead p{color:#91aeb8;font-size:13px}
+@media(max-width:520px){h1{font-size:23px}.card{padding:18px}.access .qr{width:82px;height:82px}}
+'''
+
+
+def _public_document(title, body):
+    return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+            '<meta name="robots" content="noindex, nofollow">'
+            '<title>'+esc(title)+'</title><style>'+PUBLIC_CSS+'</style></head><body>'+body+'</body></html>')
+
+
+ONYX_MARK_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+                 '<path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z"/>'
+                 '<path fill="#FF792D" d="M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></svg>')
+
+
+def subscription_page_html(sub, profiles, used, limit_gb, expiry, domain, qrs):
+    """Личная страница клиента по ссылке подписки: QR, инструкция, лимит.
+
+    qrs — список {label, hint, link, png} с base64-PNG каждого протокола."""
+    head = ('<div class="wrap"><header class="brand"><img src="data:image/svg+xml,'
+            + quote(ONYX_MARK_SVG, safe='') + '" alt="">'
+            '<div><b>Onyx Panel</b><small>ЛИЧНЫЙ ДОСТУП</small></div></header>'
+            '<h1>'+esc(sub.get('name', 'Ваш доступ'))+'</h1>'
+            '<p class="sub">Один профиль — все протоколы. Подключите устройства по инструкции ниже.</p>')
+    metrics = '<div class="metrics"><div><span>Трафик за месяц</span><b>'+size(used)+'</b></div></div>'
+    if limit_gb:
+        share = min(100.0, 100.0 * used / (limit_gb * 2**30)) if limit_gb else 0
+        cls = 'bar over' if share >= 100 else ('bar warn' if share >= 80 else 'bar')
+        metrics += '<div class="'+cls+'"><i style="width:%.1f%%"></i></div>' % share
+        metrics += '<p class="sub" style="margin-top:8px">Месячный лимит: '+size(used)+' из '+str(limit_gb)+' ГБ.</p>'
+    if expiry:
+        metrics += ('<span class="until">⏳ Доступ активен до '
+                    + time.strftime('%d.%m.%Y', time.localtime(int(expiry)))+'</span>')
+    rows = []
+    for item in qrs:
+        rows.append('<div class="access"><span class="qr"><img alt="QR: '+esc(item['label'])+'" src="data:image/png;base64,'+item['png']+'"></span>'
+                    '<div><b>'+esc(item['label'])+'</b><small>'+esc(item.get('hint', ''))+'</small>'
+                    '<div class="link-row"><input readonly value="'+esc(item.get('link', ''))+'" aria-label="Ссылка '+esc(item['label'])+'">'
+                    '<button type="button" data-copy="'+esc(item.get('link', ''))+'">Копировать</button></div></div></div>')
+    page = (_public_document(sub.get('name', 'Ваш доступ'),
+             head+'<section class="card"><h2>Подключение</h2><p>Наведите камеру приложения на QR или вставьте ссылку.</p>'
+             + metrics+''.join(rows)+'</section>'
+             + '<section class="card"><h2>Как подключить</h2><ol>'
+               '<li>Установите приложение: <b>Happ</b>, <b>Hiddify</b> или <b>v2rayNG</b> (Android), <b>Happ</b>, <b>Streisand</b> или <b>Hiddify</b> (iOS).</li>'
+               '<li>Нажмите <b>«+»</b> → <b>«Сканировать QR»</b> или <b>«Импорт из буфера»</b> — и подставьте ссылку выше.</li>'
+               '<li>Выберите сервер и включите подключение. Готово — трафик уже идёт через VPN.</li></ol>'
+               '<div class="apps"><span>Happ</span><span>Hiddify</span><span>v2rayNG</span><span>Streisand</span><span>V2Box</span></div></section>'
+               '<footer>ONYX PANEL · ССЫЛКА ЛИЧНАЯ — НЕ ПЕРЕДАВАЙТЕ ЕЁ ТРЕТЬИМ ЛИЦАМ</footer>'))
+    page += ('<script>document.addEventListener("click",async e=>{const b=e.target.closest("[data-copy]");if(!b)return;'
+             'try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent="Скопировано"}catch(err){}'
+             'setTimeout(()=>b.textContent="Копировать",1600)});</script>')
+    return page
+
+
+def status_page_html(online, total):
+    """Публичная страница статуса: жива ли панель и сколько нод онлайн."""
+    ok = total > 0 and online >= total
+    dot = "#41d8a0" if ok else ("#e5c94d" if online > 0 else "#ff7a70")
+    title = "Все системы работают" if ok else ("Частичные проблемы" if online > 0 else "Нет связи")
+    body = ('<div class="wrap"><div class="card"><b><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:' + dot + ';margin-right:9px"></span>'
+            + esc(title) + '</b>'
+            + '<p>Нод онлайн: ' + str(online) + ' из ' + str(total) + '.</p>'
+            + '<p class="sub">Проверено ' + esc(time.strftime("%d.%m.%Y %H:%M UTC", time.gmtime())) + ' · обновление раз в минуту.</p></div>'
+            + '<footer>ONYX PANEL</footer></div>')
+    page = _public_document("Статус", body)
+    return page.replace('<meta name="viewport"', '<meta http-equiv="refresh" content="60"><meta name="viewport"')
+
+
+def invite_page_html(invite, claimed_sub, domain, path, qr_b64=""):
+    """Публичная страница приглашения: до активации — приглашение, после — доступ."""
+    if invite is None and claimed_sub is None:
+        return _public_document('Приглашение', '<div class="wrap"><div class="card dead"><b>Приглашение не найдено</b>'
+                                '<p>Ссылка недействительна: проверьте адрес или попросите новую у администратора.</p></div></div>')
+    if claimed_sub is not None:
+        sub_url = 'https://'+domain+'/onyx-sub/'+claimed_sub['token']
+        head = ('<h1>Доступ готов</h1><p class="sub">Подписка «'+esc(claimed_sub.get('name', 'Гость'))
+                +'» создана. Добавьте ссылку в VPN-приложение — она уже включает все протоколы.</p>')
+        page = (_public_document('Доступ готов', '<div class="wrap">'+head
+                 +'<section class="card"><h2>Ссылка подписки</h2><p>Скопируйте и вставьте в приложение (Happ, Hiddify, v2rayNG, Streisand).</p>'
+                 +('<img src="data:image/png;base64,'+qr_b64+'" alt="QR-код подписки" style="display:block;width:220px;height:220px;margin:16px auto 4px;background:#fff;padding:12px;border-radius:14px">' if qr_b64 else '')
+                 +'<div class="link-row"><input readonly value="'+esc(sub_url)+'"><button type="button" class="primary" data-copy="'+esc(sub_url)+'">Копировать</button></div>'
+                 +'<p class="sub" style="margin-top:14px">Эту страницу можно закрыть — доступ уже работает. Просто не потеряйте ссылку.</p></section>'
+                 +'<footer>ONYX PANEL</footer>'))
+        page += ('<script>document.addEventListener("click",async e=>{const b=e.target.closest("[data-copy]");if(!b)return;'
+                 'try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent="Скопировано"}catch(err){}'
+                 'setTimeout(()=>b.textContent="Копировать",1600)});</script>')
+        return page
+    if invite is None:
+        return _public_document('Приглашение', '<div class="wrap"><div class="card dead"><b>Приглашение не найдено</b>'
+                                '<p>Ссылка недействительна: проверьте адрес или попросите новую у администратора.</p></div></div>')
+    problem = ''
+    uses_left = int(invite.get('max_uses', 1)) - int(invite.get('uses', 0))
+    if not invite.get('enabled', True):
+        problem = 'Приглашение отключено администратором.'
+    elif int(invite.get('expires_at', 0) or 0) and time.time() > int(invite['expires_at']):
+        problem = 'Срок действия приглашения истёк.'
+    elif int(invite.get('max_uses', 1)) > 0 and uses_left <= 0:
+        problem = 'Лимит активаций исчерпан.'
+    if problem:
+        return _public_document('Приглашение', '<div class="wrap"><div class="card dead"><b>Приглашение недоступно</b><p>'+esc(problem)+'</p></div></div>')
+    until = time.strftime('%d.%m.%Y', time.localtime(int(invite.get('expires_at', 0) or 0))) if invite.get('expires_at') else ''
+    head = ('<h1>Вам выдан доступ</h1><p class="sub">Приглашение «'+esc(invite.get('name', 'Гость'))
+            +'» · протоколы: '+esc(' + '.join({'vless': 'VLESS XHTTP', 'hysteria': 'Hysteria2'}.get(p, p) for p in invite.get('protocols', [])))
+            +(' · до '+esc(until) if until else '')+'</p>')
+    many = int(invite.get('max_uses', 1)) > 1
+    left_note = (' Осталось активаций: '+str(uses_left)+'.') if many else ''
+    return _public_document('Активация приглашения',
+             '<div class="wrap">'+head
+             +'<section class="card"><h2>Активация</h2><p>Нажмите кнопку — панель создаст личную подписку и сразу покажет ссылку для приложения.'+esc(left_note)+'</p>'
+             +'<form method="post" action="'+esc(path)+'/claim" style="margin-top:16px"><button class="primary" type="submit">Активировать доступ</button></form></section>'
+             +'<section class="card"><h2>Что дальше</h2><ol><li>После активации появится <b>ссылка подписки</b>.</li>'
+               '<li>Вставьте её в Happ, Hiddify, v2rayNG или Streisand.</li>'
+               '<li>Включите подключение — пользуйтесь.</li></ol></section>'
+             +'<footer>ONYX PANEL</footer>')
+
+
+SETTINGS_EXTRA_CSS = '''
+.settings-flow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start;margin-bottom:18px}
+.settings-flow>.settings-col{display:grid;gap:18px;min-width:0;align-content:start}
+.settings-flow>.settings-col>.card{margin:0}
+.card.collapsible:not(.open) .card-body{display:none}
+.card.collapsible:not(.open) .card-title{margin-bottom:0}
+.choice-card input[type=checkbox],.checks input[type=checkbox]{appearance:none;-webkit-appearance:none;width:17px;height:17px;flex:0 0 auto;border:1.5px solid color-mix(in srgb,var(--text) 40%,transparent);border-radius:5px;background:transparent;cursor:pointer;position:relative;transition:border-color .15s ease,background .15s ease}
+.choice-card input[type=checkbox]:hover,.checks input[type=checkbox]:hover{border-color:var(--accent)}
+.choice-card input[type=checkbox]:checked,.checks input[type=checkbox]:checked{border-color:var(--accent);background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6.5 9.5 17 4.5 11.5'/%3E%3C/svg%3E") center/12px 12px no-repeat}
+.choice-card input[type=checkbox]:disabled,.checks input[type=checkbox]:disabled{opacity:.4;cursor:default}
+.choice-card:has(input[type=checkbox]:checked){border-color:var(--accent)}
+.card-expand{width:34px;height:34px;padding:0;flex:0 0 auto;background:transparent;color:var(--muted)}
+.card-expand svg{width:17px;height:17px;transition:transform .35s cubic-bezier(.4,0,.2,1)}
+.card-expand:hover{color:var(--accent)}
+.card.open .card-expand{color:var(--accent)}
+.card.open .card-expand svg{transform:rotate(180deg)}
+.head-lock .card-title .actions{flex-wrap:nowrap;flex:0 0 auto}
+.head-lock .card-title .actions button{white-space:nowrap}
+.head-lock .card-title>div:first-child{min-width:0}
+.choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:16px 0}
+@media(max-width:640px){.choice-grid{grid-template-columns:1fr}}
+@media(max-width:1100px){.settings-flow{grid-template-columns:1fr}}
+/* Uniform card headers: the description always reserves two lines, so every
+   header — and every collapsed card — is the same height whether its subtitle
+   wraps to one line or two. */
+.settings-flow .card>.card-title>div:first-child>p{min-height:42px;min-height:2lh}
+.settings-flow .card>.card-title>div:first-child{flex:1 1 auto;min-width:0}
+.settings-flow .card>.card-title .actions{margin-left:auto}
+/* Mobile: single column, wide tables scroll horizontally instead of crushing
+   their columns, and inline form rows stack. */
+@media(max-width:700px){
+  /* Narrow screens wrap more subtitles to three lines — reserve three so the
+     cards stay uniform here too. */
+  .settings-flow .card>.card-title>div:first-child>p{min-height:63px;min-height:3lh}
+  .settings-flow .card>.card-title{align-items:flex-start}
+  .settings-flow .card>.card-title .actions{flex-wrap:wrap;justify-content:flex-end}
+  .fw-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .limit-field{flex-wrap:wrap}
+  .limit-field input{max-width:none;flex:1 1 100%}
+  .limit-field select{flex:1 1 auto}
+  .limit-field .btn{flex:1 1 100%;justify-content:center}
+}
+.panel-setting+.panel-setting{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}
+.audit-filter{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.audit-filter select{font-size:11px;width:auto;max-width:230px;padding:8px 28px 8px 10px}
+.audit-filter button:not(.selx-trigger){font-size:11px;padding:8px 11px}
+.audit-filter .selx-trigger{font-size:11px;padding:9px 14px 9px 12px}
+.audit-filter .selx-label{flex:0 1 auto}
+.audit-filter .selx-caret{position:static}
+.audit-filter .selx-pop{right:auto;width:max-content;min-width:100%}
+@media(max-width:760px){.audit-filter .selx{flex-shrink:0}.audit-filter .selx-trigger{font-size:10px;padding:9px 12px 9px 10px}.audit-filter button:not(.selx-trigger){flex:1 1 auto;padding:10px;font-size:11px;white-space:nowrap}}
+.audit-table{width:100%;border-collapse:collapse;font-size:11px}
+.audit-table td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.audit-table tr:last-child td{border-bottom:0}
+.audit-table .audit-action{color:var(--accent);font:10px ui-monospace,monospace;white-space:nowrap}
+.audit-table .audit-target{overflow-wrap:anywhere}
+.login-failed td{color:var(--red)}
+.limit-bar{height:4px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:9px}
+.limit-bar i{display:block;height:100%;background:var(--green);border-radius:4px;transition:width .3s}
+.limit-bar-warn i{background:var(--amber)}
+.limit-bar-over i{background:var(--red)}
+.limit-note{display:block;font-size:9px;color:var(--muted);margin-top:4px;white-space:nowrap}
+.spark{display:block;margin-top:7px}
+.diag-grid{display:grid;gap:10px}
+.diag-row{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:var(--input)}
+.diag-mark{display:grid;place-items:center;width:24px;height:24px;flex:0 0 auto;border-radius:8px;background:var(--line);color:var(--muted);font-size:12px;font-weight:600}
+.diag-row.ok .diag-mark{background:color-mix(in srgb,var(--green) 22%,transparent);color:var(--green)}
+.diag-row.err .diag-mark{background:color-mix(in srgb,var(--red) 20%,transparent);color:var(--red)}
+.diag-row.run .diag-mark{background:var(--tint);color:var(--accent)}
+.diag-row b{display:block;font-size:12px}
+.diag-row small{display:block;color:var(--muted);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+.logs-shell{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:#060d12;overflow:hidden;margin-bottom:18px}
+.logs-bar{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap}
+.logs-bar select{font-size:11px;width:auto;padding:8px 28px 8px 10px}
+.logs-bar input{font-size:11px;max-width:190px;padding:8px 11px}
+.logs-bar .logs-live{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:var(--green)}
+.logs-bar .logs-live i{width:7px;height:7px;border-radius:50%;background:var(--green);animation:onyx-pulse 1.6s ease-in-out infinite}
+.logs-bar .logs-live.off{color:var(--red)}.logs-bar .logs-live.off i{background:var(--red);animation:none}
+@keyframes onyx-pulse{50%{opacity:.35}}
+.logs-view{height:min(58dvh,620px);overflow:auto;padding:13px 15px;font:11px/1.75 ui-monospace,Consolas,monospace;color:#b7ccd4;white-space:pre-wrap;overflow-wrap:anywhere}
+.logs-view .hit{background:color-mix(in srgb,var(--amber) 22%,transparent);border-radius:3px}
+.logs-empty{color:var(--muted)}
+.cloud-provider{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+.cloud-provider:first-of-type{border-top:0;padding-top:2px;margin-top:0}
+.cloud-provider .choice-card{align-items:center}
+.cloud-provider .choice-card input{margin-top:0}
+.cloud-provider .choice-card small{overflow-wrap:anywhere}
+.cloud-connect{display:grid;gap:9px;margin-top:11px}
+.cloud-connect-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.cloud-connect .actions{margin:2px 0 0}
+.cloud-connect input{min-width:0}
+.cloud-hint{display:block;font-size:10.5px;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
+#cloudForm{margin-top:18px}
+@media(max-width:640px){.cloud-connect-fields{grid-template-columns:1fr}}
+.cloud-state{font-size:10px;color:var(--muted);display:block;margin-top:3px}
+.cloud-state.on{color:var(--green)}.cloud-state.err{color:var(--red)}
+.fw-table{width:100%;border-collapse:collapse;font-size:11px;margin:10px 0 0}
+.fw-table th{text-align:left;font-size:9.5px;font-weight:500;letter-spacing:.04em;color:var(--muted);padding:7px 8px;border-bottom:1px solid var(--line)}
+.fw-table td{padding:9px 8px;border-bottom:1px solid var(--line)}
+.fw-table tr:last-child td{border-bottom:0}
+.fw-port{font:11px ui-monospace,monospace}
+.backup-modal{width:min(430px,calc(100vw - 28px));padding:24px 24px 20px;border-radius:22px}
+.backup-modal::backdrop{background:rgba(4,9,13,.62);backdrop-filter:blur(3px)}
+.backup-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+.backup-modal-head h2{font-size:17px;margin:5px 0 0}
+.backup-close{width:32px;height:32px;padding:0;flex:0 0 auto;background:transparent;color:var(--muted);font-size:17px}
+.backup-close:hover{color:var(--text)}
+.backup-steps{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+.backup-step{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:13px;background:var(--input);transition:border-color .2s ease,opacity .2s ease}
+.backup-step.pending{opacity:.45}
+.backup-step.active{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.backup-step.done{border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+.backup-step.fail{border-color:color-mix(in srgb,var(--red) 55%,transparent)}
+.backup-mark{display:grid;place-items:center;width:26px;height:26px;flex:0 0 auto;border-radius:9px;background:var(--raised);color:var(--muted);font:600 12px/1 ui-monospace,monospace}
+.backup-step.active .backup-mark{background:var(--tint);color:var(--accent)}
+.backup-step.done .backup-mark{background:color-mix(in srgb,var(--green) 20%,transparent);color:var(--green)}
+.backup-step.fail .backup-mark{background:color-mix(in srgb,var(--red) 18%,transparent);color:var(--red)}
+.backup-mark .ring{width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 30%,transparent);border-top-color:var(--accent);animation:onyx-spin .8s linear infinite}
+@keyframes onyx-spin{to{transform:rotate(360deg)}}
+.backup-step-info{min-width:0;flex:1}
+.backup-step-info b{display:block;font-size:12.5px;font-weight:550}
+.backup-step-info small{display:block;margin-top:3px;font-size:10.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.backup-step.fail .backup-step-info small{color:var(--red)}
+.backup-step.done .backup-step-info small{color:var(--text)}
+.backup-progress{height:5px;border-radius:5px;background:var(--input);margin:16px 0 0;overflow:hidden}
+.backup-progress i{display:block;height:100%;width:0;border-radius:5px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,var(--green)));transition:width .45s cubic-bezier(.4,0,.2,1)}
+.backup-progress.err i{background:var(--red)}
+.backup-summary{margin:13px 0 0;font-size:11.5px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
+.backup-summary.ok{color:var(--green)}
+.backup-summary.err{color:var(--red)}
+.backup-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:17px}
+'''
+
+
+def settings_extras(path, token, data):
+    """Карточки настроек 2.1: алерты, журнал действий, облака для копий, порты."""
+    alerts = data.get('alerts') or {}
+    audit_items = data.get('audit') or []
+    cloud = data.get('cloud') or {}
+    cloud_cfg = data.get('cloud_cfg') or {}
+    fw_enabled = data.get('fw_enabled')
+    fw_owned = data.get('fw_owned') or []
+    fw_extra = data.get('fw_extra') or []
+    fw_sockets = data.get('fw_sockets') or []
+    action_labels = {'login': 'вход', 'login-failed': 'ошибка входа', 'client-create': 'создание клиента',
+                     'client-delete': 'удаление клиента', 'client-toggle': 'доступ', 'client-limit': 'лимит',
+                     'client-check': 'проверка', 'subscription-update': 'подписка', 'subscription-rotate': 'ссылка подписки',
+                     'cascade-add': 'новый каскад', 'cascade-delete': 'удаление каскада', 'node-add': 'нода подключена',
+                     'node-delete': 'нода удалена', 'panel-path': 'адрес панели', 'panel-login': 'логин',
+                     'panel-password': 'пароль', 'import': 'восстановление', 'export': 'экспорт копии',
+                     'backup-run': 'бэкап', 'firewall-port': 'порт firewall', 'invite-create': 'приглашение',
+                     'invite-claim': 'активация приглашения', 'security-save': 'обход ТСПУ',
+                     'security-preset': 'пресет обхода', 'promo-create': 'промокод создан',
+                     'promo-delete': 'промокод удалён', 'unbound-toggle': 'DoT-резолвер'}
+    audit_rows = ''.join('<tr><td class="audit-action">'+time.strftime('%d.%m %H:%M', time.localtime(int(item.get("ts", 0) or 0)))
+                         +'</td><td>'+esc(action_labels.get(item.get("action"), item.get("action", "")))
+                         +'</td><td class="audit-target">'+esc(item.get("target", "") or "—")
+                         +('<br><span class="muted">'+esc(item.get("details", ""))+'</span>' if item.get("details") else '')
+                         +'</td></tr>' for item in audit_items) or '<tr><td colspan="3" class="muted">Действий пока не было</td></tr>'
+    options = ''.join('<option value="'+esc(a)+'">'+esc(action_labels.get(a, a))+'</option>'
+                      for a in sorted({str(item.get("action", "")) for item in audit_items} | set(action_labels)))
+    def cloud_parts(key, name, hint):
+        """choice-card с чекбоксом «Отправлять» и статусом подключения хранилища."""
+        state_info = cloud.get(key) or {}
+        cfg = cloud_cfg.get(key) or {}
+        last = cfg.get('last') or {}
+        connected = bool(state_info.get('connected'))
+        note = (' · '+time.strftime('%d.%m %H:%M', time.localtime(last['ts']))+' — '+last.get('message', 'ок')) if last.get('ts') else ''
+        state_cls = ('cloud-state on' if connected else 'cloud-state' + (' err' if state_info.get('detail') else ''))
+        state_text = 'Подключено' if connected else (state_info.get('detail') or 'Не подключено')
+        state = '<span class="'+state_cls+'">'+esc(state_text)+note+'</span>'
+        card = ('<label class="choice-card"><input form="cloudForm" type="checkbox" name="enable_'+key+'" value="1" '
+                + ('checked' if cfg.get('enabled') else '')
+                + '><span><strong>'+name+'</strong><small>'+hint+' '+state+'</small></span></label>')
+        return connected, card
+
+    y_connected, yandex_choice = cloud_parts('yandex', 'Яндекс Диск',
+                                             'Свой OAuth-токен этого сервера — независимо от OpenFlux.')
+    mailru_connected, mailru_choice = cloud_parts('mailru', 'Облако Mail.ru',
+                                                  'Своя почта и «пароль для внешних приложений» — независимо от OpenFlux.')
+    gdrive_connected, gdrive_choice = cloud_parts('gdrive', 'Google Drive',
+                                                  'Свой OAuth-клиент Google Cloud · панель видит только свои файлы (drive.file).')
+    yandex_block = ('<div class="cloud-provider">'+yandex_choice
+                    +'<form id="yandexForm" class="cloud-connect" action="'+esc(path)+'/yandex-connect"><input type="hidden" name="csrf" value="'+esc(token)+'">'
+                    +('<div class="actions"><button type="button" class="btn danger" data-cloud-disconnect="yandex">Отключить</button></div>' if y_connected else
+                      '<input type="password" name="token" placeholder="y0_AgAAAA… — OAuth-токен с полигона Яндекс Диска" autocomplete="new-password">'
+                      '<div class="actions"><button type="submit" class="btn primary">Подключить</button></div>')
+                    +'<p class="panel-setting-status" id="yandexStatus" role="status"></p></form>'
+                    +'<small class="cloud-hint">Токен выдаёт <a href="https://yandex.ru/dev/disk/" target="_blank" rel="noopener">полигон API Яндекс Диска</a> — кнопка «Получить OAuth-токен». Свой клиент создаётся в <a href="https://oauth.yandex.ru/client/new" target="_blank" rel="noopener">консоли OAuth</a> с доступом «Запись в любом месте на Диске»; токен — по ссылке вида oauth.yandex.ru/authorize?response_type=token&amp;client_id=…</small></div>')
+    mailru_block = ('<div class="cloud-provider">'+mailru_choice
+                    +'<form id="mailruForm" class="cloud-connect" action="'+esc(path)+'/mailru-connect"><input type="hidden" name="csrf" value="'+esc(token)+'">'
+                    +('<div class="actions"><button type="button" class="btn danger" data-cloud-disconnect="mailru">Отключить</button></div>' if mailru_connected else
+                      '<div class="cloud-connect-fields"><input name="email" type="email" placeholder="имя@mail.ru" autocomplete="off">'
+                      '<input name="password" type="password" placeholder="Пароль для внешних приложений" autocomplete="new-password"></div>'
+                      '<div class="actions"><button type="submit" class="btn primary">Подключить</button></div>')
+                    +'<p class="panel-setting-status" id="mailruStatus" role="status"></p></form>'
+                    +'<small class="cloud-hint">Обычный пароль почты не подойдёт: включите <a href="https://account.mail.ru/user/2-step-auth/" target="_blank" rel="noopener">двухэтапную аутентификацию Mail.ru</a> и в разделе «Безопасность → Пароли для внешних приложений» создайте пароль — его и адрес почты введите здесь.</small></div>')
+    gdrive_block = ('<div class="cloud-provider">'+gdrive_choice
+                    +'<form id="gdriveForm" class="cloud-connect" action="'+esc(path)+'/gdrive-start"><input type="hidden" name="csrf" value="'+esc(token)+'">'
+                    +'<div class="cloud-connect-fields"><input name="client_id" placeholder="Client ID · …apps.googleusercontent.com" autocomplete="off" spellcheck="false">'
+                    +'<input name="client_secret" type="password" placeholder="Client Secret · GOCSPX-…" autocomplete="new-password"></div>'
+                    +'<div class="actions"><button type="submit" class="btn primary">Подключить Google Drive</button>'
+                    +('<button type="button" class="btn danger" data-cloud-disconnect="gdrive">Отключить</button>' if gdrive_connected else '')+'</div>'
+                    +'<p class="panel-setting-status" id="gdriveStatus" role="status"></p></form>'
+                    +'<small class="cloud-hint">В <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> создайте OAuth-клиент «Веб-приложение» с redirect URI <code>'+esc(data.get('gdrive_redirect', ''))+'</code> и включите Drive API.</small></div>')
+    fw_rows = ''.join('<tr><td class="fw-port">'+esc(spec.split('/')[0])+'</td><td>'+esc(spec.split('/')[1].upper())+'</td><td class="muted">открыт панелью</td></tr>'
+                      for spec in sorted(set(fw_owned) | set(fw_extra))) or '<tr><td colspan="3" class="muted">Панель ещё не открывала порты в UFW</td></tr>'
+    socket_rows = ''.join('<tr><td class="fw-port">'+str(row['port'])+'</td><td>'+row['proto'].upper()+'</td><td class="muted">'+esc(row['process'])+'</td></tr>'
+                          for row in fw_sockets[:14]) or '<tr><td colspan="3" class="muted">Не удалось прочитать слушающие порты</td></tr>'
+    alert_check = ('<label class="choice-card"><input type="checkbox" name="enabled" value="1" '+('checked' if alerts.get('enabled') else '')
+                   +'><span><strong>Следить за сервером</strong><small>Раз в минуту панель сверяет свежие измерения с порогами ниже</small></span></label>')
+    observe_card = ('<div class="card collapsible"><div class="card-title"><div><h2>Наблюдение за сервером</h2><p>Пороговые алерты по ресурсам VPS — в колокольчик и Telegram</p></div>'+card_expand()+'</div>'
+            '<div class="card-body">'
+            '<section class="panel-setting"><div class="panel-setting-info"><b>Алерты по ресурсам</b><small>Пока показатель выше порога, напоминания приходят не чаще раза в час; при возврате в норму придёт отдельное уведомление.</small></div>'
+            '<form id="alertsForm" action="'+esc(path)+'/alerts-save"><input type="hidden" name="csrf" value="'+esc(token)+'"><div class="checks">'+alert_check+'</div>'
+            '<div class="admin-access-grid"><div><label>CPU, % выше</label><input name="cpu" type="number" min="10" max="100" value="'+str(int(alerts.get('cpu', 90)))+'"></div>'
+            '<div><label>Память, % выше</label><input name="ram" type="number" min="10" max="100" value="'+str(int(alerts.get('ram', 90)))+'"></div>'
+            '<div><label>Диск, % выше</label><input name="disk" type="number" min="10" max="100" value="'+str(int(alerts.get('disk', 85)))+'"></div>'
+            '<div><label>Load (1 мин) выше</label><input name="load" type="number" step="0.1" min="0.1" max="64" value="'+esc(alerts.get('load', 4))+'"></div></div>'
+            '<div class="actions"><button type="submit" class="btn primary">Сохранить пороги</button>'
+            '<a class="btn" href="'+esc(path)+'/diagnostics">'+extra_icon('stetho')+' Диагностика</a>'
+            '<a class="btn" href="'+esc(path)+'/logs">'+extra_icon('terminal')+' Журналы</a></div>'
+            '<p class="panel-setting-status" id="alertsStatus" role="status"></p></form></section>'
+            '<section class="panel-setting"><div class="panel-setting-info"><b>Журнал действий</b><small>Что происходило в панели: клиенты, подписки, настройки, ноды, каскады. Хранится 500 последних событий.</small></div>'
+            '<div class="audit-filter"><select id="auditFilter" aria-label="Фильтр журнала" data-selx-lock><option value="">Все события</option>'+options+'</select>'
+            '<button type="button" class="btn danger" id="auditClear">Очистить журнал</button></div>'
+            '<table class="audit-table"><tbody id="auditRows">'+audit_rows+'</tbody></table></section>'
+            '</div></div>')
+    ports_card = ('<div class="card collapsible head-lock"><div class="card-title"><div><h2>Порты и firewall</h2><p>Слушающие порты сервера и правила UFW, созданные панелью</p></div>'
+            '<div class="actions"><span class="badge '+('on' if fw_enabled else '')+'">'+('UFW активен' if fw_enabled else 'UFW не активен')+'</span>'+card_expand()+'</div></div>'
+            '<div class="card-body">'
+            '<section class="panel-setting"><div class="panel-setting-info"><b>Слушающие порты</b><small>Что сейчас открыто на сервере и какой сервис отвечает. Порты протоколов панель открывает сама при создании клиентов.</small></div>'
+            '<table class="fw-table"><thead><tr><th>Порт</th><th>Протокол</th><th>Процесс</th></tr></thead><tbody>'+socket_rows+'</tbody></table></section>'
+            '<section class="panel-setting"><div class="panel-setting-info"><b>Открыть порт вручную</b><small>Для нового сервиса на VPS: правило попадёт в UFW с пометкой Onyx Panel. Не забудьте открыть тот же порт в firewall хостинга.</small></div>'
+            '<form id="fwForm" action="'+esc(path)+'/firewall-port"><input type="hidden" name="csrf" value="'+esc(token)+'">'
+            '<div class="limit-field"><div><label>Порт</label><input name="port" type="number" min="1" max="65535" placeholder="8080" required></div>'
+            '<div><label>Протокол</label><select name="proto"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>'
+            '<button type="submit" class="btn primary" name="operation" value="open">Открыть</button></div></form>'
+            '<table class="fw-table"><thead><tr><th>Порт</th><th>Протокол</th><th>Кто открыл</th></tr></thead><tbody>'+fw_rows+'</tbody></table>'
+            '<p class="panel-setting-status" id="fwStatus" role="status"></p></section>'
+            '</div></div>')
+    cloud_card = ('<div class="card collapsible head-lock"><div class="card-title"><div><h2>Облачные копии</h2><p>Ежедневный архив дополнительно уходит в выбранные облака</p></div>'
+            '<div class="actions"><button type="button" class="btn" id="backupNow">'+extra_icon('cloud')+' Копия сейчас</button>'+card_expand()+'</div></div>'
+            '<div class="card-body">'
+            '<div class="cloud-providers">'+yandex_block+mailru_block+gdrive_block+'</div>'
+            '<form id="cloudForm" action="'+esc(path)+'/backup-cloud-save"><input type="hidden" name="csrf" value="'+esc(token)+'"><input type="hidden" name="targets" value="1">'
+            '<div class="actions"><button type="submit" class="btn primary">Сохранить цели</button></div>'
+            '<p class="panel-setting-status" id="cloudStatus" role="status"></p></form></div></div>'
+            '<dialog id="backupModal" class="backup-modal" aria-labelledby="backupModalTitle">'
+            '<div class="backup-modal-head"><div><span class="eyebrow">ONYX PANEL / BACKUP</span><h2 id="backupModalTitle">Копия сейчас</h2></div>'
+            '<button type="button" class="backup-close" id="backupModalClose" aria-label="Закрыть" hidden>×</button></div>'
+            '<ol class="backup-steps" id="backupSteps"></ol>'
+            '<div class="backup-progress" id="backupProgress"><i id="backupProgressBar"></i></div>'
+            '<p class="backup-summary" id="backupSummary" hidden></p>'
+            '<div class="backup-modal-actions"><button type="button" class="btn primary" id="backupModalDone" hidden>Готово</button></div>'
+            '</dialog>')
+    script = '<script>\n' \
+        '(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;\n' \
+        'const post=async(url,data)=>{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(data)});\n' \
+        'if(r.redirected)throw new Error("Сессия завершена. Войдите заново.");\n' \
+        'let res;try{res=await r.json()}catch(e){throw new Error("Панель вернула некорректный ответ.")}\n' \
+        'if(!r.ok||!res.ok)throw new Error(res.message||"Операция не выполнена.");return res};\n' \
+        'const bind=(formId,statusId,after)=>{const f=document.getElementById(formId),s=document.getElementById(statusId);if(!f)return;\n' \
+        'f.addEventListener("submit",async e=>{e.preventDefault();const b=f.querySelector("button[type=submit]"),label=b.textContent;b.disabled=true;\n' \
+        's.className="panel-setting-status";s.textContent="Применяю…";\n' \
+        'try{const fd=new FormData(f),payload={};fd.forEach((v,k)=>payload[k]=v);\n' \
+        'const res=await post(f.getAttribute("action"),payload);s.className="panel-setting-status ok";s.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Сохранено.");if(after)after(res)}\n' \
+        'catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}\n' \
+        'finally{b.disabled=false;b.textContent=label}})};\n' \
+        'bind("alertsForm","alertsStatus");bind("cloudForm","cloudStatus");bind("gdriveForm","gdriveStatus",res=>{if(res.redirect)location.href=res.redirect});bind("fwForm","fwStatus",()=>setTimeout(()=>location.reload(),900));\n' \
+        'bind("yandexForm","yandexStatus",()=>setTimeout(()=>location.reload(),900));bind("mailruForm","mailruStatus",()=>setTimeout(()=>location.reload(),900));\n' \
+        'document.addEventListener("click",async e=>{const b=e.target.closest("[data-cloud-disconnect]");if(!b)return;\n' \
+        'if(!(await onyxConfirm("Отключить это хранилище? Сохранённые ключи будут удалены.",{danger:true,ok:"Отключить"})))return;\n' \
+        'b.disabled=true;try{await post(PATH+"/"+b.dataset.cloudDisconnect+"-disconnect",{csrf:CSRF});if(window.onyxToast)onyxToast("Отключено.");setTimeout(()=>location.reload(),700)}\n' \
+        'catch(err){if(window.onyxToast)onyxToast(err.message,"err");b.disabled=false}});\n' \
+        'document.addEventListener("click",e=>{const t=e.target.closest(".card-expand");if(!t)return;const c=t.closest(".card");if(!c)return;\n' \
+        'const open=c.classList.toggle("open");t.setAttribute("aria-expanded",open?"true":"false");t.title=t.ariaLabel=open?"Свернуть карточку":"Развернуть карточку"});\n' \
+        'const backupNow=document.getElementById("backupNow"),backupModal=document.getElementById("backupModal");\n' \
+        'if(backupNow&&backupModal){\n' \
+        'const stepsBox=document.getElementById("backupSteps"),bar=document.getElementById("backupProgressBar"),progress=document.getElementById("backupProgress"),\n' \
+        'summary=document.getElementById("backupSummary"),doneBtn=document.getElementById("backupModalDone"),closeBtn=document.getElementById("backupModalClose");\n' \
+        'const fmt=b=>b>=1048576?(b/1048576).toFixed(1)+" МБ":b>=1024?(b/1024).toFixed(1)+" КБ":b+" Б";\n' \
+        'let rows={};\n' \
+        'const row=(id,label,kind)=>{const li=document.createElement("li");li.className="backup-step pending";li.dataset.step=id;\n' \
+        'li.innerHTML="<span class=backup-mark></span><span class=backup-step-info><b>"+label+"</b><small></small></span>";\n' \
+        'li.dataset.kind=kind||"step";stepsBox.append(li);rows[id]=li;return li};\n' \
+        'const mark=(li,state,text)=>{if(!li)return;li.classList.remove("pending","active","done","fail");li.classList.add(state);\n' \
+        'li.querySelector(".backup-mark").innerHTML=state==="active"?"<span class=ring></span>":(state==="done"?"✓":"!");\n' \
+        'if(text!==undefined)li.querySelector("small").textContent=text};\n' \
+        'const advance=n=>{const total=stepsBox.children.length;const done=[...stepsBox.children].filter(li=>li.classList.contains("done")||li.classList.contains("fail")).length;\n' \
+        'bar.style.width=total?Math.round(done/total*100)+"%":"0%"};\n' \
+        'const finish=(ok,text)=>{summary.hidden=false;summary.className="backup-summary "+(ok?"ok":"err");summary.textContent=text;\n' \
+        'progress.classList.toggle("err",!ok);doneBtn.hidden=false;closeBtn.hidden=false;\n' \
+        'if(window.onyxToast)onyxToast(text,ok?"":"err")};\n' \
+        'backupModal.addEventListener("close",()=>{stepsBox.innerHTML="";rows={};bar.style.width="0%";progress.classList.remove("err");summary.hidden=true;doneBtn.hidden=true;closeBtn.hidden=true;backupNow.disabled=false});\n' \
+        'doneBtn.addEventListener("click",()=>backupModal.close());\n' \
+        'closeBtn.addEventListener("click",()=>backupModal.close());\n' \
+        'backupNow.addEventListener("click",async()=>{backupNow.disabled=true;\n' \
+        'stepsBox.innerHTML="";rows={};bar.style.width="0%";progress.classList.remove("err");summary.hidden=true;doneBtn.hidden=true;closeBtn.hidden=true;\n' \
+        'const sBuild=row("build","Собираю архив настроек"),sLocal=row("local","Сохраняю копию на сервере");\n' \
+        'try{backupModal.showModal()}catch(e){}\n' \
+        'const step=li=>{mark(li,"active");return li};\n' \
+        'try{\n' \
+        'step(sBuild);let build;try{build=await post(PATH+"/backup-now",{csrf:CSRF,stage:"build"})}\n' \
+        'catch(e){mark(sBuild,"fail",e.message);advance();return finish(false,"Копия не создана: "+e.message)}\n' \
+        'mark(sBuild,"done","Архив "+build.name+" · "+fmt(build.size));advance();\n' \
+        'step(sLocal);try{await post(PATH+"/backup-now",{csrf:CSRF,stage:"local",job:build.job})}\n' \
+        'catch(e){mark(sLocal,"fail",e.message);advance();return finish(false,"Локальная копия не сохранена: "+e.message)}\n' \
+        'mark(sLocal,"done","Лежит в /var/lib/onyx-panel/backups · "+fmt(build.size));advance();\n' \
+        'const targets=Array.isArray(build.targets)?build.targets:[];let failed=0;\n' \
+        'for(const t of targets){const li=row("cloud-"+t.key,"Загружаю в "+t.label);step(li);\n' \
+        'try{const r=await post(PATH+"/backup-now",{csrf:CSRF,stage:"cloud",job:build.job,target:t.key});mark(li,"done",r.message||"Загружено")}\n' \
+        'catch(e){mark(li,"fail",e.message);failed++}\n' \
+        'advance()}\n' \
+        'step(row("finish","Финализирую…"));let fin;\n' \
+        'try{fin=await post(PATH+"/backup-now",{csrf:CSRF,stage:"finish",job:build.job})}\n' \
+        'catch(e){mark(rows["finish"],"fail",e.message);advance();return finish(false,e.message)}\n' \
+        'mark(rows["finish"],"done",failed?"Часть облаков не приняла копию":"Копия зафиксирована");advance();\n' \
+        'finish(!failed,(failed?targets.length-failed+" из "+targets.length+" облаков приняли копию. ":"")+((fin&&fin.message)||"Готово."))}\n' \
+        'catch(e){finish(false,e.message)}});\n' \
+        '}\n' \
+        'const auditFilter=document.getElementById("auditFilter"),auditRows=document.getElementById("auditRows");\n' \
+        'if(auditFilter&&auditRows){auditRows.dataset.all=auditRows.innerHTML;\n' \
+        'auditFilter.addEventListener("change",()=>{if(!auditFilter.value){auditRows.innerHTML=auditRows.dataset.all;return}\n' \
+        'const probe=document.createElement("tbody");probe.innerHTML=auditRows.dataset.all;\n' \
+        'auditRows.innerHTML=[...probe.querySelectorAll("tr")].map(tr=>tr.outerHTML).join("")})}\n' \
+        'const auditClear=document.getElementById("auditClear");\n' \
+        'if(auditClear)auditClear.addEventListener("click",async()=>{if(!(await onyxConfirm("Очистить весь журнал действий? История пропадёт безвозвратно.",{danger:true,ok:"Очистить"})))return;\n' \
+        'try{await post(PATH+"/audit-clear",{csrf:CSRF});auditRows.innerHTML=\'<tr><td colspan="3" class="muted">Действий пока не было</td></tr>\';if(window.onyxToast)onyxToast("Журнал очищен.")}catch(e){if(window.onyxToast)onyxToast(e.message,"err")}});\n' \
+        '})();\n' \
+        '</script>'
+    return {'style': SETTINGS_EXTRA_CSS,
+            'observe': observe_card,
+            'ports': ports_card,
+            'cloud': cloud_card,
+            'script': script.replace('@@PATH@@', json.dumps(path)).replace('@@CSRF@@', json.dumps(token))}
+
+
+LOG_UNITS = [('panel', 'Панель (onyx-panel)'), ('xray', 'Xray — VLESS и Hysteria2'), ('relay', 'Релей — WEB Proxy / MTProto'),
+             ('mtproxy', 'MTProxy'), ('caddy', 'Caddy — HTTPS и сертификаты'), ('awg', 'AmneziaWG — все профили'),
+             ('openflux', 'OpenFlux — туннели'), ('metrics', 'Сборщик метрик')]
+
+
+def logs_ui(path, csrf):
+    """Страница живых журналов: SSE-поток journalctl с фильтром и паузой."""
+    units = ''.join('<option value="'+key+'">'+esc(label)+'</option>' for key, label in LOG_UNITS)
+    body = ('<style>'+SETTINGS_EXTRA_CSS+'</style>'
+            '<div class="page-head"><div><span class="eyebrow">ONYX PANEL / LOGS</span><h1>Журналы</h1>'
+            '<p>Живой поток journalctl по службам сервера</p></div>'
+            '<div class="actions"><a class="btn" href="'+esc(path)+'/diagnostics">'+extra_icon('stetho')+' Диагностика</a></div></div>'
+            '<div class="logs-shell"><div class="logs-bar"><select id="logUnit" aria-label="Журнал службы">'+units+'</select>'
+            '<input type="search" id="logFilter" placeholder="Фильтр: error, handshake…" aria-label="Фильтр строк">'
+            '<button type="button" id="logPause">Пауза</button><button type="button" id="logClear">Очистить</button>'
+            '<span class="logs-live" id="logLive"><i></i>в эфире</span></div>'
+            '<div class="logs-view" id="logView" aria-live="polite"><span class="logs-empty">Подключаюсь к журналу…</span></div></div>'
+            '<p class="note">В журнал пишут сами службы: если строк нет, сервис молчит — это обычно хорошо. '
+            'Полная история доступна по SSH: <code>journalctl -u &lt;служба&gt;</code>.</p>'
+            + LOGS_JS.replace('@@PATH@@', json.dumps(path)))
+    return body
+
+
+LOGS_JS = '''<script>
+(()=>{const PATH=@@PATH@@;
+const unit=document.getElementById("logUnit"),filter=document.getElementById("logFilter"),view=document.getElementById("logView"),
+      pauseBtn=document.getElementById("logPause"),clearBtn=document.getElementById("logClear"),live=document.getElementById("logLive");
+let source=null,paused=false,buffer=[];
+const MAX_LINES=500;
+function setLive(on,text){live.classList.toggle("off",!on);live.innerHTML="<i></i>"+(text||(on?"в эфире":"пауза"))}
+function paint(){const q=(filter.value||"").toLowerCase();
+view.textContent="";
+const rows=q?buffer.filter(line=>line.toLowerCase().includes(q)):buffer;
+if(!rows.length){view.innerHTML='<span class="logs-empty">'+(buffer.length?"Ни одна строка не подходит под фильтр.":"Журнал пуст — служба ничего не писала.")+"</span>";return}
+const frag=document.createDocumentFragment();
+rows.forEach(line=>{const div=document.createElement("div");
+if(q&&line.toLowerCase().includes(q)){const i=line.toLowerCase().indexOf(q);
+div.append(line.slice(0,i));const mark=document.createElement("span");mark.className="hit";mark.textContent=line.slice(i,i+q.length);div.append(mark);div.append(line.slice(i+q.length))}
+else div.textContent=line;frag.append(div)});
+view.append(frag);view.scrollTop=view.scrollHeight}
+function connect(){if(source){source.close();source=null}
+buffer=[];paint();
+source=new EventSource(PATH+"/logs-stream?unit="+encodeURIComponent(unit.value));
+source.onmessage=e=>{if(paused){if(buffer.length<MAX_LINES*2)buffer.push(e.data);return}
+buffer.push(e.data);if(buffer.length>MAX_LINES)buffer.splice(0,buffer.length-MAX_LINES);paint()};
+source.onerror=()=>{setLive(false,"связь потеряна");setTimeout(()=>{if(source){setLive(true);connect()}},2500)};
+setLive(true)}
+unit.addEventListener("change",connect);
+filter.addEventListener("input",paint);
+pauseBtn.addEventListener("click",()=>{paused=!paused;pauseBtn.textContent=paused?"Продолжить":"Пауза";
+if(!paused&&buffer.length){buffer=buffer.slice(-MAX_LINES);paint()}setLive(!paused)});
+clearBtn.addEventListener("click",()=>{buffer=[];paint()});
+connect();
+})();
+</script>'''
+
+
+def diagnostics_ui(path, csrf, state):
+    """Страница самопроверки сервера: чеклист с живым прогрессом."""
+    checks = ''.join('<div class="diag-row run" data-diag="'+esc(item.get("key", ""))+'"><span class="diag-mark">…</span>'
+                     '<div><b>'+esc(item.get("label", ""))+'</b><small>Ожидание проверки</small></div></div>'
+                     for item in (state.get("checks") or []))
+    body = ('<style>'+SETTINGS_EXTRA_CSS+'</style>'
+            '<div class="page-head"><div><span class="eyebrow">ONYX PANEL / HEALTH</span><h1>Диагностика</h1>'
+            '<p>Проверка домена, сертификата, служб, портов и сборщиков — без SSH</p></div>'
+            '<div class="actions"><button type="button" class="btn primary" id="diagRun">'+extra_icon('stetho')+' Запустить проверку</button></div></div>'
+            '<p id="diagNote" class="note" role="status" hidden></p>'
+            '<section class="card"><div class="card-title"><div><h2>Состояние сервера</h2>'
+            '<p id="diagStamp">Проверка не запускалась на этой странице</p></div></div>'
+            '<div class="diag-grid" id="diagGrid">'+(checks or '<p class="empty">Нажмите «Запустить проверку» — панель прогонит чеклист и покажет результат по пунктам.</p>')+'</div></section>'
+            '<p class="note">Проверки — то, что обычно делают вручную по SSH: DNS и сертификат, доступность панели снаружи, '
+            'активность служб, валидность конфига Xray, nft-таблица и счётчики, слушающие порты, свежесть метрик, '
+            'место на диске и возраст последней копии.</p>'
+            + DIAG_JS.replace('@@PATH@@', json.dumps(path)).replace('@@CSRF@@', json.dumps(csrf))
+                     .replace('@@STATE@@', json.dumps(state, ensure_ascii=True)))
+    return body
+
+
+DIAG_JS = '''<script>
+(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
+const grid=document.getElementById("diagGrid"),stamp=document.getElementById("diagStamp"),note=document.getElementById("diagNote"),runBtn=document.getElementById("diagRun");
+function render(d){if(!d||!d.checks)return;
+stamp.textContent=d.phase==="running"?"Проверка идёт…":d.started?("Проверено: "+new Date(d.started*1000).toLocaleString("ru-RU")):"";
+grid.innerHTML=d.checks.map(c=>{const cls=c.status==="pending"?"run":(c.ok?"ok":"err");
+return '<div class="diag-row '+cls+'" data-diag="'+c.key+'"><span class="diag-mark">'+(c.status==="pending"?"…":(c.ok?"✓":"!"))+'</span><div><b>'+c.label+'</b><small>'+(c.detail||"Ожидание")+'</small></div></div>'}).join("")}
+let timer=null;
+async function poll(){try{const r=await fetch(PATH+"/diagnostics-status",{cache:"no-store"});if(!r.ok||r.redirected)return;
+const d=await r.json();render(d);
+if(d.phase==="running"){if(!timer)timer=setInterval(poll,1500)}
+else{if(timer){clearInterval(timer);timer=null}runBtn.disabled=false;
+const done=(d.checks||[]).filter(c=>c.status==="done");
+const bad=done.filter(c=>!c.ok);
+if(bad.length){note.hidden=false;note.style.borderLeftColor="";note.textContent="Есть проблемы: "+bad.map(c=>c.label).join(", ")+". Подробности — в строках выше."}
+else if(done.length){note.hidden=false;note.style.borderLeftColor="var(--green)";note.textContent="Все проверки пройдены."}}}
+catch(e){}}
+runBtn.addEventListener("click",async()=>{runBtn.disabled=true;
+try{await fetch(PATH+"/diagnostics-run",{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams({csrf:CSRF})})}catch(e){}
+if(!timer)timer=setInterval(poll,1500)});
+render(@@STATE@@);
+poll();
+})();
 </script>'''

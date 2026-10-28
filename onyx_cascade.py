@@ -146,9 +146,7 @@ def parse_link(link):
             upgrade['host'] = _first(query, 'host')
         stream['httpupgradeSettings'] = upgrade
     elif network == 'grpc':
-        service = _first(query, 'serviceName', 'path')
-        if not service:
-            raise CascadeError('В gRPC-ключе не указано имя сервиса (serviceName).')
+        service = _first(query, 'serviceName', 'path', default='')
         stream['grpcSettings'] = {'serviceName': service,
                                   'multiMode': _first(query, 'mode').lower() == 'multi'}
     elif network == 'xhttp':
@@ -299,9 +297,9 @@ def build_outbound(record, tag):
 
 def _cascadable_uids(users):
     """Profiles whose traffic enters Xray and can be routed to a cascade:
-    VLESS and Hysteria2 share the same inbound email scheme."""
+    VLESS, Hysteria2 and TUIC share the same inbound email scheme."""
     return [user for user in (users or [])
-            if user.get('protocol') in ('vless', 'hysteria') and user.get('enabled', True)
+            if user.get('protocol') in ('vless', 'hysteria', 'tuic') and user.get('enabled', True)
             and UID_RE.fullmatch(str(user.get('id', '')))]
 
 
@@ -336,7 +334,28 @@ def route_assignment(cascades, users):
     return by_tag, all_tag, carries
 
 
-def xray_additions(cascades, users):
+def xray_balancer(cascades, least_ping=False):
+    """Observatory + leastPing balancer for the generated config, or None.
+
+    With leastPing on and two or more enabled cascades, the catch-all rule
+    routes into the balancer pool instead of the top cascade, and Xray's
+    observatory probes every hop so the pool always picks the fastest path.
+    """
+    if not least_ping:
+        return None
+    enabled = [record for record in (cascades or []) if record.get('enabled')]
+    if len(enabled) < 2:
+        return None
+    tags = ['cascade-' + record['id'] for record in enabled]
+    return {'observatory': {'subject': ['outbound:' + tag for tag in tags],
+                            'enable': True, 'probeURL': 'http://www.gstatic.com/generate_204',
+                            'probeInterval': '60s'},
+            'balancer': [{'tag': 'cascade-pool',
+                          'selector': {'tag': ['cascade-']},
+                          'strategy': {'type': 'leastPing'}}]}
+
+
+def xray_additions(cascades, users, least_ping=False):
     """Outbounds and routing rules to merge into the generated Xray config."""
     enabled = [record for record in (cascades or []) if record.get('enabled')]
     if not enabled:
@@ -349,10 +368,15 @@ def xray_additions(cascades, users):
         if emails:
             rules.append({'type': 'field', 'user': emails, 'outboundTag': 'cascade-' + record['id']})
     if all_tag:
-        # VLESS and Hysteria2 inbounds both cascade; UDP inside Hysteria2
-        # rides XHTTP UDP-over-TCP, which needs a modern Xray on the upstream.
-        rules.append({'type': 'field', 'inboundTag': ['vless-xhttp', 'hysteria2'],
-                      'outboundTag': all_tag})
+        # VLESS, Hysteria2 and TUIC inbounds all cascade; UDP inside Hysteria2
+        # and TUIC rides QUIC, which needs a modern Xray on the upstream.
+        # Per-user rules above always win over the catch-all/balancer below.
+        if xray_balancer(cascades, least_ping):
+            rules.append({'type': 'field', 'inboundTag': ['vless-xhttp', 'hysteria2', 'tuic5'],
+                          'balancerTag': 'cascade-pool'})
+        else:
+            rules.append({'type': 'field', 'inboundTag': ['vless-xhttp', 'hysteria2', 'tuic5'],
+                          'outboundTag': all_tag})
     return outbounds, rules
 
 

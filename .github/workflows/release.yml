@@ -1,7 +1,8 @@
-# Auto-release: on every push to main the workflow reads the panel version
-# from install-core.sh and, when a v<version> tag does not exist yet, creates
-# the tag and a GitHub Release with commit-list notes (same style as
-# release.sh). Bump the version -> push -> the release appears by itself.
+# Auto-release: on every push to main the workflow takes the panel version
+# from the repo-root VERSION file, syncs the version literals across the
+# installer/update scripts, and — when a v<version> tag does not exist yet —
+# creates the tag and a GitHub Release with commit-list notes.
+# Bump the version in the VERSION file -> push -> the release appears by itself.
 name: Release
 
 on:
@@ -24,12 +25,48 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync version literals
+        run: |
+          # VERSION is the single source of truth. Rewrite every version
+          # literal in the standalone scripts so a fresh install, update or
+          # uninstall never shows or falls back to a stale number:
+          #   update.sh               LOCAL_VERSION="…"
+          #   install-*.sh            || echo '…'  fallback when the version file is absent
+          #   install-panel.sh        Description=Onyx Panel …  (systemd unit)
+          #   onyx_ui.py              VERSION = '…'  fallback for the version badge
+          #   uninstall-onyx-panel.sh display strings
+          # Each pattern is anchored so it matches exactly one kind of line.
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid version in the VERSION file: '$VERSION'"
+            exit 1
+          fi
+          sed -i "s/^LOCAL_VERSION=\"[0-9][0-9.]*\"/LOCAL_VERSION=\"$VERSION\"/" update.sh
+          sed -i "s/|| echo '[0-9][0-9.]*'/|| echo '$VERSION'/" install-core.sh install-final.sh install-panel.sh
+          sed -i "s/Description=Onyx Panel [0-9][0-9.]*/Description=Onyx Panel $VERSION/" install-panel.sh
+          sed -i "s/^VERSION = '[0-9][0-9.]*'/VERSION = '$VERSION'/" onyx_ui.py
+          sed -i "s/Onyx Panel [0-9][0-9.]*/Onyx Panel $VERSION/g" uninstall-onyx-panel.sh
+          if git diff --quiet; then
+            echo "Version literals already in sync with $VERSION."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: sync version literals to $VERSION [skip ci]"
+            git push origin "$GITHUB_REF"
+          fi
+
       - name: Detect version
         id: version
         run: |
-          VERSION="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' install-core.sh | head -n1)"
+          # The VERSION file is authoritative; parsing install-core.sh is
+          # kept as a fallback for branches that predate the VERSION file.
+          VERSION="$(tr -d '[:space:]' < VERSION)"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::Cannot parse VERSION from install-core.sh, got: '$VERSION'"
+            VERSION="$(grep -oE "echo '[0-9]+\.[0-9]+\.[0-9]+'" install-core.sh | head -n1 | sed "s/echo '//;s/'//")"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Cannot detect version (VERSION file or install-core.sh), got: '$VERSION'"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -37,9 +74,9 @@ jobs:
       - name: Check version consistency
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for f in install-final.sh install-panel.sh README.md; do
+          for f in update.sh install-core.sh install-final.sh install-panel.sh onyx_ui.py uninstall-onyx-panel.sh; do
             if ! grep -qF "$VERSION" "$f"; then
-              echo "::error::Version mismatch: $f does not mention $VERSION — bump the version there too."
+              echo "::error::Version mismatch: $f does not mention $VERSION."
               exit 1
             fi
           done
@@ -64,7 +101,7 @@ jobs:
           {
             echo "## Изменения"
             echo
-            git log --no-decorate --format='- %s (%h)' $RANGE
+            git log --no-decorate --format='- %s (%h)' $RANGE | grep -v 'chore: sync version literals'
           } > NOTES.md
           echo "----- release notes -----"
           cat NOTES.md

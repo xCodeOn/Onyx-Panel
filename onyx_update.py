@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 import time
 from onyx_metrics import atomic_json, read_state
 
@@ -13,6 +14,16 @@ STATUS = ROOT / 'status.json'
 NOTES = ROOT / 'notifications.json'
 VERSION = Path('/etc/onyx-panel/version')
 UNIT = 'onyx-panel-web-update.service'
+# Панель многопоточная (ThreadingHTTPServer): update-status, поток дашборда и
+# события колокольчика читают-пишут notes параллельно. Мьютекс держит
+# целостность read-modify-write внутри процесса; состояние на диске всё равно
+# атомарно через os.replace, поэтому процессов достаточно даже без файлового лока.
+_NOTES_LOCK = threading.RLock()
+_ANNOUNCE_LOCK = threading.Lock()
+_STATUS_CACHE = {"ts": 0.0, "data": None}
+_STATUS_TTL = 10.0
+_NOTES_CACHE = {}
+_NOTES_TTL = 3600.0
 # Onyx Panel ships self-contained: the updater normally reinstalls from the
 # package already unpacked on this server. Set ONYX_UPDATE_REPOSITORY to check
 # and pull releases from your own Git repository instead.
@@ -71,17 +82,50 @@ def unit_running():
     return r.stdout.strip() in ('active', 'activating', 'reloading')
 
 
-def get_status():
+def get_status(_cached=True):
+    if _cached and _STATUS_CACHE["data"] is not None and time.time() - _STATUS_CACHE["ts"] < _STATUS_TTL:
+        return dict(_STATUS_CACHE["data"])
     data = read_state(STATUS)
     # A killed/rebooted updater cannot remain "running" forever in the UI.
     if data.get('phase') in ('running', 'queued') and time.time() - data.get('started', 0) > 60:
         try:
             if not unit_running(): data.update(phase='interrupted', message='Обновление прервано. Проверьте журнал через Onyx/SSH.')
         except (OSError, subprocess.TimeoutExpired): pass
+    # A finished update ("done") should not linger forever: once the panel
+    # has been back for a while, transition to "checked" so the Updates tab
+    # reflects the real state — "latest" or "no updates" — instead of a
+    # stale "update complete" banner.
+    if data.get('phase') == 'done':
+        finished_at = data.get('finished', 0)
+        target = str(data.get('target', '') or '')
+        cur = current_version()
+        if target.lstrip('v') == cur.lstrip('v') and time.time() - finished_at > 30:
+            data['phase'] = 'checked'
+            latest = data.get('latest', '')
+            if latest and newer(latest, cur):
+                data['message'] = f'Доступна новая версия {latest.lstrip("v")}.'
+            else:
+                data['message'] = f'Обновлений нет — установлена последняя версия v{cur.lstrip("v")}.'
+            atomic_json(STATUS, data)
     data['current'] = current_version()
     data['available'] = newer(data.get('latest', ''), data['current'])
     data['can_install'] = bool(data.get('releases'))
-    announce_finished(data)
+    _STATUS_CACHE["ts"] = time.time()
+    _STATUS_CACHE["data"] = dict(data)
+    # Объявление версии тянет GitHub и переписывает notes: не параллелим его по
+    # потокам и не даём сбить выдачу статуса — сломанный announce не должен
+    # ронять /update-status, поток дашборда и /notifications с 502.
+    if _ANNOUNCE_LOCK.acquire(blocking=False):
+        try:
+            announce_finished(data)
+        except Exception as exc:
+            print('update announce:', type(exc).__name__, file=sys.stderr, flush=True)
+        finally:
+            _ANNOUNCE_LOCK.release()
+        # announce может проставить data['announced'] — отдаём вызывающим уже
+        # свежий статус, иначе первый poll после завершения не увидит маркер.
+        _STATUS_CACHE["ts"] = time.time()
+        _STATUS_CACHE["data"] = dict(data)
     return data
 
 
@@ -110,37 +154,50 @@ def notes_public():
 
 def add_note(kind, version, changes=None, link=''):
     """Append or refresh an event; one note per (kind, version), read flag kept."""
-    items = load_notes()
-    record = {'kind': kind, 'version': version, 'created': int(time.time()), 'read': False,
-              'changes': [str(change) for change in (changes or [])], 'link': str(link or ''),
-              'current': current_version()}
-    for index, item in enumerate(items):
-        if item.get('kind') == kind and item.get('version') == version:
-            record['read'] = bool(item.get('read'))
-            record['created'] = item.get('created', record['created'])
-            items[index] = record
-            break
-    else:
-        items.append(record)
-    save_notes(items)
+    with _NOTES_LOCK:
+        items = load_notes()
+        record = {'kind': kind, 'version': version, 'created': int(time.time()), 'read': False,
+                  'changes': [str(change) for change in (changes or [])], 'link': str(link or ''),
+                  'current': current_version()}
+        is_new = True
+        for index, item in enumerate(items):
+            if item.get('kind') == kind and item.get('version') == version:
+                record['read'] = bool(item.get('read'))
+                record['created'] = item.get('created', record['created'])
+                items[index] = record
+                is_new = False
+                break
+        if is_new:
+            items.append(record)
+        save_notes(items)
+    if is_new:
+        # Новое событие колокольчика: будим PWA-подписки Web Push (пустой ping).
+        try:
+            import onyx_webpush
+            onyx_webpush.notify_new(record)
+        except Exception as exc:
+            print('webpush notify:', type(exc).__name__, file=sys.stderr, flush=True)
     return record
 
 
 def mark_notes_read():
-    items = load_notes()
-    for item in items: item['read'] = True
-    save_notes(items)
+    with _NOTES_LOCK:
+        items = load_notes()
+        for item in items: item['read'] = True
+        save_notes(items)
 
 
 def clear_notes():
-    save_notes([])
+    with _NOTES_LOCK:
+        save_notes([])
 
 
 def prune_available(current=''):
     """Drop "available" notes for versions that are already installed."""
     current = current or current_version()
-    save_notes([item for item in load_notes()
-                if not (item.get('kind') == 'available' and not newer(item.get('version', ''), current))])
+    with _NOTES_LOCK:
+        save_notes([item for item in load_notes()
+                    if not (item.get('kind') == 'available' and not newer(item.get('version', ''), current))])
 
 
 def repo_slug():
@@ -163,6 +220,9 @@ def parse_notes(body):
 
 def release_notes(tag):
     """Changelog lines and the release URL from the GitHub release of `tag`."""
+    hit = _NOTES_CACHE.get(str(tag))
+    if hit and time.time() - hit[0] < _NOTES_TTL:
+        return list(hit[1]), hit[2]
     slug = repo_slug()
     if not slug: return [], ''
     try:
@@ -175,24 +235,51 @@ def release_notes(tag):
     except Exception:
         return [], ''
     link = str(data.get('html_url') or f'https://github.com/{slug}/releases/tag/{tag}')
-    return parse_notes(data.get('body')), link
+    _NOTES_CACHE[str(tag)] = (time.time(), parse_notes(data.get('body')), link)
+    return _NOTES_CACHE[str(tag)][1], link
 
 
 def announce_finished(data):
     """A finished update becomes one bell note with the release changelog."""
     target = str(data.get('target', '') or '')
-    if data.get('phase') != 'done' or not target or data.get('announced') == target: return
-    if target.lstrip('v') != current_version().lstrip('v'):
-        # The panel came back on a different version (rollback or manual fix):
-        # nothing to announce, but stop re-checking this target forever.
+    if data.get('phase') == 'done' and target and data.get('announced') != target:
+        # Вызвавший поток мог прочитать статус до чужого announce — сверяемся с диском.
+        if read_state(STATUS).get('announced') == target:
+            return
+        if target.lstrip('v') != current_version().lstrip('v'):
+            # The panel came back on a different version (rollback or manual fix):
+            # nothing to announce, but stop re-checking this target forever.
+            data['announced'] = target
+            atomic_json(STATUS, data)
+            return
+        changes, link = release_notes(target)
+        add_note('changelog', target, changes=changes, link=link)
+        prune_available()
         data['announced'] = target
         atomic_json(STATUS, data)
         return
-    changes, link = release_notes(target)
-    add_note('changelog', target, changes=changes, link=link)
-    prune_available()
-    data['announced'] = target
-    atomic_json(STATUS, data)
+    # Обновление мимо панели (SSH, update.sh): панель сама замечает смену версии
+    # и добавляет запись в колокольчик, иначе список событий выглядит пустым.
+    current = current_version()
+    announced = data.get('announced')
+    # announced также отсутствует на «свежей» done-статистике, которую get_status
+    # только что перевёл в checked: фаз-флип пишет файл раньше announce — без
+    # этой ветки запись changelog не создаётся вовсе.
+    fresh_done = announced is None and data.get('target') and data.get('phase') not in ('running', 'queued')
+    if (current and announced is not None and announced != current
+            and data.get('phase') not in ('running', 'queued')) or fresh_done:
+        note_version = 'v' + current.lstrip('v')
+        if read_state(STATUS).get('announced') == note_version:
+            data['announced'] = note_version
+            return
+        try:
+            changes, link = release_notes(note_version)
+        except Exception:
+            changes, link = [], ''
+        add_note('changelog', note_version, changes=changes, link=link)
+        prune_available()
+        data['announced'] = note_version
+        atomic_json(STATUS, data)
 
 
 def _lock(blocking=False):
@@ -209,7 +296,8 @@ def _lock(blocking=False):
 
 def check_release():
     with _lock():
-        state = get_status()
+        _STATUS_CACHE["ts"] = 0.0
+        state = get_status(_cached=False)
         if state.get('phase') in ('running', 'queued'): return state
         if time.time() - state.get('checked', 0) < 60: return state
         if not REPO:
@@ -235,7 +323,7 @@ def check_release():
             prune_available()
             if newer(latest, current_version()): add_note('available', latest)
             atomic_json(STATUS, state)
-            return get_status()
+            return get_status(_cached=False)
         env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0'}
         try:
             r = subprocess.run(['git', 'ls-remote', '--tags', '--refs', REPO, 'v[0-9]*'], capture_output=True, text=True, timeout=20, env=env)
@@ -262,12 +350,13 @@ def check_release():
         except (OSError, subprocess.TimeoutExpired):
             raise ValueError('Не удалось проверить репозиторий. Повторите позже.')
         atomic_json(STATUS, state)
-        return get_status()
+        return get_status(_cached=False)
 
 
 def start_update(target=''):
     with _lock():
-        state = get_status()
+        _STATUS_CACHE["ts"] = 0.0
+        state = get_status(_cached=False)
         if state.get('phase') in ('running', 'queued') or unit_running():
             raise ValueError('Обновление уже выполняется.')
         releases=state.get('releases',[])
@@ -281,10 +370,12 @@ def start_update(target=''):
         state.update(phase='queued', target=target, started=int(time.time()),
                      message=action+' запускается. Панель временно отключится.')
         atomic_json(STATUS, state)
+        _STATUS_CACHE["ts"] = 0.0
         r = subprocess.run(['systemctl', 'start', '--no-block', UNIT], capture_output=True, text=True, timeout=10)
         if r.returncode:
             state.update(phase='failed', message='Не удалось запустить службу обновления.')
             atomic_json(STATUS, state)
+            _STATUS_CACHE["ts"] = 0.0
             raise ValueError(state['message'])
         return state
 
@@ -306,7 +397,7 @@ def run_update():
             os.chmod(log.name, 0o600)
             result = subprocess.run(['/usr/bin/bash', UPDATER], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env)
         state.update(phase='done' if result.returncode == 0 else 'failed', code=result.returncode,
-                     message='Обновление завершено. Войдите в панель заново.' if result.returncode == 0 else failure_message(ROOT / 'update.log'))
+                     message='Обновление установлено. Панель перезапускается…' if result.returncode == 0 else failure_message(ROOT / 'update.log'))
     except OSError:
         state.update(phase='failed', message='Не удалось выполнить установщик. Проверьте журнал через SSH.')
     state['finished'] = int(time.time())

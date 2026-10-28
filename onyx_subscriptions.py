@@ -49,7 +49,7 @@ def limits(value):
 
 
 def protocols(value):
-    supported = ('vless', 'hysteria')
+    supported = ('vless', 'hysteria', 'tuic')
     if not isinstance(value, list) or not value or any(p not in supported for p in value):
         raise SubscriptionError('Выберите хотя бы один поддерживаемый протокол.')
     return list(dict.fromkeys(value))
@@ -69,7 +69,7 @@ def provision(data, sub, device):
             raise SubscriptionError('Достигнут общий лимит профилей подписок.', 503, 'capacity')
         uid = secrets.token_hex(8)
         sub.setdefault('profile_ids', []).append(uid)
-        ports = {'vless': 443, 'hysteria': 8443}
+        ports = {'vless': 443, 'hysteria': 8443, 'tuic': 9443}
         profile = {
             'id': uid, 'name': sub['name'] + ' / ' + device['name'],
             'protocol': protocol, 'enabled': sub['enabled'], 'secret': str(uuid.uuid4()),

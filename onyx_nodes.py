@@ -8,6 +8,7 @@ import re
 import secrets
 import socket
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -203,6 +204,42 @@ def save_nodes(path, nodes):
     atomic_json(path, nodes)
 
 
+def sync_registry(path, nodes, snapshots):
+    """Fold live probe results back into the registry: refresh each version and
+    re-enable nodes that answer. Nothing in the panel can switch a node off, so
+    a record with enabled=false is stale state — without the heal it keeps the
+    add-time version and the «Отключена» badge forever. Merges onto a fresh
+    load, so a concurrent add or delete is not overwritten."""
+    updates = {}
+    for node, snapshot in zip(nodes, snapshots):
+        if not isinstance(node, dict) or not isinstance(snapshot, dict):
+            continue
+        version = str(snapshot.get('version', '') or '')
+        heal = bool(snapshot.get('enabled')) and not node.get('enabled', True)
+        if not version and not heal:
+            continue
+        updates[str(node.get('id', ''))] = {'version': version[:32], 'heal': heal}
+    if not updates:
+        return False
+    fresh = load_nodes(path)
+    changed = False
+    for node in fresh:
+        if not isinstance(node, dict):
+            continue
+        update = updates.get(str(node.get('id', '')))
+        if not update:
+            continue
+        if update['version'] and update['version'] != str(node.get('version', '') or ''):
+            node['version'] = update['version']
+            changed = True
+        if update['heal']:
+            node['enabled'] = True
+            changed = True
+    if changed:
+        save_nodes(path, fresh)
+    return changed
+
+
 def public_node(node):
     return {key: value for key, value in node.items() if key != 'token'}
 
@@ -326,3 +363,59 @@ def metrics(node, timeout=10):
     """Proxy traffic totals and per-profile activity from one managed node."""
     data = request(node, 'GET', API_PREFIX + '/metrics', timeout=timeout)
     return data if isinstance(data, dict) else {}
+
+
+def node_status(node, timeout=6):
+    """Lightweight availability probe: version, domain and location."""
+    data = request(node, 'GET', API_PREFIX + '/status', timeout=timeout)
+    return data if isinstance(data, dict) else {}
+
+
+BENCH_SAMPLES = 4
+
+
+def _ttfb(url, timeout):
+    """One HTTPS round trip; milliseconds until the first response byte."""
+    started = time.monotonic()
+    request_ = urllib.request.Request(url, method='HEAD',
+                                      headers={'User-Agent': 'Onyx-Controller/2.7'})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(request_, timeout=timeout) as response:
+        response.read(1)
+    return (time.monotonic() - started) * 1000
+
+
+def aggregate(samples):
+    """Median/min/max of the successful samples; None when nothing answered."""
+    values = sorted(value for value in samples if value is not None)
+    if not values:
+        return None
+    return {'median_ms': int(values[len(values) // 2]),
+            'min_ms': int(values[0]), 'max_ms': int(values[-1]),
+            'samples': len(values)}
+
+
+def benchmark(node, samples=BENCH_SAMPLES, timeout=8):
+    """Multi-sample HTTPS TTFB against the node's own domain.
+
+    The median of several round trips is far more honest than one ping: it
+    filters retransmits and anycast jitter, and the panel stores the result
+    on the node record so the Nodes tab can sort by real latency.
+    """
+    base = normalize_url(node.get('url'))
+    parsed = urllib.parse.urlsplit(base)
+    resolve_public(parsed.hostname)
+    target = 'https://' + parsed.hostname + '/'
+    measured = []
+    for _ in range(max(1, min(10, int(samples)))):
+        try:
+            measured.append(_ttfb(target, timeout))
+        except Exception:
+            measured.append(None)
+    stats = aggregate(measured)
+    return {'ok': stats is not None, 'at': int(time.time()),
+            'median_ms': stats['median_ms'] if stats else 0,
+            'min_ms': stats['min_ms'] if stats else 0,
+            'max_ms': stats['max_ms'] if stats else 0,
+            'samples': stats['samples'] if stats else 0,
+            'message': '' if stats else 'Нода не ответила на HTTPS-замер.'}

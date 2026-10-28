@@ -348,3 +348,56 @@ def traffic(users):
         except ValueError:
             continue
     return result
+
+
+SPEED_MIN_KBIT = 64
+SPEED_MAX_KBIT = 1000000
+
+
+def speed_path(uid):
+    if not re.fullmatch(r"[a-f0-9]{16}", str(uid)):
+        raise RuntimeError("Invalid AWG profile id")
+    return os.path.join(CONFIG_DIR, str(uid) + ".speed")
+
+
+def speed_kbit(value):
+    """Validate a speed-limit value: 0 (no limit) or 64 kbit .. 1 Gbit."""
+    try:
+        kbit = int(value)
+    except (TypeError, ValueError):
+        raise RuntimeError("Скорость должна быть целым числом Мбит.")
+    if not 0 <= kbit <= SPEED_MAX_KBIT // 1000:
+        raise RuntimeError("Скорость: от 0 (без лимита) до 1000 Мбит.")
+    return kbit
+
+
+def write_speed(uid, kbit):
+    """Persist the per-profile speed file read by awg-up; None when unchanged."""
+    kbit = speed_kbit(kbit)
+    return _atomic_text(speed_path(uid), str(kbit) + "\n" if kbit else "")
+
+
+def read_speed(uid):
+    try:
+        with open(speed_path(uid), encoding="utf-8") as handle:
+            return speed_kbit(handle.read().strip() or 0)
+    except FileNotFoundError:
+        return 0
+
+
+def tc_commands(interface, kbit):
+    """tc commands applying (or clearing) the shaper on an AWG interface.
+
+    The same commands run from awg-up at boot and from the panel immediately
+    after a limit change, so both paths stay byte-identical.
+    """
+    if not re.fullmatch(r"wa[a-f0-9]{11}", str(interface)):
+        raise RuntimeError("Invalid AWG interface name")
+    if not kbit:
+        return ["tc qdisc del dev %s root 2>/dev/null || true" % interface]
+    rate = int(kbit) * 1000
+    # Burst must absorb a full MTU frame at line rate; 16 KB keeps small-packet
+    # throughput honest without defeating the shaper on fast links.
+    burst = max(16384, rate // 125 // 10)
+    return ["tc qdisc replace dev %s root tbf rate %dbit burst %d latency 50ms"
+            % (interface, rate, burst)]
