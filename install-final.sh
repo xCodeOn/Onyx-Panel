@@ -5,7 +5,7 @@ umask 077
 
 # Panel version: prefer the env var set by install.sh (from the GitHub tag),
 # fall back to the existing installed version, then to a hardcoded default.
-ONYX_VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.8.0')}"
+ONYX_VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.8.1')}"
 
 # Visual kit: banner, colored stages, explained red errors. When the kit file
 # is missing (offline update from an old package) fall back to plain output.
