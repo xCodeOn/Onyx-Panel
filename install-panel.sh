@@ -3742,7 +3742,7 @@ class Handler(BaseHTTPRequestHandler):
             api_keys=onyx_webapi.public_keys(d.get("api_keys"))
             logins=onyx_access.last_logins(d,60)
             hour_options=''.join(f'<option value="{h}" {"selected" if int(backups_cfg.get("hour",4))==h else ""}>{h:02d}:00</option>' for h in range(24))
-            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"),("nodes","Ноды: падения и возвраты"))
+            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"))
             event_checks=''.join(f'<label class="choice-card"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}><span><strong>{label}</strong></span></label>' for key,label in event_labels)
             last_backup=backups_cfg.get("last") if isinstance(backups_cfg.get("last"),dict) else {}
             backup_status=("Последний: %s — %s."%(time.strftime("%d.%m.%Y %H:%M",time.localtime(last_backup.get("ts",0))),last_backup.get("message",""))) if last_backup.get("ts") else "Копий пока не было."
@@ -6261,56 +6261,6 @@ def failover_worker():
         except Exception as exc:
             print("failover worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
 
-def nodes_watch():
-    """Node online transitions -> bell + Telegram, once per transition."""
-    try:
-        live = nodes_live()
-    except Exception:
-        return
-    states = {}
-    for s in live.get("nodes", []):
-        nid = str(s.get("id", ""))
-        if nid:
-            states[nid] = (bool(s.get("online")),
-                           str(s.get("location") or s.get("url") or nid),
-                           str(s.get("error") or ""))
-    try:
-        with STATE_LOCK:
-            d = load()
-        marks = d.get("node_marks") if isinstance(d.get("node_marks"), dict) else {}
-        changed = False
-        for nid, (online, label, err) in states.items():
-            prev = (marks.get(nid) or {}).get("online")
-            if prev is None:
-                marks[nid] = {"online": online}
-                changed = True
-                continue
-            if prev and not online:
-                marks[nid] = {"online": False}
-                changed = True
-                bell_note("node", "down:" + nid, ["down"])
-                text = "🔴 Нода недоступна: %s" % label
-                if err:
-                    text += " — " + err[:160]
-                threading.Thread(target=telegram_notify, args=("nodes", text), daemon=True).start()
-            elif not prev and online:
-                marks[nid] = {"online": True}
-                changed = True
-                bell_note("node", "up:" + nid, ["up"])
-                threading.Thread(target=telegram_notify, args=("nodes", "🟢 Нода вернулась: %s" % label), daemon=True).start()
-        for nid in list(marks):
-            if nid not in states:
-                marks.pop(nid, None)
-                changed = True
-        if changed:
-            with STATE_LOCK:
-                d = load()
-                d["node_marks"] = marks
-                save(d)
-    except Exception as exc:
-        print("nodes watch failed:", type(exc).__name__, file=sys.stderr, flush=True)
-
-
 def cert_watch():
     """Warn once a day when the panel domain cert expires within 14 days."""
     try:
@@ -6446,9 +6396,7 @@ def alerts_worker():
     time.sleep(150)
     while True:
         try:
-            # Ноды и сертификат не зависят от включения пороговых алертов.
-            try: nodes_watch()
-            except Exception: pass
+            # Сертификат не зависит от включения пороговых алертов.
             try: cert_watch()
             except Exception: pass
             with STATE_LOCK: d=load()

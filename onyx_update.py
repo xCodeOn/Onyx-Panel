@@ -140,7 +140,10 @@ MAX_NOTES = 50
 
 def load_notes():
     items = read_state(NOTES).get('items')
-    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+    if not isinstance(items, list): return []
+    # node up/down notes are no longer produced; legacy ones stay hidden and
+    # get purged on the next save.
+    return [item for item in items if isinstance(item, dict) and item.get('kind') != 'node']
 
 
 def save_notes(items):
