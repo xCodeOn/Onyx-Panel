@@ -8,7 +8,7 @@ from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 import onyx_i18n as i18n
 
-VERSION = '2.8.1'
+VERSION = '2.8.2'
 
 
 def login_version():
