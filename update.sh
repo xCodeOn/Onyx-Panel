@@ -15,7 +15,7 @@ REPOSITORY="${ONYX_UPDATE_REPOSITORY:-https://github.com/xCodeOn/Onyx-Panel.git}
 REQUESTED_REF="${ONYX_PANEL_REF:-}"
 RELEASE_REF="$REQUESTED_REF"
 LOCAL_SOURCE=""
-LOCAL_VERSION="2.12.3"
+LOCAL_VERSION="2.12.4"
 # `--local` is accepted for compatibility and behaves the same as the default.
 LOCAL_SOURCE="$(cd "$(dirname "$0")" && pwd)"
 # Invoked as the installed /usr/local/sbin/onyx-panel-update, the script's own
@@ -339,7 +339,22 @@ trap finish EXIT
 
 echo "Preparing Onyx Panel update files..."
 if [[ -n "$REPOSITORY" && "$REMOTE_OK" == 1 ]]; then
-    if ! timeout 90 git clone --depth 1 --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
+    # Sparse partial clone: the ~70 MB of component binaries in assets/ stay on
+    # the remote until a full update actually needs them — a panel-only update
+    # downloads a couple of MB. git >= 2.19 (Ubuntu 20.04+) supports blob filters.
+    SPARSE_OK=0
+    if timeout 90 git clone --depth 1 --filter=blob:none --no-checkout --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
+        git -C "$TEMP_DIR/source" sparse-checkout init --no-cone >/dev/null 2>&1
+        printf '%s\n' '/*' '!/assets/Xray-linux-64.zip' '!/assets/caddy_*.tar.gz' \
+            '!/assets/tproxy-server-linux-amd64' '!/assets/mtproto-proxy-linux-amd64' \
+            '!/assets/OpenFlux-linux-amd64' '!/assets/amneziawg-go-linux-amd64' \
+            '!/assets/awg-linux-amd64' '!/assets/awg-quick-linux-amd64' \
+            '!/assets/tproxy-server-*.tar.gz' > "$TEMP_DIR/source/.git/info/sparse-checkout"
+        git -C "$TEMP_DIR/source" checkout >/dev/null 2>&1 && SPARSE_OK=1
+    fi
+    if [[ "$SPARSE_OK" != 1 ]]; then
+        rm -rf "$TEMP_DIR/source"
+        if ! timeout 90 git clone --depth 1 --branch "$RELEASE_REF" "$REPOSITORY" "$TEMP_DIR/source" 2>/dev/null; then
         ui_warn "git clone не сработал — качаю tarball ${RELEASE_REF} через зеркала..."
         REPO_PATH="${REPOSITORY#*github.com/}"
         REPO_PATH="${REPO_PATH%.git}"
@@ -357,6 +372,7 @@ if [[ -n "$REPOSITORY" && "$REMOTE_OK" == 1 ]]; then
             cp -a "$LOCAL_SOURCE/." "$TEMP_DIR/source/"
         fi
     fi
+    fi
 else
     require_local_archive
     cp -a "$LOCAL_SOURCE/." "$TEMP_DIR/source/"
@@ -364,45 +380,6 @@ fi
 [[ -f "$TEMP_DIR/source/install-panel.sh" ]] || die "Update package is incomplete."
 onyx_phase "файлы обновления готовы"
 chmod 0700 "$TEMP_DIR/source/install-panel.sh" "$TEMP_DIR/source/install-final.sh" "$TEMP_DIR/source/install-core.sh"
-
-# The prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are
-# committed to the repository under assets/ together with their SHA256SUMS.
-# A clone or release tarball that already carries a complete, intact set needs
-# no bundle download; the release-attached bundle below is only a fallback for
-# older releases whose tarballs shipped without these files.
-ONYX_ASSETS_READY=0
-if [[ -s "$TEMP_DIR/source/assets/SHA256SUMS" ]] &&
-   ( cd "$TEMP_DIR/source/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1; then
-    ONYX_ASSETS_READY=1
-    echo "Prebuilt components ship with the repository; bundle download skipped."
-fi
-if [[ "$REMOTE_OK" == 1 && "$ONYX_ASSETS_READY" != "1" && "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
-    UPDATE_REPO_PATH="${REPOSITORY#*github.com/}"; UPDATE_REPO_PATH="${UPDATE_REPO_PATH%.git}"
-    BIN_BUNDLE="onyx-binaries-${RELEASE_REF#v}.tar.gz"
-    echo "Fetching prebuilt components ${BIN_BUNDLE}..."
-    ONYX_BIN_OK=0
-    for dl in \
-        "https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
-        "https://gh-proxy.com/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
-        "https://ghproxy.net/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
-        "https://ghfast.top/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}"; do
-        curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
-            -o "$TEMP_DIR/onyx-binaries.tar.gz" "$dl" && { ONYX_BIN_OK=1; break; }
-    done
-    if [[ "$ONYX_BIN_OK" == 1 && -s "$TEMP_DIR/onyx-binaries.tar.gz" ]]; then
-        mkdir -p "$TEMP_DIR/source/assets"
-        tar -xzf "$TEMP_DIR/onyx-binaries.tar.gz" \
-            -C "$TEMP_DIR/source/assets" --no-same-owner
-        [[ -s "$TEMP_DIR/source/assets/SHA256SUMS" ]] ||
-            die "Prebuilt component bundle lacks SHA256SUMS. Aborting the update."
-        ( cd "$TEMP_DIR/source/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
-            die "Prebuilt component bundle failed checksum verification. Aborting the update."
-        echo "Prebuilt components unpacked and verified."
-    else
-        ui_warn "Could not fetch prebuilt components; the update will fail unless the local package already carries them."
-    fi
-fi
 
 # ── Fast panel-only path ────────────────────────────────────────────────
 # A release that changes no component pins against the installed package
@@ -468,6 +445,56 @@ if [[ "$FAST_UPDATE" == 1 ]]; then
 else
     echo "Full update path."
 fi
+
+# A full update needs the component binaries the sparse clone skipped — fetch
+# those blobs now (fast updates never download them at all).
+if [[ "$FAST_UPDATE" != 1 && -d "$TEMP_DIR/source/.git/info" ]]; then
+    if [[ -s "$TEMP_DIR/source/.git/info/sparse-checkout" ]]; then
+        git -C "$TEMP_DIR/source" sparse-checkout disable >/dev/null 2>&1 || true
+        git -C "$TEMP_DIR/source" checkout >/dev/null 2>&1 || true
+    fi
+fi
+
+# The prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are
+# committed to the repository under assets/ together with their SHA256SUMS.
+# A clone or release tarball that already carries a complete, intact set needs
+# no bundle download; the release-attached bundle below is only a fallback for
+# older releases whose tarballs shipped without these files.
+ONYX_ASSETS_READY=0
+if [[ -s "$TEMP_DIR/source/assets/SHA256SUMS" ]] &&
+   ( cd "$TEMP_DIR/source/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1; then
+    ONYX_ASSETS_READY=1
+    echo "Prebuilt components ship with the repository; bundle download skipped."
+fi
+if [[ "$REMOTE_OK" == 1 && "$ONYX_ASSETS_READY" != "1" && "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+    UPDATE_REPO_PATH="${REPOSITORY#*github.com/}"; UPDATE_REPO_PATH="${UPDATE_REPO_PATH%.git}"
+    BIN_BUNDLE="onyx-binaries-${RELEASE_REF#v}.tar.gz"
+    echo "Fetching prebuilt components ${BIN_BUNDLE}..."
+    ONYX_BIN_OK=0
+    for dl in \
+        "https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://gh-proxy.com/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://ghproxy.net/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://ghfast.top/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}"; do
+        curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
+            -o "$TEMP_DIR/onyx-binaries.tar.gz" "$dl" && { ONYX_BIN_OK=1; break; }
+    done
+    if [[ "$ONYX_BIN_OK" == 1 && -s "$TEMP_DIR/onyx-binaries.tar.gz" ]]; then
+        mkdir -p "$TEMP_DIR/source/assets"
+        tar -xzf "$TEMP_DIR/onyx-binaries.tar.gz" \
+            -C "$TEMP_DIR/source/assets" --no-same-owner
+        [[ -s "$TEMP_DIR/source/assets/SHA256SUMS" ]] ||
+            die "Prebuilt component bundle lacks SHA256SUMS. Aborting the update."
+        ( cd "$TEMP_DIR/source/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
+            die "Prebuilt component bundle failed checksum verification. Aborting the update."
+        echo "Prebuilt components unpacked and verified."
+    else
+        ui_warn "Could not fetch prebuilt components; the update will fail unless the local package already carries them."
+    fi
+fi
+
+
 
 # Downtime window starts here: the release files are already on disk, so the
 # panel is only down for the snapshot and the file swap. rollback_update()
