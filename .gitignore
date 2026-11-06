@@ -8,3 +8,6 @@ Thumbs.db
 .tmp_render*
 .tmp_ssh.py
 android/
+
+# Локальный дизайн-концепт (не для репозитория)
+newdesign/
