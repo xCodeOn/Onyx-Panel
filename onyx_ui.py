@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 
-VERSION = '2.11.0'
+VERSION = '2.12.0'
 
 
 _VERSION_CACHE = ""
