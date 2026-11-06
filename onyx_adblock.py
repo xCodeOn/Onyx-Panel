@@ -1,6 +1,6 @@
 """DNS-level adblock for the panel: an unbound local-zone blocklist.
 
-The list (OISD basic by default) is downloaded daily, converted into
+The list (OISD small) is downloaded daily, converted into
 `local-zone: "domain" always_nxdomain` entries and dropped into
 /etc/unbound/unbound.conf.d/. Xray resolves through unbound while the DoT
 marker exists, and AWG clients get the tunnel gateway as their DNS, so every
@@ -16,7 +16,7 @@ import re
 import subprocess
 import time
 
-LIST_URL = "https://dbl.oisd.nl/basic/"
+LIST_URL = "https://small.oisd.nl/"
 LIST_CACHE = "/var/lib/onyx-panel/adblock-list.txt"
 CONF_PATH = "/etc/unbound/unbound.conf.d/onyx-adblock.conf"
 ENABLED_MARKER = "/etc/onyx-panel/adblock.enabled"
