@@ -2076,6 +2076,12 @@ const restoreBtn=document.getElementById("importConfirm");
 if(restoreBtn)restoreBtn.addEventListener("click",async()=>{if(!(await onyxConfirm("Заменить текущие настройки, клиентов и заглушки содержимым копии?",{title:"Восстановление из копии",ok:"Восстановить",danger:true})))return;preview.close();preview.hidden=true;file.value="";submit(importForm,status)});
 const cancelBtn=document.getElementById("importCancel");
 if(cancelBtn)cancelBtn.addEventListener("click",()=>{preview.close();preview.hidden=true;data.value="";file.value=""})};
+const adblockForm=document.getElementById("adblockForm");
+if(adblockForm){const status=document.getElementById("adblockStatus");
+adblockForm.addEventListener("submit",e=>{e.preventDefault();submit(adblockForm,status,()=>setTimeout(()=>location.reload(),1200))})}
+const adblockUpdate=document.getElementById("adblockUpdate");
+if(adblockUpdate){const status=document.getElementById("adblockStatus");
+adblockUpdate.addEventListener("submit",e=>{e.preventDefault();submit(adblockUpdate,status,()=>setTimeout(()=>location.reload(),1200))})}
 })();
 </script>
 <script>
@@ -2098,12 +2104,6 @@ next.addEventListener('click',()=>{if(page<pages-1){page++;render()}});
 pager.hidden=false;
 render();
 })();
-const adblockForm=document.getElementById("adblockForm");
-if(adblockForm){const status=document.getElementById("adblockStatus");
-adblockForm.addEventListener("submit",e=>{e.preventDefault();submit(adblockForm,status,()=>setTimeout(()=>location.reload(),1200))})}
-const adblockUpdate=document.getElementById("adblockUpdate");
-if(adblockUpdate){const status=document.getElementById("adblockStatus");
-adblockUpdate.addEventListener("submit",e=>{e.preventDefault();submit(adblockUpdate,status,()=>setTimeout(()=>location.reload(),1200))})}
 </script>'''
             security_js='''<script>
 (()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
