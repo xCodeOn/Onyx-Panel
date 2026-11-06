@@ -1,8 +1,8 @@
-"""End-to-end smoke tests for the panel server embedded in install-panel.sh.
+"""End-to-end smoke tests for the panel server (panel.py).
 
-The server Python is extracted from its heredoc at runtime, imported with
-Linux-only modules stubbed, and the request handlers are exercised through
-fake requests (login, 2FA, observer role, external API, settings pages).
+The server ships as a regular package file, imported with Linux-only modules
+stubbed, and the request handlers are exercised through fake requests (login,
+2FA, observer role, external API, settings pages).
 Run from the repository root:  python tests/test_server.py
 """
 import io, json, os, re, hashlib, sys, types, importlib.util, tempfile, urllib.parse
@@ -11,10 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-_lines = open("install-panel.sh", encoding="utf-8").read().split("\n")
-_start = _lines.index("cat > \"$APP_FILE\" <<'PY'")
-_end = _lines.index("PY", _start + 1)
-_code = "\n".join(_lines[_start + 1:_end])
+_code = open("panel.py", encoding="utf-8").read()
 for _m in ('grp', 'pwd'): sys.modules.setdefault(_m, types.ModuleType(_m))
 _tmp = tempfile.mkdtemp()
 # Песочница путей: серверные константы /var/lib/onyx-panel и /etc/onyx-panel

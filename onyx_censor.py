@@ -194,13 +194,5 @@ def record_round(state, results):
     return state
 
 
-def history_json(state):
-    """Compact history for the dashboard chart (host, ts, verdict)."""
-    state = normalize_state(state)
-    return json.dumps([{"h": item.get("host"), "t": item.get("ts"),
-                        "v": item.get("verdict")} for item in state["history"]],
-                      ensure_ascii=False)
-
-
 def _elapsed(started):
     return int((time.monotonic() - started) * 1000)

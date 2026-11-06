@@ -33,6 +33,38 @@ assert onyx_totp.verify_counter(secret, '', timestamp=30) is None     # empty
 assert 'otpauth://totp/Onyx%20Panel:admin?secret=' in onyx_totp.provisioning_uri(secret, 'admin')
 print('TOTP OK')
 
+# ---- defense: валидация ban_command, живой honeypot с on_ban ровно один раз
+import onyx_defense, socket as _socket, time as _time
+assert onyx_defense.classify("1.2.3.4") == "ban4"
+assert onyx_defense.classify("2001:db8::1") == "ban6"
+_cmd = onyx_defense.ban_command("1.2.3.4")
+assert "ban4" in _cmd and "1.2.3.4" in _cmd and "24h" in _cmd
+try:
+    onyx_defense.ban_command("1.2.3.4; rm -rf /")
+    raise SystemExit('bad ip accepted by ban_command')
+except ValueError:
+    pass
+_s = _socket.socket(); _s.bind(("127.0.0.1", 0))
+_port = _s.getsockname()[1]; _s.close()
+_hits = []; _bans = []
+assert onyx_defense.start(port=_port, on_hit=lambda *a: _hits.append(a),
+                          on_ban=lambda ip: _bans.append(ip), threshold=3)
+assert onyx_defense.running()
+assert not onyx_defense.start(port=_port)  # повторный старт не плодит слушателей
+for _i in range(4):
+    try:
+        _c = _socket.create_connection(("127.0.0.1", _port), timeout=2)
+        _c.sendall(b"GET / HTTP/1.0\r\n\r\n"); _c.close()
+    except OSError:
+        pass
+_deadline = _time.time() + 5
+while _time.time() < _deadline and len(_hits) < 4:
+    _time.sleep(0.05)
+assert len(_hits) == 4, _hits
+assert _bans == ["127.0.0.1"], _bans  # бан ровно один раз при пересечении порога
+onyx_defense.stop()
+print('DEFENSE OK')
+
 # ---- webapi: tokens, hashing, validation
 tok = onyx_webapi.create_token()
 k, tok2 = onyx_webapi.new_key('test')
@@ -316,10 +348,7 @@ print('REALITY OK')
 # ---- embedded code: sync_xray/sync_firewall исполняются со стабами (ловля NameError)
 import ast as _ast, types as _types
 import json as json, re as re, time as time
-_lines = open(os.path.join(ROOT, "install-panel.sh"), encoding="utf-8").read().split("\n")
-_man = _lines.index('cat > "$MANAGER" <<\'PY\'')
-_man_end = _lines.index("PY", _man + 1)
-_man_code = "\n".join(_lines[_man + 1:_man_end])
+_man_code = open(os.path.join(ROOT, "onyx-panelctl"), encoding="utf-8").read()
 _tree = _ast.parse(_man_code, feature_version=(3, 10))
 
 class _OsShim:

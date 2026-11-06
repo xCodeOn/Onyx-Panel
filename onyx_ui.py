@@ -6,20 +6,30 @@ import re
 import time
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
-import onyx_i18n as i18n
 
 VERSION = '2.11.0'
+
+
+_VERSION_CACHE = ""
+
+def _installed_version():
+    """Reads /etc/onyx-panel/version once per process: an update restarts the
+    panel service, so the file can never change under a running instance."""
+    global _VERSION_CACHE
+    if not _VERSION_CACHE:
+        try:
+            with open('/etc/onyx-panel/version', encoding='ascii') as handle:
+                _VERSION_CACHE = handle.read().strip()
+        except OSError:
+            pass
+    return _VERSION_CACHE
 
 
 def login_version():
     """Installed version straight from the server file; VERSION is only a
     fallback for development machines, so the login page can never show a
     stale hardcoded number after an update."""
-    try:
-        with open('/etc/onyx-panel/version', encoding='ascii') as handle:
-            return handle.read().strip() or VERSION
-    except OSError:
-        return VERSION
+    return _installed_version() or VERSION
 
 
 def esc(value): return html.escape(str(value), quote=True)
@@ -259,6 +269,11 @@ new MutationObserver(muts=>{muts.forEach(m=>{m.addedNodes.forEach(n=>{if(n.nodeT
 /* Кнопка обновления дашборда: иконка крутится две секунды после клика */
 document.addEventListener("click",e=>{const b=e.target.closest("#refreshDashboard");if(!b)return;b.classList.add("spin2");clearTimeout(b._onyxSpin);b._onyxSpin=setTimeout(()=>b.classList.remove("spin2"),2000)});
 })();</script>"""
+
+# COMMON_JS without the <script> wrapper — served as the cached, versioned
+# /__static/app.js so pages stop carrying ~12 KB of inline script, and the
+# browser parses it once instead of per navigation.
+COMMON_JS_BODY = COMMON_JS[len("<script>"):-len("</script>")] if COMMON_JS.startswith("<script>") and COMMON_JS.endswith("</script>") else COMMON_JS
 
 
 # PWA: регистрация минимального service worker (панель ставится как приложение).
@@ -795,10 +810,7 @@ setInterval(async()=>{if(document.hidden)return;try{await fetch(PATH+'/update-ch
 
 def ui_version():
     """Версия установленной панели: страницы помечаются ею для авто-перезагрузки UI."""
-    try:
-        return open('/etc/onyx-panel/version', encoding='ascii').read().strip()
-    except OSError:
-        return ''
+    return _installed_version()
 
 
 def page_layout(title, body, path, active, domain, csrf='', role='admin'):
@@ -811,7 +823,7 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
         nav += f'<a class="nav-button{state}" href="{esc(path)}/{key}" data-tip="{label}" aria-label="{label}"{current}>{icon(glyph)}</a>'
     banner = f'''<aside id="releaseBanner" class="release-banner" role="status" hidden><span class="release-banner-mark">{icon('refresh')}</span><div class="release-banner-copy"><b>Доступна новая версия Onyx Panel</b><small>Обновление можно установить с автоматической резервной копией</small></div><span id="releaseBannerVersion" class="release-banner-version"></span><div class="release-banner-actions"><a class="btn primary" href="{esc(path)}/updates">Посмотреть</a><button type="button" id="releaseBannerClose" class="release-banner-close" aria-label="Скрыть уведомление">×</button></div></aside>'''
     banner_script = f'''<script>(()=>{{const banner=document.getElementById('releaseBanner'),version=document.getElementById('releaseBannerVersion'),close=document.getElementById('releaseBannerClose');if(!banner)return;function dismissed(v){{try{{return localStorage.getItem('onyx-release-banner:'+v)==='1'}}catch(e){{return false}}}}function show(d){{if(!d||!d.available||!d.latest||dismissed(d.latest)){{banner.hidden=true;return}}banner.dataset.version=d.latest;version.textContent=(d.current||'—')+' → '+d.latest;banner.hidden=false}}async function check(){{try{{const r=await fetch('{esc(path)}/update-status',{{cache:'no-store'}});if(!r.ok||r.redirected)return;const d=await r.json();const mine=document.body.dataset.uiVersion;if(d.current&&mine&&d.current!==mine&&!['queued','running'].includes(d.phase)){{location.reload();return}}show(d)}}catch(e){{}}}}close.addEventListener('click',()=>{{const v=banner.dataset.version;if(v)try{{localStorage.setItem('onyx-release-banner:'+v,'1')}}catch(e){{}}banner.hidden=true}});window.addEventListener('onyx-update-status',e=>show(e.detail));check();setInterval(check,30000)}})();</script>'''
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>{esc(title)} · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}</style></head><body data-role="{esc(role)}" data-ui-version="{esc(ui_version())}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: клиенты, функции, разделы…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{PWA_INSTALL_DIALOG.replace("@@LOGO@@",esc(path)+"/__logo")}{COMMON_JS}{PWA_JS.replace("@@SW@@",json.dumps(path+"/__/sw.js")).replace("@@SCOPE@@",json.dumps(path))}{PWA_INSTALL_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{PANEL_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>{esc(title)} · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><link rel="stylesheet" href="{esc(path)}/__static/app.css?v={esc(ui_version())}"></head><body data-role="{esc(role)}" data-ui-version="{esc(ui_version())}"><div class="shell"><aside class="sidebar" aria-label="Навигация панели"><a class="brand" href="{esc(path)}/dashboard" aria-label="Onyx Panel — на главную"><img src="{esc(path)}/__logo" alt="" width="30" height="30"></a><nav class="nav-primary" aria-label="Разделы панели">{nav}</nav><div class="nav-bottom">{restart_buttons(path, csrf)}<a class="nav-button" href="{esc(path)}/logout" data-tip="Выйти" aria-label="Выйти">{icon('logout')}</a></div></aside><main>{banner}{body}</main></div><template id="headCluster">{bell_button(path, csrf, role)}<button type="button" class="head-search" data-head-search aria-label="Поиск (Ctrl+K)" title="Поиск (Ctrl+K)">{icon('search')}</button><span class="head-avatar" title="Onyx Panel"><img src="{esc(path)}/__logo" alt="" width="22" height="22"></span></template><dialog id="paletteDialog" class="palette-dialog" aria-label="Командная палитра"><div class="palette-box"><input id="paletteInput" placeholder="Поиск: клиенты, функции, разделы…" autocomplete="off" spellcheck="false"><div id="paletteResults" class="palette-results" role="listbox"></div><div class="palette-hint">Ctrl+K — открыть · ↑↓ — выбрать · Enter — перейти · Esc — закрыть</div></div></dialog>{PWA_INSTALL_DIALOG.replace("@@LOGO@@",esc(path)+"/__logo")}<script src="{esc(path)}/__static/app.js?v={esc(ui_version())}"></script>{PWA_JS.replace("@@SW@@",json.dumps(path+"/__/sw.js")).replace("@@SCOPE@@",json.dumps(path))}{PWA_INSTALL_JS}{HEAD_MOVE_JS}{PALETTE_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{PANEL_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))}{BELL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',esc(csrf))}{banner_script}</body></html>'''
 
 
 def login_ui(path, totp=False):
@@ -856,7 +868,7 @@ backBtn.addEventListener('click',()=>showStep(1));''' if totp else ''
     js_fields = ("const userField=document.getElementById('loginName'),passField=document.getElementById('loginPassword'),codeField=document.getElementById('loginCode');"
                  if totp else
                  "const userField=document.getElementById('loginName'),passField=document.getElementById('loginPassword');")
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>Вход · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><style>{CSS}
+    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f2028"><title>Вход · Onyx Panel</title><link rel="preload" href="{esc(path)}/__font/dashboard-sans-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="{esc(path)}/__font/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="icon" type="image/png" href="{esc(path)}/__favicon"><link rel="manifest" href="{esc(path)}/__/manifest.webmanifest"><link rel="apple-touch-icon" href="{esc(path)}/__favicon"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Onyx Panel"><link rel="stylesheet" href="{esc(path)}/__static/app.css?v={esc(login_version())}"><style>
 .login-step{{animation:login-fade-in .3s ease}}
 .login-step[hidden]{{display:none!important}}
 @keyframes login-fade-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
@@ -878,7 +890,7 @@ backBtn.addEventListener('click',()=>showStep(1));''' if totp else ''
 .login-modal-text{{font-size:13px;color:var(--muted);margin:0;text-align:center;max-width:260px}}
 </style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
 <div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card" id="loginModalCard"><div class="move-ring spin" id="loginModalRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="loginModalMark">…</b></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
-{COMMON_JS}
+<script src="{esc(path)}/__static/app.js?v={esc(login_version())}"></script>
 <script>(()=>{{
 const TOTP={totp_flag};
 const form=document.getElementById('loginForm'),step1=document.getElementById('loginStep1'),step2=document.getElementById('loginStep2');

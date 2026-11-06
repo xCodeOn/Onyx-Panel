@@ -25,11 +25,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-APP_LINES = open("install-panel.sh", encoding="utf-8").read().split("\n")
-_start = APP_LINES.index("cat > \"$APP_FILE\" <<'PY'")
-_end = APP_LINES.index("PY", _start + 1)
-APP_CODE = "\n".join(APP_LINES[_start + 1:_end])
-SOURCES = [("install-panel.sh(app)", APP_CODE)] + [(p, open(p, encoding="utf-8").read()) for p in sorted(glob.glob("onyx_*.py"))]
+SOURCES = ([("panel.py", open("panel.py", encoding="utf-8").read()),
+            ("onyx-panelctl", open("onyx-panelctl", encoding="utf-8").read())]
+           + [(p, open(p, encoding="utf-8").read()) for p in sorted(glob.glob("onyx_*.py"))])
 
 BUILTINS = set(dir(builtins))
 
@@ -127,7 +125,7 @@ print("1) static scan: no loaded-but-undefined names in app or modules OK")
 for _m in ('grp', 'pwd'):
     sys.modules.setdefault(_m, types.ModuleType(_m))
 _tmp = tempfile.mkdtemp()
-_code = APP_CODE
+_code = SOURCES[0][1]  # panel.py
 for _sysdir in ('/var/lib/onyx-panel', '/etc/onyx-panel'):
     _code = _code.replace(_sysdir, os.path.join(_tmp, _sysdir.strip('/').replace('/', '_')))
 import hashlib
@@ -164,7 +162,20 @@ assert "limit-bar" in html and "<i" in html, html
 print("3) limit_bar renders OK")
 
 # 3. the login notification branch must use the imported alias
-assert "onyx_telegram.configured" not in APP_CODE, "bare onyx_telegram use is back"
+assert "onyx_telegram.configured" not in SOURCES[0][1], "bare onyx_telegram use is back"
 print("4) telegram login notify uses telegram_api alias OK")
+
+# 4. module lists must not drift apart: every panel module the installer
+# requires must also be required by the updater's local-archive check.
+_installer = open("install-panel.sh", encoding="utf-8").read()
+_updater = open("update.sh", encoding="utf-8").read()
+_m = re.search(r"for module in ([a-z0-9_.\- ]+); do", _installer)
+_u = re.search(r"for file in ([a-z0-9_.\-/ ]+); do", _updater)
+assert _m and _u, "module list not found"
+_installer_mods = set(_m.group(1).split())
+_updater_files = set(_u.group(1).split())
+_missing = sorted(m for m in _installer_mods if m not in _updater_files)
+assert not _missing, "update.sh local-archive check misses modules: %s" % _missing
+print("5) installer/updater module lists in sync OK")
 
 print("ALL STATIC/NAME TESTS PASSED")

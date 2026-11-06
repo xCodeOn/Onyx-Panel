@@ -75,10 +75,7 @@ assert len(state["audit"]) == onyx_audit.MAX_ENTRIES
 print("4) audit rotate OK")
 
 # ---------- 3. Сервер: маршруты 2.1 через харнесс ----------
-_lines = open("install-panel.sh", encoding="utf-8").read().split("\n")
-_start = _lines.index("cat > \"$APP_FILE\" <<'PY'")
-_end = _lines.index("PY", _start + 1)
-_code = "\n".join(_lines[_start + 1:_end])
+_code = open("panel.py", encoding="utf-8").read()
 for _m in ('grp', 'pwd'):
     sys.modules.setdefault(_m, types.ModuleType(_m))
 if not hasattr(hashlib, "scrypt"):

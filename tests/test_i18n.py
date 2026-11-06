@@ -24,10 +24,7 @@ os.chdir(ROOT)
 
 REPORT = "--report" in sys.argv
 
-_lines = open("install-panel.sh", encoding="utf-8").read().split("\n")
-_start = _lines.index("cat > \"$APP_FILE\" <<'PY'")
-_end = _lines.index("PY", _start + 1)
-_code = "\n".join(_lines[_start + 1:_end])
+_code = open("panel.py", encoding="utf-8").read()
 for _m in ('grp', 'pwd'):
     sys.modules.setdefault(_m, types.ModuleType(_m))
 _tmp = tempfile.mkdtemp()
@@ -211,6 +208,7 @@ if runs:
 # Client-facing pages: subscription page and invite page (all states)
 import time as _time
 import onyx_ui as _onyx_ui
+import onyx_i18n as _onyx_i18n
 sub_fake = {"name": "Клиент Тест", "token": "tok123"}
 qrs_fake = [{"label": "VLESS XHTTP", "hint": "Быстрый канал", "link": "https://panel.example.com/s/tok123?vless=x", "png": "aGk="}]
 extra_pages = {
@@ -221,7 +219,7 @@ extra_pages = {
     "/invite-claimed": _onyx_ui.invite_page_html(None, {"token": "t3", "name": "Гость"}, "panel.example.com", "/onyx-invite/t3"),
 }
 for label, doc in extra_pages.items():
-    en_doc = _onyx_ui.i18n.document(doc)
+    en_doc = _onyx_i18n.document(doc)
     runs = visible_cyrillic(en_doc)
     if runs:
         leftovers[label] = sorted(set(leftovers.get(label, [])) | set(runs))
@@ -239,7 +237,7 @@ if obs_cookie:
             leftovers["/users-observer"] = sorted(set(runs))
 
 # Login page with the 2FA code field enabled
-page = _onyx_ui.i18n.document(_onyx_ui.login_ui("", totp=True))
+page = _onyx_i18n.document(_onyx_ui.login_ui("", totp=True))
 runs = visible_cyrillic(page)
 if runs:
     leftovers["/login-2fa"] = sorted(set(runs))

@@ -145,56 +145,6 @@ def fp_for(uid, state, now_ts=None):
     return pool[zlib.crc32(seed) % len(pool)]
 
 
-def xray_client_config(secret, uid, *, domain, path, level="off", fp=FP_DEFAULT,
-                       reality=None, variant="reality", tag="proxy"):
-    """Full Xray client config ready for import into v2rayN and friends.
-
-    variant "reality" — VLESS + Reality + Vision over TCP with the panel's
-    server names; variant "xhttp" — VLESS over XHTTP behind the domain's TLS.
-    A fragment level other than "off" attaches sockopt.fragment so the
-    client's own ClientHello is split before it reaches the DPI.
-    """
-    level = level if level in FRAGMENT_LEVELS else "off"
-    fragment = fragment_settings(level)
-    if variant not in ("reality", "xhttp"):
-        raise BypassError("Неизвестный вариант конфигурации: %s" % variant)
-    if variant == "reality":
-        reality = reality if isinstance(reality, dict) else {}
-        if not reality.get("enabled"):
-            raise BypassError("Reality выключен на сервере.")
-        user = {"id": secret, "encryption": "none", "flow": "xtls-rprx-vision", "level": 0}
-        outbound = {"protocol": "vless", "settings": {"vnext": [
-            {"address": domain, "port": int(reality.get("port", 2053)), "users": [user]}]},
-            "streamSettings": {"network": "tcp", "security": "reality",
-                               "realitySettings": {"show": False,
-                                                   "fingerprint": fp,
-                                                   "serverName": (reality.get("server_names") or [domain])[0],
-                                                   "publicKey": reality.get("public_key", ""),
-                                                   "shortId": (reality.get("short_ids") or [""])[0],
-                                                   "spiderX": "/"}}}
-    else:
-        user = {"id": secret, "encryption": "none", "level": 0}
-        outbound = {"protocol": "vless", "settings": {"vnext": [
-            {"address": domain, "port": 443, "users": [user]}]},
-            "streamSettings": {"network": "xhttp", "security": "tls",
-                               "tlsSettings": {"serverName": domain, "fingerprint": fp,
-                                               "alpn": ["h2"]},
-                               "xhttpSettings": {"path": path, "mode": "auto", "host": domain}}}
-    if fragment:
-        outbound["sockopt"] = {"fragment": fragment,
-                               "tcpFastOpen": True, "domainStrategy": "UseIPv4"}
-    return {"log": {"loglevel": "warning"},
-            "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": 10808,
-                          "protocol": "socks", "settings": {"udp": True}},
-                         {"tag": "http", "listen": "127.0.0.1", "port": 10809,
-                          "protocol": "http"}],
-            "outbounds": [outbound, {"tag": "direct", "protocol": "freedom"}],
-            "routing": {"domainStrategy": "AsIs",
-                        "rules": [{"type": "field", "inboundTag": ["socks", "http"],
-                                   "outboundTag": tag}]},
-            "_onyx": {"uid": str(uid), "variant": variant, "fragment": level, "fp": fp}}
-
-
 def preset_apply(level):
     """Preset bundles for the one-button "max bypass" switch.
 

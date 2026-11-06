@@ -1,0 +1,5165 @@
+#!/usr/bin/env python3
+import base64
+import copy
+import hashlib
+import hmac
+import html
+import ipaddress
+import json
+import os
+import re
+import secrets
+import select
+import shutil
+import socket
+import subprocess
+import sys
+import grp
+import tempfile
+import threading
+import time
+import urllib.request
+import urllib.error
+from http import cookies
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, quote, urlencode, urlparse
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
+from onyx_subscriptions import PREFIX as SUB_PREFIX
+from onyx_panel_extras import preview_document
+import onyx_i18n as i18n
+from onyx_ui import page_layout, login_ui, dashboard_body, dashboard_page, users_ui, editor_ui, client_records, nodes_ui, nodes_live_block, cascade_ui, cascade_state_view, routing_ui, updates_ui, icon, logs_ui, diagnostics_ui, subscription_page_html, invite_page_html, status_page_html, settings_extras, card_expand, duration, limit_bar, CSS as UI_CSS, COMMON_JS_BODY as UI_COMMON_JS
+import onyx_metrics as server_metrics
+import onyx_update as web_updates
+import onyx_webpush as web_push
+import onyx_components as components
+import onyx_nodes as node_api
+import onyx_openflux as openflux
+import onyx_awg as awg
+import onyx_cascade as cascade_api
+import onyx_routing as routing_api
+import onyx_warp as warp_api
+import onyx_reality as reality_api
+import onyx_telegram as telegram_api
+import onyx_totp
+import onyx_access
+import onyx_webapi
+import onyx_failover
+import onyx_audit
+import onyx_limits
+import onyx_cloud
+import onyx_firewall
+import onyx_subscriptions
+import onyx_bypass as bypass_api
+import onyx_censor
+import onyx_defense
+import onyx_promo
+
+HOST="127.0.0.1"
+PORT=8090
+DATA="/var/lib/onyx-panel/data.json"
+KEY="/var/lib/onyx-panel/session.key"
+DOMAIN=os.environ.get("ONYX_DOMAIN","")
+MTPROTO_HOST=os.environ.get("ONYX_MTPROTO_HOST",DOMAIN)
+PANEL_PATH=os.environ.get("ONYX_PANEL_PATH","")
+PRIMARY="/etc/onyx-panel/primary-secret"
+PROFILES="/etc/tproxy-server/profiles.json"
+USERS="/etc/onyx-panel/users.json"
+TRAFFIC="/var/lib/onyx-panel/traffic.json"
+XRAY_PATH_FILE="/etc/onyx-panel/xray-path"
+HYSTERIA_PORT=8443
+TUIC_PORT=9443
+UNBOUND_MARKER="/etc/onyx-panel/unbound.enabled"
+MANAGER="/usr/local/sbin/onyx-panelctl"
+QR="/usr/bin/qrencode"
+LOGO="/opt/onyx-panel/onyx-logo.png"
+FAVICON="/opt/onyx-panel/onyx-favicon.png"
+FLAGS="/opt/onyx-panel/flags"
+SITE_INDEX="/srv/tproxy-site/index.html"
+SITE_BACKUP="/var/lib/onyx-panel/index.html.bak"
+SITE_SOURCE="/var/lib/onyx-panel/site-source.html"
+SITE_SOURCE_BACKUP="/var/lib/onyx-panel/site-source.html.bak"
+SITE_CSS="/srv/tproxy-site/panel-site.css"
+SITE_CSS_BACKUP="/var/lib/onyx-panel/panel-site.css.bak"
+SITE_JS="/srv/tproxy-site/panel-site.js"
+SITE_JS_BACKUP="/var/lib/onyx-panel/panel-site.js.bak"
+MAX_HTML_BYTES=1024*1024
+SITE_DRAFT="/var/lib/onyx-panel/site-draft.html"
+CUSTOM_PRESETS_FILE="/var/lib/onyx-panel/custom-presets.json"
+API_KEY_FILE="/var/lib/onyx-panel/api.key"
+NODES_FILE="/var/lib/onyx-panel/nodes.json"
+NODES_TRAFFIC_FILE="/var/lib/onyx-panel/nodes-traffic.json"
+NODES_TRAFFIC={"loaded":False,"points":[]}
+LOCATION_FILE="/var/lib/onyx-panel/location.json"
+CASCADES_FILE="/var/lib/onyx-panel/cascades.json"
+ROUTING_FILE="/var/lib/onyx-panel/routing.json"
+WARP_FILE="/var/lib/onyx-panel/warp.json"
+REALITY_FILE="/var/lib/onyx-panel/reality.json"
+RESTART_STATUS="/var/lib/onyx-panel/restart-status.json"
+API_KEY=node_api.ensure_api_key(API_KEY_FILE)
+# Live node snapshot for the dashboard: fetched in the background so a slow or
+# offline node never delays /dashboard-data itself.
+NODES_LIVE={"stamp":0.0,"fetching":False,"data":[]}
+NODES_LIVE_LOCK=threading.Lock()
+SUB_FETCH_SLOTS=threading.BoundedSemaphore(4)
+SUB_RATE_LOCK=threading.Lock()
+SUB_REQUESTS={}
+
+# Presets are deliberately standalone at authoring time: no CDN and no icon
+# font. On publication the panel moves executable CSS/JS into immutable local
+# files because the public relay uses a strict Content-Security-Policy.
+# The bundled "standard" soft-start stub leads the list: the custom-preset
+# handlers reject any operation on ids without the "custom-" prefix, so it can
+# never be edited or removed — only applied or previewed.
+STANDARD_STUB="""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b"><meta name="description" content="Onyx. Скоро здесь начнётся что-то особенное.">
+<title>Onyx — скоро</title>
+<style>
+*{box-sizing:border-box}html{background:#09090b}body{margin:0;color:#f4f1eb;font-family:Arial,Helvetica,sans-serif;min-height:100svh;overflow-x:hidden}button{font:inherit}::selection{background:#f47b42;color:#09090b}
+.scene{position:fixed;inset:0;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 50% 49%,#25140f66,transparent 62%)}canvas{width:100%;height:100%;position:absolute;inset:0}.grain{position:absolute;inset:0;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.7' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}
+.eclipse{position:absolute;left:50%;top:47%;width:min(64vw,660px);aspect-ratio:1;border-radius:50%;transform:translate(calc(-50% + var(--mx,0px)),calc(-50% + var(--my,0px)));transition:transform 1.5s ease-out;background:#09090b;box-shadow:0 0 90px #ed673113,inset 0 0 50px #25130e;isolation:isolate}.eclipse:before{content:"";position:absolute;inset:-2px;border-radius:50%;z-index:-2;background:conic-gradient(from 0deg,#ffbe78 0deg,#ed7540 20deg,#b13c151a 85deg,#28140e 170deg,#ffb168 220deg,#ffdfb4 240deg,#4b2516 290deg,#ffbe78);animation:orbit 22s linear infinite;box-shadow:0 0 24px #e9653030}.eclipse:after{content:"";position:absolute;inset:1px;border-radius:50%;z-index:-1;background:radial-gradient(ellipse at 50% 10%,#211812,#0b0b0d 45%,#09090b 80%);box-shadow:inset 0 0 24px #ff8b2510}.halo{position:absolute;inset:-23px;border:1px solid #ffffff05;border-radius:50%}.halo:after{content:"";position:absolute;inset:-65px;border:1px solid #ffffff03;border-radius:50%}
+.shell{position:relative;min-height:100svh;display:flex;flex-direction:column;padding:34px 4.4vw 24px}header,footer{display:flex;justify-content:space-between;align-items:center;gap:24px}header{animation:appear 1s both}.brand{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:700;letter-spacing:-.9px}.mark{width:23px;height:27px;display:inline-block;background:linear-gradient(130deg,#fff,#aaa);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%,50% 0,50% 24%,21% 38%,21% 62%,50% 77%,79% 62%,79% 38%,50% 24%)}.status{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#aaa6a2}.status i{height:5px;width:5px;border-radius:50%;background:#efaa70;box-shadow:0 0 12px #f79043;animation:breathe 3s ease-in-out infinite}main{flex:1;display:grid;place-items:center;text-align:center;padding:88px 0 94px}.hero{position:relative;width:100%}.eyebrow{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:#d0b39f;margin:0 0 30px;animation:rise 1s .15s both}.eyebrow:before,.eyebrow:after{content:"";display:inline-block;width:28px;height:1px;background:#a7856b66;vertical-align:middle;margin:0 15px}h1{font-size:clamp(108px,20.5vw,285px);font-weight:500;line-height:.83;letter-spacing:-.085em;margin:0 0 40px;padding-right:.08em;color:#ece9e4;text-shadow:0 5px 55px #0008;animation:rise 1.3s .25s both}h1 span{display:inline-block;background:linear-gradient(165deg,#fff 15%,#dad5cd 53%,#8a8581 100%);background-clip:text;-webkit-background-clip:text;color:transparent}h2{font-size:clamp(21px,2.35vw,32px);font-weight:400;letter-spacing:-.9px;margin:0 0 14px;animation:rise 1s .45s both}.description{font-size:14px;line-height:1.8;color:#94918f;margin:0 auto;max-width:380px;animation:rise 1s .6s both}.action{margin-top:30px;display:inline-flex;align-items:center;gap:30px;border:1px solid #ffffff24;background:#ffffff06;color:#eee7df;border-radius:50px;padding:15px 20px 15px 25px;font-size:12px;cursor:pointer;transition:background .3s,border-color .3s,transform .3s;animation:rise 1s .75s both}.action:hover{background:#f4965120;border-color:#eaaa7870;transform:translateY(-3px)}.action svg{width:16px;height:16px;transition:transform .3s}.action:hover svg{transform:rotate(45deg)}button:focus-visible{outline:2px solid #ffbe78;outline-offset:6px}.side{position:absolute;left:0;top:47%;writing-mode:vertical-rl;transform:rotate(180deg);font:9px monospace;letter-spacing:3px;color:#76706b}.coordinates{position:absolute;right:0;top:48%;color:#79716b;font:9px monospace;letter-spacing:2px;writing-mode:vertical-rl}.bottom{animation:appear 1s 1s both}footer{border-top:1px solid #ffffff13;padding-top:20px;font-size:10px;color:#77736f;letter-spacing:.4px}.footer-note{display:flex;align-items:center;gap:9px}.footer-note:before{content:"";width:4px;height:4px;background:#a28e7b;border-radius:50%}.controls{border:0;background:transparent;color:#99938e;cursor:pointer;display:flex;align-items:center;gap:8px;padding:9px 0;font-size:10px}.bars{height:12px;display:flex;align-items:center;gap:3px}.bars i{width:2px;height:9px;background:#c39c7c;animation:bars 1.3s ease-in-out infinite alternate}.bars i:nth-child(2){animation-delay:-.5s}.bars i:nth-child(3){animation-delay:-.9s}.progress-line{position:absolute;bottom:0;left:0;width:100%;height:1px;background:#ffffff05}.progress-line:after{content:"";position:absolute;width:20%;height:100%;background:linear-gradient(90deg,transparent,#d69560,transparent);animation:scan 9s linear infinite}
+dialog{color:#eee9e3;background:#131214;border:1px solid #e3ac7838;border-radius:20px;max-width:440px;width:calc(100% - 40px);padding:38px;box-shadow:0 20px 100px #0009}dialog::backdrop{background:#0009;backdrop-filter:blur(12px)}dialog[open]{animation:rise .3s both}dialog h2{animation:none;margin-top:22px;font-size:28px}dialog p{color:#a6a09b;line-height:1.8;font-size:14px}.close{position:absolute;top:14px;right:18px;background:none;border:0;color:#aaa;font-size:25px;cursor:pointer}.dialog-label{color:#d0a17d;font:10px monospace;letter-spacing:2px}.paused *,.paused *:before,.paused *:after{animation-play-state:paused!important}
+@keyframes orbit{to{transform:rotate(360deg)}}@keyframes breathe{50%{opacity:.4;box-shadow:0 0 4px #f79043}}@keyframes rise{from{opacity:0;transform:translateY(20px);filter:blur(5px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}@keyframes appear{from{opacity:0}to{opacity:1}}@keyframes bars{to{height:3px}}@keyframes scan{from{left:-20%}to{left:100%}}
+@media(min-width:1600px){.shell{padding-top:45px}main{padding:100px 0}.eclipse{width:750px}}
+@media(max-width:600px){.shell{padding:24px 23px 18px}.brand{font-size:18px}.status{font-size:8px;letter-spacing:1.3px}.eclipse{width:106vw;top:44%}main{padding:100px 0 105px}.eyebrow{font-size:8px;letter-spacing:2.8px;margin-bottom:34px}.eyebrow:before,.eyebrow:after{width:15px;margin:0 10px}h1{font-size:29vw;margin-bottom:35px}h2{font-size:23px}.description{font-size:12px;max-width:270px}.side,.coordinates{display:none}footer{font-size:9px;flex-wrap:wrap;gap:12px}.footer-note{display:none}.action{font-size:11px}.controls{font-size:9px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="scene" aria-hidden="true"><canvas id="dust"></canvas><div class="eclipse"><div class="halo"></div></div><div class="grain"></div></div>
+<div class="shell"><header><div class="brand"><span class="mark" aria-hidden="true"></span>onyx</div><div class="status"><i></i>Скоро открытие</div></header>
+<main><div class="hero"><div class="side" aria-hidden="true">BEYOND THE ORDINARY</div><p class="eyebrow">Новое притяжение</p><h1 aria-label="Onyx"><span>Onyx</span></h1><h2>Всё начинается с тишины.</h2><p class="description">Мы создаём что-то особенное.<br>Совсем скоро здесь станет интереснее.</p><button class="action" id="more" type="button">Что дальше?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button><div class="coordinates" aria-hidden="true">A NEW CHAPTER / ONYX</div></div></main>
+<div class="bottom"><footer><span>&copy; <span id="year">2026</span> Onyx</span><span class="footer-note">На пороге чего-то нового</span><button class="controls" id="motion" type="button" aria-pressed="false"><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="motion-label">Остановить анимацию</span></button></footer></div><div class="progress-line" aria-hidden="true"></div></div>
+<dialog id="info" aria-labelledby="dialog-title"><button class="close" type="button" aria-label="Закрыть">&times;</button><span class="dialog-label">ONYX / COMING SOON</span><h2 id="dialog-title">Встречаемся здесь.</h2><p>Onyx готовится к запуску. Мы откроем сайт, когда всё будет готово. Загляните чуть позже — продолжение уже близко.</p></dialog>
+<script>
+(()=>{'use strict';
+const canvas=document.getElementById('dust'),ctx=canvas.getContext('2d'),media=matchMedia('(prefers-reduced-motion: reduce)'),motion=document.getElementById('motion'),label=document.getElementById('motion-label'),dialog=document.getElementById('info');
+let w=0,h=0,particles=[],paused=media.matches,frame=0,last=0;const pointer={x:-1000,y:-1000};
+document.getElementById('year').textContent=new Date().getFullYear();
+function resize(){w=innerWidth;h=innerHeight;const dpr=Math.min(devicePixelRatio||1,2);canvas.width=w*dpr;canvas.height=h*dpr;if(!ctx)return;ctx.setTransform(dpr,0,0,dpr,0,0);particles=Array.from({length:Math.min(95,Math.floor(w*h/14000))},()=>({x:Math.random()*w,y:Math.random()*h,r:.4+Math.random()*1.1,v:.07+Math.random()*.14,a:.1+Math.random()*.4,phase:Math.random()*6.28}));draw(0)}
+function draw(dt){if(!ctx)return;ctx.clearRect(0,0,w,h);for(const p of particles){p.y-=p.v*dt;p.x+=Math.sin(p.phase+p.y*.004)*.045*dt;if(p.y<0)p.y=h;const dx=p.x-pointer.x,dy=p.y-pointer.y,d=Math.hypot(dx,dy);const force=d<130?(1-d/130)*14:0;ctx.beginPath();ctx.fillStyle='rgba(220,178,138,'+p.a+')';ctx.arc(p.x+(d?dx/d*force:0),p.y+(d?dy/d*force:0),p.r,0,Math.PI*2);ctx.fill()}}
+function tick(t){if(paused||document.hidden){frame=0;return}draw(Math.min((t-last)/16.67,2));last=t;frame=requestAnimationFrame(tick)}
+function start(){if(!frame&&!paused&&!document.hidden){last=performance.now();frame=requestAnimationFrame(tick)}}
+function sync(){document.body.classList.toggle('paused',paused);motion.setAttribute('aria-pressed',String(paused));label.textContent=paused?'Включить анимацию':'Остановить анимацию';if(paused){cancelAnimationFrame(frame);frame=0}else start()}
+motion.addEventListener('click',()=>{paused=!paused;sync()});media.addEventListener('change',e=>{paused=e.matches;sync()});
+addEventListener('pointermove',e=>{if(paused)return;pointer.x=e.clientX;pointer.y=e.clientY;document.documentElement.style.setProperty('--mx',((e.clientX/w-.5)*12)+'px');document.documentElement.style.setProperty('--my',((e.clientY/h-.5)*12)+'px')},{passive:true});
+document.addEventListener('pointerleave',()=>{pointer.x=pointer.y=-1000});addEventListener('resize',resize);document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else start()});
+document.getElementById('more').addEventListener('click',()=>dialog.showModal());dialog.querySelector('.close').addEventListener('click',()=>dialog.close());dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close()}});
+resize();sync();
+})();
+</script></body></html>"""
+PRESETS=[{"id":"standard","name":"Стандартная заглушка","description":"Стартовая страница Onyx — то, что видно сразу после установки. Всегда доступна: изменить или удалить нельзя, можно применить заново.","html":STANDARD_STUB}]
+os.makedirs(os.path.dirname(DATA),exist_ok=True)
+if not os.path.exists(KEY):
+    with open(KEY,"wb") as f: f.write(secrets.token_bytes(32))
+with open(KEY,"rb") as f: SESSION_KEY=f.read()
+os.chmod(KEY,0o600)
+STATE_LOCK=threading.RLock()
+# In-progress manual backups for the staged "Копия сейчас" flow: job id ->
+# {"blob","name","ts","saved","cloud"}. Живут в памяти, чистятся по TTL 30 минут.
+BACKUP_JOBS={}
+BACKUP_JOBS_LOCK=threading.Lock()
+# In-progress client deletion jobs ("удалить клиентов" modal): job id ->
+# {"steps","status","done","total","deleted","failed","message","ts"}.
+# Живут в памяти, чистятся по TTL 30 минут при старте новой задачи.
+DELETE_JOBS={}
+DELETE_JOBS_LOCK=threading.Lock()
+# Шаги задачи удаления. Отзыв ключей идёт последовательно по клиентам
+# (manager-вызовы не параллелятся), очистка профилей на нодах — по потоку
+# на ноду с общим лимитом ожидания, чтобы модалка не висла на мёртвой ноде.
+DELETE_NODE_WAIT=60
+# Role of the request's session ("admin"/"observer"), resolved by auth() and
+# read by layout() from the same request thread.
+ROLE_LOCAL=threading.local()
+# Cascade background jobs serialize on this lock: the manager holds its own
+# exclusive lock during the Xray restart, so parallel jobs would just queue.
+APPLY_LOCK=threading.Lock()
+# Coalesced cascade applies: toggle/users/delete clicks within one window
+# share a single Xray restart instead of queueing a full apply each.
+_CASCADE_APPLY_WINDOW=2.5
+_CASCADE_APPLY={"timer":None,"batch":[]}
+_CASCADE_APPLY_LOCK=threading.Lock()
+LOGIN_LOCK=threading.RLock()
+LOGIN_FAILURES=defaultdict(deque)
+LOGIN_FAILURES_GLOBAL=deque()
+LOGIN_WINDOW=10*60
+LOGIN_LIMIT=8
+LOGIN_GLOBAL_LIMIT=200
+LOGIN_BANS="/var/lib/onyx-panel/login-bans.json"
+TRAFFIC_HISTORY="/var/lib/onyx-panel/traffic-history.json"
+LIMITS_FILE="/var/lib/onyx-panel/traffic-month.json"
+CLIENT_CHECKS="/var/lib/onyx-panel/client-checks.json"
+DIAGNOSTICS_FILE="/var/lib/onyx-panel/diagnostics.json"
+XRAY_BIN="/opt/onyx-panel/xray/xray"
+
+def atomic_private(path,value):
+    tmp=str(path)+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f: json.dump(value,f,ensure_ascii=True,separators=(",",":"))
+    os.chmod(tmp,0o600); os.replace(tmp,path)
+
+def read_private(path):
+    try:
+        with open(path,encoding="utf-8") as f:
+            value=json.load(f)
+            return value if isinstance(value,dict) else {}
+    except Exception: return {}
+
+def audit(action,target="",details="",actor="admin"):
+    """Одна строка в журнал действий; никогда не роняет обработчик запроса."""
+    try:
+        with STATE_LOCK:
+            d=load()
+            onyx_audit.record(d,action,target,details,actor)
+            save(d)
+    except Exception as exc:
+        print("audit failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def load_bans():
+    value=read_private(LOGIN_BANS); now=int(time.time())
+    if not value: return {}
+    return {ip:entry for ip,entry in value.items() if isinstance(entry,dict) and int(entry.get("until",0) or 0)>now}
+
+def save_bans(value):
+    try: atomic_private(LOGIN_BANS,dict(list(value.items())[-200:]))
+    except OSError: pass
+
+def client_check_state():
+    value=read_private(CLIENT_CHECKS)
+    now=int(time.time())
+    return {uid:item for uid,item in value.items() if isinstance(item,dict) and now-int(item.get("ts",0) or 0)<600}
+
+def write_client_check(uid,value):
+    state=client_check_state(); state[str(uid)]=value
+    try: atomic_private(CLIENT_CHECKS,state)
+    except OSError: pass
+
+def write_diagnostics(value):
+    try: atomic_private(DIAGNOSTICS_FILE,value)
+    except OSError: pass
+
+def read_diagnostics():
+    value=read_private(DIAGNOSTICS_FILE)
+    return value if value.get("started",0) and int(value.get("started",0))>time.time()-1800 else {"phase":"idle"}
+
+def esc(x): return html.escape(str(x),quote=True)
+def hash_password(p):
+    salt=secrets.token_bytes(16)
+    d=hashlib.scrypt(p.encode(),salt=salt,n=16384,r=8,p=1,dklen=32)
+    return base64.b64encode(salt+d).decode()
+def check_password(p,h):
+    try:
+        raw=base64.b64decode(h); salt,exp=raw[:16],raw[16:]
+        got=hashlib.scrypt(p.encode(),salt=salt,n=16384,r=8,p=1,dklen=32)
+        return secrets.compare_digest(exp,got)
+    except Exception:
+        return False
+def sign(x): return x+"."+hmac.new(SESSION_KEY,x.encode(),hashlib.sha256).hexdigest()
+def rotate_session_key():
+    global SESSION_KEY
+    fresh=secrets.token_bytes(32)
+    tmp=KEY+".tmp"
+    with open(tmp,"wb") as f:
+        f.write(fresh); f.flush(); os.fsync(f.fileno())
+    os.chmod(tmp,0o600)
+    os.replace(tmp,KEY)
+    SESSION_KEY=fresh
+def client_id(handler):
+    forwarded=handler.headers.get("X-Forwarded-For","")
+    candidate=forwarded.split(",")[-1].strip() if forwarded else handler.client_address[0]
+    try: return str(ipaddress.ip_address(candidate))
+    except ValueError: return "unknown"
+def login_blocked(client):
+    now=time.monotonic(); cutoff=now-LOGIN_WINDOW
+    with LOGIN_LOCK:
+        bucket=LOGIN_FAILURES[client]
+        while bucket and bucket[0]<cutoff: bucket.popleft()
+        while LOGIN_FAILURES_GLOBAL and LOGIN_FAILURES_GLOBAL[0]<cutoff: LOGIN_FAILURES_GLOBAL.popleft()
+        if not LOGIN_FAILURES_GLOBAL:
+            LOGIN_FAILURES.clear()
+            bucket=LOGIN_FAILURES[client]
+        if len(bucket)>=LOGIN_LIMIT or len(LOGIN_FAILURES_GLOBAL)>=LOGIN_GLOBAL_LIMIT: return True
+    # Переживает перезапуск панели: порог ошибок предыдущей жизни блокирует IP
+    # до конца окна, иначе рестарт службы обнуляет отсчёт перебора.
+    bans=load_bans()
+    entry=bans.get(client) if isinstance(bans.get(client),dict) else {}
+    return int(entry.get("until",0) or 0)>int(time.time())
+def login_failed(client):
+    now=time.monotonic()
+    with LOGIN_LOCK:
+        LOGIN_FAILURES[client].append(now)
+        LOGIN_FAILURES_GLOBAL.append(now)
+        bucket=LOGIN_FAILURES[client]
+        if len(bucket)>=LOGIN_LIMIT:
+            bans=load_bans()
+            bans[client]={"until":int(time.time())+LOGIN_WINDOW*6,"fails":len(bucket)}
+            save_bans(bans)
+def login_succeeded(client):
+    with LOGIN_LOCK: LOGIN_FAILURES.pop(client,None)
+    bans=load_bans()
+    if client in bans:
+        bans.pop(client,None); save_bans(bans)
+# Parsed-JSON cache keyed on (mtime_ns, size): the panel re-reads data.json /
+# users.json / traffic.json several times per request and per SSE frame, and
+# json.loads dominates that cost. os.replace writers (including onyx-panelctl
+# in another process) always flip the key, so stale reads cannot survive a
+# write. Callers receive a deep copy — mutating the result never poisons the
+# cache.
+_JSON_CACHE={}
+_JSON_CACHE_LOCK=threading.Lock()
+
+def _read_json_cached(path):
+    try:
+        st=os.stat(path)
+    except OSError:
+        return None
+    key=(st.st_mtime_ns,st.st_size)
+    with _JSON_CACHE_LOCK:
+        hit=_JSON_CACHE.get(path)
+        if hit and hit[0]==key:
+            return copy.deepcopy(hit[1])
+    try:
+        with open(path,encoding="utf-8") as f: value=json.load(f)
+    except Exception:
+        return None
+    with _JSON_CACHE_LOCK:
+        _JSON_CACHE[path]=(key,value)
+    return copy.deepcopy(value)
+
+def load():
+    value=_read_json_cached(DATA)
+    if not isinstance(value,dict):
+        return {"admin":{"user":"admin","hash":""}}
+    return value
+def save(d):
+    # mkstemp gives every writer its own temp file: a fixed DATA+".tmp" name
+    # raced whenever two writers saved concurrently (one could os.replace the
+    # other's temp away and lose the state).
+    fd,t=tempfile.mkstemp(dir=os.path.dirname(DATA),prefix=".data-",suffix=".tmp")
+    try:
+        with os.fdopen(fd,"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=True,indent=2)
+        os.chmod(t,0o600); os.replace(t,DATA)
+    except BaseException:
+        try: os.unlink(t)
+        except OSError: pass
+        raise
+    with _JSON_CACHE_LOCK: _JSON_CACHE.pop(DATA,None)
+def primary():
+    try:
+        with open(PRIMARY,encoding="utf-8") as f: return f.read().strip()
+    except Exception: return ""
+def users():
+    value=_read_json_cached(USERS)
+    if not isinstance(value,dict): return []
+    items=value.get("users",[])
+    return items if isinstance(items,list) else []
+def traffic():
+    value=_read_json_cached(TRAFFIC)
+    return value if isinstance(value,dict) else {}
+def human_bytes(value):
+    value=max(0,int(value or 0))
+    units=("Б","КБ","МБ","ГБ","ТБ")
+    size=float(value)
+    for unit in units:
+        if size<1024 or unit==units[-1]:
+            return ("%.0f"%size if unit=="Б" else "%.1f"%size)+" "+unit
+        size/=1024
+def traffic_info(uid,state=None):
+    state=state or traffic()
+    item=state.get(uid,{})
+    up=max(0,int(item.get("up",0)))
+    down=max(0,int(item.get("down",0)))
+    last=max(0,int(item.get("last_change",0)))
+    active=bool(item.get("service_active")) and last>0 and time.time()-last<=90
+    return {"up":up,"down":down,"total":up+down,"last":last,"active":active,"service":bool(item.get("service_active"))}
+def read_site_html():
+    try:
+        # Keep the author source separate from the generated public files.
+        # Reading index.html here used to make the next edit depend on the
+        # previous preset's CSS/JS files.
+        if os.path.exists(SITE_SOURCE):
+            with open(SITE_SOURCE,encoding="utf-8") as f: return f.read()
+        with open(SITE_INDEX,encoding="utf-8") as f: return hydrate_legacy_assets(f.read())
+    except Exception as e:
+        raise RuntimeError("Не удалось прочитать index.html: "+str(e))
+def install_public_file(path,raw):
+    tmp=path+".tmp"
+    try:
+        with open(tmp,"wb") as f:
+            f.write(raw); f.flush(); os.fsync(f.fileno())
+        os.chown(tmp,0,grp.getgrnam("tproxy").gr_gid)
+        os.chmod(tmp,0o640)
+        os.replace(tmp,path)
+    except Exception:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+        raise
+def install_private_file(path,raw):
+    tmp=path+".tmp"
+    try:
+        with open(tmp,"wb") as f:
+            f.write(raw); f.flush(); os.fsync(f.fileno())
+        os.chown(tmp,0,0)
+        os.chmod(tmp,0o600)
+        os.replace(tmp,path)
+    except Exception:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+        raise
+def restart_public_site():
+    r=subprocess.run(["systemctl","restart","tproxy-server.service"],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=30)
+    if r.returncode or subprocess.run(["systemctl","is-active","--quiet","tproxy-server.service"],timeout=10).returncode:
+        raise RuntimeError((r.stderr or r.stdout or "tproxy-server failed to restart").strip())
+    # systemd considers the process active before both HTTP listeners have
+    # completed their startup. Wait for the local health endpoint instead of
+    # racing the first landing-page request.
+    for _ in range(30):
+        health=subprocess.run(["curl","-fsS","--noproxy","*","--max-time","2",
+                               "http://127.0.0.1:8081/healthz"],
+                              stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=4)
+        if health.returncode==0: break
+        time.sleep(0.5)
+    else:
+        raise RuntimeError("Relay health endpoint did not become ready after restart")
+def fetch_published(path):
+    # Resolve the real HTTPS hostname to loopback. This validates Caddy and the
+    # relay without depending on public DNS, IPv6 routing or hairpin NAT.
+    commands=(
+        ["curl","-kfsS","--noproxy","*","--resolve",DOMAIN+":443:127.0.0.1",
+         "--connect-timeout","2","--max-time","5","https://"+DOMAIN+path],
+        ["curl","-fsS","--noproxy","*","-H","Host: "+DOMAIN,
+         "--connect-timeout","2","--max-time","5","http://127.0.0.1:8080"+path],
+    )
+    last=""
+    for attempt in range(12):
+        for command in commands:
+            result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=8)
+            if result.returncode==0: return result.stdout
+            last=(result.stderr or result.stdout or "relay request failed").strip()
+        time.sleep(min(0.5+attempt*0.15,1.5))
+    raise RuntimeError("Relay did not publish the landing page after restart: "+last[-300:])
+def verify_public_asset(path, marker):
+    body=fetch_published(path)
+    if marker not in body:
+        raise RuntimeError("Relay did not publish "+path+" after restart")
+def verify_public_page(css_name,js_name):
+    # A query forces the relay's no-store path, avoiding a false success from
+    # the five-minute public index cache while a new design is being published.
+    stamp=hashlib.sha256(((css_name or "")+(js_name or "")).encode()).hexdigest()[:12]
+    body=fetch_published("/?onyx-site-check="+stamp)
+    if css_name and ('/'+css_name) not in body:
+        raise RuntimeError("Published landing page does not reference its stylesheet")
+    if js_name and ('/'+js_name) not in body:
+        raise RuntimeError("Published landing page does not reference its script")
+def insert_into_head(document,tag):
+    """Insert an asset without placing anything before <!doctype html>."""
+    closing=re.search(r"</head\s*>",document,flags=re.I)
+    if closing:
+        return document[:closing.start()]+tag+document[closing.start():]
+    opening=re.search(r"<html\b[^>]*>",document,flags=re.I)
+    if opening:
+        return document[:opening.end()]+"<head>"+tag+"</head>"+document[opening.end():]
+    doctype=re.match(r"\s*<!doctype\b[^>]*>",document,flags=re.I)
+    position=doctype.end() if doctype else 0
+    return document[:position]+"<head>"+tag+"</head>"+document[position:]
+def externalize_inline_assets(source):
+    # Static public pages intentionally block inline CSS/JS. Keep generated
+    # assets at local paths that tproxy-server can serve from public_dir. Data
+    # scripts (JSON-LD, import maps and other non-executable payloads) must stay
+    # in the HTML exactly where the author put them.
+    styles=[]
+    def replace_style(match):
+        css=match.group(1).strip()
+        if not css: return ""
+        styles.append(css)
+        return '<link rel="stylesheet" href="/panel-site.css">' if len(styles)==1 else ""
+    rendered=re.sub(r"<style\b[^>]*>(.*?)</style\s*>",replace_style,source,flags=re.I|re.S)
+    scripts=[]
+    def replace_script(match):
+        attributes=match.group(1) or ""
+        type_match=re.search(r'\btype\s*=\s*(["\'])(.*?)\1',attributes,flags=re.I|re.S)
+        script_type=(type_match.group(2).strip().lower() if type_match else "")
+        executable_types={"","module","text/javascript","application/javascript","text/ecmascript","application/ecmascript"}
+        if script_type not in executable_types:
+            return match.group(0)
+        code=match.group(2).strip()
+        if not code: return ""
+        scripts.append(code)
+        return '<script src="/panel-site.js" defer></script>' if len(scripts)==1 else ""
+    rendered=re.sub(r"<script\b(?![^>]*\bsrc\s*=)([^>]*)>(.*?)</script\s*>",replace_script,rendered,flags=re.I|re.S)
+    # The relay CSP intentionally rejects style="..." attributes. Convert
+    # them to same-origin stylesheet rules so standalone HTML pasted into the
+    # editor keeps its layout without enabling unsafe-inline globally.
+    inline_styles=[]
+    def replace_inline_style(match):
+        value=match.group(2).strip()
+        if not value: return ""
+        index=len(inline_styles)
+        marker="onyx-%d"%index
+        inline_styles.append('[data-onyx-style="%s"]{%s}'%(marker,value))
+        return ' data-onyx-style="'+marker+'"'
+    rendered=re.sub(r'\sstyle\s*=\s*(["\'])(.*?)\1',replace_inline_style,rendered,flags=re.I|re.S)
+    if inline_styles:
+        styles.append("\n".join(inline_styles))
+    css="/* Onyx Panel public CSS */\n"+"\n\n".join(styles) if styles else ""
+    javascript="/* Onyx Panel public JS */\n"+"\n\n".join(scripts) if scripts else ""
+    css_name="panel-site-"+hashlib.sha256(css.encode()).hexdigest()[:12]+".css" if css else ""
+    js_name="panel-site-"+hashlib.sha256(javascript.encode()).hexdigest()[:12]+".js" if javascript else ""
+    if css_name:
+        rendered=rendered.replace('/panel-site.css','/'+css_name)
+        if '/'+css_name not in rendered:
+            rendered=insert_into_head(rendered,'<link rel="stylesheet" href="/'+css_name+'">')
+    if js_name:
+        rendered=rendered.replace('/panel-site.js','/'+js_name)
+    # Never keep a reference to a generated asset unless we generated it in
+    # this exact save. It prevents a stale link from a damaged old page.
+    if not styles:
+        rendered=re.sub(r'<link\b[^>]*\bhref\s*=\s*(["\'])/panel-site(?:-[a-f0-9]{12})?\.css\1[^>]*>\s*',"",rendered,flags=re.I)
+    if not scripts:
+        rendered=re.sub(r'<script\b[^>]*\bsrc\s*=\s*(["\'])/panel-site(?:-[a-f0-9]{12})?\.js\1[^>]*>\s*</script\s*>\s*',"",rendered,flags=re.I|re.S)
+    return rendered,css,javascript,css_name,js_name
+def hydrate_legacy_assets(source):
+    """Convert pages saved by older panel versions back to one HTML file."""
+    css_ref=re.search(r'/((?:panel-site)(?:-[a-f0-9]{12})?\.css)',source,flags=re.I)
+    js_ref=re.search(r'/((?:panel-site)(?:-[a-f0-9]{12})?\.js)',source,flags=re.I)
+    try:
+        css_path=os.path.join(os.path.dirname(SITE_INDEX),css_ref.group(1)) if css_ref else SITE_CSS
+        with open(css_path,encoding="utf-8") as f: css=f.read()
+    except Exception: css=""
+    try:
+        js_path=os.path.join(os.path.dirname(SITE_INDEX),js_ref.group(1)) if js_ref else SITE_JS
+        with open(js_path,encoding="utf-8") as f: javascript=f.read()
+    except Exception: javascript=""
+    if css:
+        source=re.sub(
+            r'<link\b[^>]*\bhref\s*=\s*(["\'])/panel-site(?:-[a-f0-9]{12})?\.css\1[^>]*>',
+            '<style>\n'+css+'\n</style>', source, flags=re.I)
+    if javascript:
+        source=re.sub(
+            r'<script\b[^>]*\bsrc\s*=\s*(["\'])/panel-site(?:-[a-f0-9]{12})?\.js\1[^>]*>\s*</script\s*>',
+            '<script>\n'+javascript+'\n</script>', source, flags=re.I|re.S)
+    return source
+def write_site_html(source):
+    # Preserve the author's original document in SITE_SOURCE. The public copy
+    # references same-origin immutable assets so the relay's strict CSP does
+    # not strip the design. JSON-LD, SEO and verification markup stay inline.
+    rendered,css,javascript,css_name,js_name=externalize_inline_assets(source)
+    raw=rendered.encode("utf-8")
+    if not source.strip(): raise ValueError("HTML не может быть пустым")
+    if len(source.encode("utf-8"))>MAX_HTML_BYTES: raise ValueError("HTML превышает лимит 1 МБ")
+    with STATE_LOCK:
+        had_index_backup=os.path.exists(SITE_INDEX)
+        had_source_backup=os.path.exists(SITE_SOURCE)
+        had_css_backup=os.path.exists(SITE_CSS)
+        had_js_backup=os.path.exists(SITE_JS)
+        if had_index_backup:
+            shutil.copy2(SITE_INDEX,SITE_BACKUP)
+            os.chmod(SITE_BACKUP,0o600)
+        if had_source_backup:
+            shutil.copy2(SITE_SOURCE,SITE_SOURCE_BACKUP)
+            os.chmod(SITE_SOURCE_BACKUP,0o600)
+        if had_css_backup:
+            shutil.copy2(SITE_CSS,SITE_CSS_BACKUP)
+            os.chmod(SITE_CSS_BACKUP,0o600)
+        if had_js_backup:
+            shutil.copy2(SITE_JS,SITE_JS_BACKUP)
+            os.chmod(SITE_JS_BACKUP,0o600)
+        try:
+            css_path=os.path.join(os.path.dirname(SITE_INDEX),css_name) if css_name else ""
+            js_path=os.path.join(os.path.dirname(SITE_INDEX),js_name) if js_name else ""
+            if css:
+                install_public_file(css_path,css.encode("utf-8"))
+            if javascript:
+                install_public_file(js_path,javascript.encode("utf-8"))
+            install_public_file(SITE_INDEX,raw)
+            # tproxy-server serves public_dir from memory; a successful
+            # restart makes the edited landing page visible immediately.
+            restart_public_site()
+            if css: verify_public_asset("/"+css_name,"Onyx Panel public CSS")
+            if javascript: verify_public_asset("/"+js_name,"Onyx Panel public JS")
+            verify_public_page(css_name,js_name)
+            install_private_file(SITE_SOURCE,source.encode("utf-8"))
+            # Keep a few prior immutable assets for rollback/open browser tabs.
+            generated=[]
+            for name in os.listdir(os.path.dirname(SITE_INDEX)):
+                if re.fullmatch(r"panel-site-[a-f0-9]{12}\.(?:css|js)",name):
+                    path=os.path.join(os.path.dirname(SITE_INDEX),name)
+                    generated.append((os.path.getmtime(path),path))
+            for _,path in sorted(generated,reverse=True)[12:]:
+                try: os.unlink(path)
+                except FileNotFoundError: pass
+        except Exception:
+            if had_index_backup and os.path.exists(SITE_BACKUP):
+                try:
+                    install_public_file(SITE_INDEX,open(SITE_BACKUP,"rb").read())
+                    if had_css_backup and os.path.exists(SITE_CSS_BACKUP):
+                        install_public_file(SITE_CSS,open(SITE_CSS_BACKUP,"rb").read())
+                    elif os.path.exists(SITE_CSS):
+                        os.unlink(SITE_CSS)
+                    if had_js_backup and os.path.exists(SITE_JS_BACKUP):
+                        install_public_file(SITE_JS,open(SITE_JS_BACKUP,"rb").read())
+                    elif os.path.exists(SITE_JS):
+                        os.unlink(SITE_JS)
+                    if had_source_backup and os.path.exists(SITE_SOURCE_BACKUP):
+                        install_private_file(SITE_SOURCE,open(SITE_SOURCE_BACKUP,"rb").read())
+                    elif os.path.exists(SITE_SOURCE):
+                        os.unlink(SITE_SOURCE)
+                    restart_public_site()
+                except Exception: pass
+            raise
+def custom_presets():
+    try:
+        with open(CUSTOM_PRESETS_FILE,encoding="utf-8") as stream: value=json.load(stream)
+        if not isinstance(value,list): return []
+        return [item for item in value if isinstance(item,dict) and
+                isinstance(item.get("id"),str) and item["id"].startswith("custom-") and
+                isinstance(item.get("name"),str) and isinstance(item.get("description"),str) and
+                isinstance(item.get("html"),str)]
+    except (OSError,ValueError,TypeError,json.JSONDecodeError):
+        return []
+def save_custom_presets(items):
+    install_private_file(CUSTOM_PRESETS_FILE,json.dumps(items,ensure_ascii=False,indent=2).encode("utf-8"))
+def all_presets():
+    return PRESETS+custom_presets()
+def get_preset(preset_id):
+    for preset in all_presets():
+        if preset.get("id")==preset_id: return preset
+    raise ValueError("Пресет не найден")
+
+def ctl(*args):
+    r=subprocess.run([MANAGER,*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60)
+    if r.returncode: raise RuntimeError(r.stderr.strip() or "manager failed")
+    return json.loads(r.stdout) if r.stdout.strip() else None
+
+def cascade_detail(exc):
+    """Last meaningful line of the manager traceback for the operator."""
+    lines=[line.strip() for line in str(exc).strip().splitlines() if line.strip()]
+    return (lines[-1].replace("RuntimeError: ","") if lines else "") or str(exc) or "ошибка применения конфигурации"
+
+def cascade_touch(uid=None,check=None,pending=None,op_error=None,speed=None):
+    """Update background-job bookkeeping fields on one or all cascades."""
+    with STATE_LOCK:
+        cascades=cascade_api.load_cascades(CASCADES_FILE)
+        for c in cascades:
+            if uid is not None and c.get("id")!=uid: continue
+            if check is not None: c["last_check"]=check
+            if pending is not None: c["pending"]=pending
+            if op_error is not None: c["op_error"]=op_error
+            if speed is not None: c["speed"]=speed
+        cascade_api.save_cascades(CASCADES_FILE,cascades)
+
+def cascade_apply_bg(uid,snapshot):
+    """Queue a cascade apply; rapid calls share one delayed run.
+
+    File mutations are already on disk when this is called, so any single
+    apply covers the whole batch: the timer only decides WHEN it runs.
+    On failure the file rolls back to the earliest pre-batch snapshot and
+    every queued cascade gets the error mark.
+    """
+    with _CASCADE_APPLY_LOCK:
+        _CASCADE_APPLY["batch"].append((uid,snapshot))
+        if _CASCADE_APPLY["timer"] is not None:
+            return
+        timer=threading.Timer(_CASCADE_APPLY_WINDOW,_cascade_apply_flush)
+        timer.daemon=True
+        _CASCADE_APPLY["timer"]=timer
+        timer.start()
+
+def _cascade_apply_flush():
+    with _CASCADE_APPLY_LOCK:
+        batch=_CASCADE_APPLY["batch"]
+        _CASCADE_APPLY["batch"]=[]
+        _CASCADE_APPLY["timer"]=None
+    if not batch: return
+    with APPLY_LOCK:
+        try:
+            ctl("cascade-apply")
+            for uid,_ in batch:
+                cascade_touch(uid,pending=False,op_error="")
+        except Exception as exc:
+            detail=cascade_detail(exc)
+            print("cascade apply failed:",detail[-500:],file=sys.stderr,flush=True)
+            if batch[0][1] is not None:
+                try: cascade_api.save_cascades(CASCADES_FILE,json.loads(batch[0][1]))
+                except Exception: pass
+            for uid,_ in batch:
+                cascade_touch(uid,pending=False,op_error=detail)
+
+def cascade_ping_bg(uid):
+    def worker():
+        with APPLY_LOCK:
+            try:
+                record=next((c for c in cascade_api.load_cascades(CASCADES_FILE) if c.get("id")==uid),None)
+                if record is None: return
+                check=cascade_api.ping(record)
+                cascade_touch(uid,check=check,pending=False)
+            except Exception as exc:
+                cascade_touch(uid,pending=False,op_error=cascade_detail(exc))
+    threading.Thread(target=worker,daemon=True).start()
+
+def write_restart_status(phase,target,message=""):
+    try:
+        temporary=RESTART_STATUS+".tmp"
+        with open(temporary,"w",encoding="utf-8") as stream:
+            json.dump({"phase":phase,"target":target,"message":message,"ts":int(time.time())},stream,ensure_ascii=True)
+        os.chmod(temporary,0o600); os.replace(temporary,RESTART_STATUS)
+    except OSError: pass
+# A panel restart kills this process mid-job: on boot, settle the stale
+# "running" marker the restart modal polls so it never hangs forever.
+try:
+    with open(RESTART_STATUS,encoding="utf-8") as _stream: _st=json.load(_stream)
+    if isinstance(_st,dict) and _st.get("phase")=="running":
+        write_restart_status("done",_st.get("target",""),"Служба перезапущена.")
+except Exception: pass
+
+def subscription_registry():
+    try:
+        with open(USERS,encoding="utf-8") as f:
+            return json.load(f).get("subscriptions",[])
+    except FileNotFoundError:
+        return []
+def ctl_subscription(request):
+    # Tokens and hardware identifiers never appear in process arguments.
+    try:
+        r=subprocess.run([MANAGER,"subscription"],input=json.dumps(request),stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,text=True,timeout=180)
+        if not r.returncode:
+            value=json.loads(r.stdout)
+            if isinstance(value,dict): return value
+    except (OSError,subprocess.TimeoutExpired,ValueError):
+        pass
+    return {"ok":False,"status":503,"message":"Менеджер занят или недоступен. Повторите позже."}
+def ctl_manager_json(command,request):
+    r=subprocess.run([MANAGER,command],input=json.dumps(request),stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE,text=True,timeout=180)
+    if r.returncode:
+        message=r.stderr.strip() or "manager failed"
+        marker="ValueError: "
+        if marker in message: raise ValueError(message.rsplit(marker,1)[-1].strip())
+        raise RuntimeError(message)
+    value=json.loads(r.stdout)
+    if not isinstance(value,dict): raise RuntimeError("manager returned invalid JSON")
+    return value
+def federation_id(subscription_id,device_id):
+    return hashlib.sha256((DOMAIN+":"+subscription_id+":"+device_id).encode()).hexdigest()
+def purge_remote_profiles(subscription,device_id=None):
+    if not subscription: return
+    devices=[d for d in subscription.get("devices",[]) if device_id is None or d.get("id")==device_id]
+    for node in node_api.load_nodes(NODES_FILE):
+        if not node.get("enabled",True): continue
+        for device in devices:
+            try: node_api.delete_profile(node,federation_id(subscription.get("id",""),device.get("id","")))
+            except node_api.NodeError as exc:
+                print("node profile cleanup failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+def purge_remote_profiles_async(subscription,device_id=None):
+    if not subscription: return
+    threading.Thread(target=purge_remote_profiles,args=(subscription,device_id),
+                     name="onyx-node-cleanup",daemon=True).start()
+
+def delete_job_step(job_id,key,**kw):
+    with DELETE_JOBS_LOCK:
+        job=DELETE_JOBS.get(job_id)
+        if not job: return
+        for st in job["steps"]:
+            if st["key"]==key: st.update(kw)
+
+def run_client_delete_job(job_id,items,previous_subs,nodes):
+    """Фон задачи удаления: отзыв ключей по клиентам, затем очистка
+    профилей на нодах параллельно с лимитом ожидания DELETE_NODE_WAIT."""
+    sub_map={s.get("id",""):s for s in previous_subs}
+    deleted=[];failed=[]
+    for idx,item in enumerate(items):
+        uid=item["id"];kind=item["kind"]
+        try:
+            if kind=="subscription":
+                if sub_map.get(uid) is not None:
+                    result=ctl_subscription({"operation":"delete","id":uid})
+                    if not result.get("ok"):
+                        raise RuntimeError(str(result.get("message","Ошибка подписки"))[:140])
+                audit('client-delete',uid,"подписка: delete")
+            elif kind=="openflux":
+                openflux.delete_profile(uid)
+            else:
+                ctl("delete",uid)
+                audit('client-delete',uid,"удалён через список клиентов")
+            deleted.append(uid)
+        except Exception as exc:
+            print("delete job client failed:",type(exc).__name__,str(exc)[:140],file=sys.stderr,flush=True)
+            failed.append({"id":uid,"message":str(exc)[:140]})
+        with DELETE_JOBS_LOCK:
+            job=DELETE_JOBS.get(job_id)
+            if job: job["done"]=len(deleted)
+        delete_job_step(job_id,"revoke",done=idx+1,failed=len(failed))
+    if nodes and deleted:
+        subs=[sub_map[i["id"]] for i in items if i["kind"]=="subscription" and i["id"] in sub_map and i["id"] in deleted]
+        if subs:
+            delete_job_step(job_id,"nodes",status="active",total=len(nodes))
+            counter={"done":0};counter_lock=threading.Lock()
+            def clean_node(node):
+                for sub in subs:
+                    for device in sub.get("devices",[]):
+                        try: node_api.delete_profile(node,federation_id(sub.get("id",""),device.get("id","")))
+                        except Exception as exc:
+                            print("node profile cleanup failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+                with counter_lock:
+                    counter["done"]+=1
+                    delete_job_step(job_id,"nodes",done=counter["done"])
+            workers=[threading.Thread(target=clean_node,args=(n,),name="onyx-node-cleanup",daemon=True) for n in nodes]
+            for w in workers: w.start()
+            deadline=time.time()+DELETE_NODE_WAIT
+            for w in workers: w.join(max(0.5,deadline-time.time()))
+            if counter["done"]<len(nodes):
+                delete_job_step(job_id,"nodes",status="error",
+                                note="Часть нод не ответила — очистка продолжится в фоне.")
+            else:
+                delete_job_step(job_id,"nodes",status="done")
+    with DELETE_JOBS_LOCK:
+        job=DELETE_JOBS.get(job_id)
+        if job:
+            job["status"]="done" if deleted else "error"
+            job["deleted"]=deleted
+            job["failed"]=failed
+            job["ts"]=time.time()
+            if not deleted: job["message"]="Не удалось удалить ни одного клиента."
+            elif failed: job["message"]="Удалено %d из %d, с ошибками: %d."%(len(deleted),len(items),len(failed))
+            elif len(deleted)>1: job["message"]="Удалено клиентов: %d."%len(deleted)
+            else: job["message"]="Клиент удалён."
+
+def warp_profile_ids(client_id):
+    """Client id (subscription or direct user) -> Xray user ids for the WARP
+    rule; empty for clients WARP cannot route (web/mtproto/awg/openflux)."""
+    ids=[u["id"] for u in users()
+         if str(u.get("subscription_id",""))==str(client_id)
+         and u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria")]
+    if ids: return ids
+    user=next((u for u in users() if str(u.get("id",""))==str(client_id)),None)
+    if user and user.get("protocol","web") in ("vless","hysteria"):
+        return [user["id"]]
+    return []
+
+def sync_routing_to_nodes():
+    """Push the panel routing policy to every enabled node: traffic that
+    terminates on a node must follow the same direct and block rules as the
+    panel itself. Runs in a background thread — a node applies its Xray
+    synchronously, which can take tens of seconds. Nodes without the endpoint
+    (panel older than 1.9.22) are skipped with a log line."""
+    data=routing_api.load(ROUTING_FILE)
+    payload={"direct_ips":data.get("direct_ips",[]),"direct_domains":data.get("direct_domains",[]),
+             "ipv4_domains":data.get("ipv4_domains",[]),"block_torrents":bool(data.get("block_torrents"))}
+    try: nodes=node_api.load_nodes(NODES_FILE)
+    except Exception:
+        print("routing sync skipped: registry unreadable",file=sys.stderr,flush=True); return
+    for node in nodes:
+        if not node.get("enabled",True): continue
+        try: node_api.request(node,"POST",node_api.API_PREFIX+"/routing",payload,timeout=90)
+        except node_api.NodeError as exc:
+            print("routing sync to node failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("routing sync to node failed:",node.get("url"),type(exc).__name__,file=sys.stderr,flush=True)
+
+def federation_names():
+    """federation_id -> subscription/device labels with the owning client id."""
+    mapping={}
+    for sub in subscription_registry():
+        for device in sub.get("devices",[]) or []:
+            if device.get("revoked"): continue
+            mapping[federation_id(sub.get("id",""),device.get("id",""))]={
+                "sub":sub.get("name","Подписка"),"device":device.get("name","Устройство"),
+                "sub_id":sub.get("id","")}
+    return mapping
+
+def fetch_node_live(node,names,current=""):
+    """One node snapshot: version, totals and federated users mapped back by id."""
+    snapshot={"id":node.get("id",""),"url":node.get("url",""),"country_code":node.get("country_code","UN"),
+              "country_name":node.get("country_name","Сервер"),"location":node.get("name",""),
+              "registry_version":str(node.get("version","") or ""),
+              "enabled":bool(node.get("enabled",True)),"online":False,"outdated":False,"error":"",
+              "version":"","rates":{"up":None,"down":None},"totals":{"up":0,"down":0},"users":[]}
+    if not snapshot["enabled"]:
+        # Nothing in the panel can switch a node off, so enabled=false is stale
+        # state. The node is probed like any other; a successful answer clears
+        # the flag in the snapshot here and in the registry via sync_registry().
+        snapshot["stale_disabled"]=True
+    started=time.monotonic()
+    try:
+        data=node_api.metrics(node)
+    except node_api.NodeError as exc:
+        snapshot["latency_ms"]=int((time.monotonic()-started)*1000)
+        text=str(exc)
+        stale=snapshot.pop("stale_disabled",False)
+        # The node is reachable but has no /metrics: it predates statistics.
+        # Probe /status for the real version so the UI can say what to do.
+        try:
+            status=node_api.node_status(node)
+            snapshot["version"]=str(status.get("version","") or "")
+            if stale: snapshot["enabled"]=True
+        except Exception:
+            pass
+        snapshot["version"]=snapshot["version"] or snapshot["registry_version"]
+        if "not found" in text.lower():
+            snapshot["outdated"]=True
+            snapshot["error"]=("Нода на версии "+(snapshot["version"] or "?")+" без статистики — обновите Onyx Panel на ноде: SSH → onyx-panel-update.")
+        else:
+            snapshot["error"]="Нода не отвечает или отклонила API-токен."
+        return snapshot
+    except Exception as exc:
+        snapshot.pop("stale_disabled",None)
+        snapshot["error"]="Неизвестная ошибка опроса ноды."
+        print("node metrics failed:",node.get("url"),type(exc).__name__,file=sys.stderr,flush=True)
+        return snapshot
+    totals=data.get("totals") if isinstance(data.get("totals"),dict) else {}
+    snapshot["online"]=True
+    snapshot["latency_ms"]=int((time.monotonic()-started)*1000)
+    snapshot["version"]=str(data.get("version","") or "") or snapshot["registry_version"]
+    if snapshot.pop("stale_disabled",False): snapshot["enabled"]=True
+    snapshot["rates"]={"up":totals.get("up_rate"),"down":totals.get("down_rate")}
+    snapshot["totals"]={"up":max(0,int(totals.get("up",0) or 0)),"down":max(0,int(totals.get("down",0) or 0))}
+    for profile in data.get("profiles",[]) or []:
+        if not isinstance(profile,dict): continue
+        label=names.get(str(profile.get("federation_id","")))
+        if label is None: continue
+        snapshot["users"].append({"name":label["sub"],"device":label["device"],"sub_id":label["sub_id"],
+            "protocol":str(profile.get("protocol","")),"active":bool(profile.get("active")),
+            "up":max(0,int(profile.get("up",0) or 0)),"down":max(0,int(profile.get("down",0) or 0))})
+    snapshot["users"].sort(key=lambda u:(not u["active"],-(u["up"]+u["down"])))
+    if current and snapshot["version"] and web_updates.version_tuple(snapshot["version"])<web_updates.version_tuple(current):
+        snapshot["outdated"]=True
+    return snapshot
+
+def refresh_nodes_live():
+    try:
+        nodes=node_api.load_nodes(NODES_FILE)
+        names=federation_names()
+        current=web_updates.current_version()
+        worker=lambda node: fetch_node_live(node,names,current)
+        if nodes:
+            with ThreadPoolExecutor(max_workers=min(8,len(nodes))) as pool:
+                data=list(pool.map(worker,nodes))
+        else:
+            data=[]
+        record_nodes_history(data)
+        try: node_api.sync_registry(NODES_FILE,nodes,data)
+        except Exception as exc:
+            print("node registry sync failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        with NODES_LIVE_LOCK:
+            NODES_LIVE["stamp"]=time.time()
+            NODES_LIVE["data"]=data
+    except Exception as exc:
+        # Advance the stamp even on failure so a broken registry cannot
+        # re-trigger a refresh thread on every dashboard poll.
+        print("node live refresh failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        with NODES_LIVE_LOCK:
+            NODES_LIVE["stamp"]=time.time()
+    finally:
+        with NODES_LIVE_LOCK:
+            NODES_LIVE["fetching"]=False
+
+_CLIENTS_STATE_CACHE={"ts":0.0,"lang":"","body":b""}
+
+
+def nodes_live(max_age=10):
+    """Cached node snapshots; a background refresh runs at most every max_age seconds."""
+    with NODES_LIVE_LOCK:
+        stamp=float(NODES_LIVE.get("stamp",0.0))
+        stale=time.time()-stamp>max_age
+        if stale and not NODES_LIVE.get("fetching"):
+            NODES_LIVE["fetching"]=True
+            threading.Thread(target=refresh_nodes_live,name="onyx-nodes-live",daemon=True).start()
+        data=NODES_LIVE.get("data",[])
+        age=int(time.time()-stamp) if stamp else None
+    return {"nodes":data,"age":age}
+
+def nodes_client_summary():
+    """client id -> node traffic and activity, from the cached node snapshots."""
+    with NODES_LIVE_LOCK:
+        nodes=list(NODES_LIVE.get("data",[]))
+    out={}
+    for s in nodes:
+        if not s.get("online"): continue
+        where=s.get("location") or s.get("country_name") or s.get("url","")
+        for u in s.get("users",[]):
+            cid=u.get("sub_id")
+            if not cid: continue
+            rec=out.setdefault(cid,{"active":False,"up":0,"down":0,"nodes":[]})
+            rec["up"]+=u.get("up",0); rec["down"]+=u.get("down",0)
+            if where not in rec["nodes"]: rec["nodes"].append(where)
+            if u.get("active"): rec["active"]=True
+    return out
+
+def _load_nodes_traffic(now):
+    """Lazily read the persisted node rate history once per panel run."""
+    if NODES_TRAFFIC["loaded"]: return
+    try:
+        with open(NODES_TRAFFIC_FILE,encoding="utf-8") as f: value=json.load(f)
+        NODES_TRAFFIC["points"]=[p for p in value.get("points",[]) if isinstance(p,dict) and now-p.get("time",0)<86400] if isinstance(value,dict) else []
+    except (OSError,ValueError): pass
+    NODES_TRAFFIC["loaded"]=True
+
+def record_nodes_history(data):
+    """Persist node rate samples for the dashboard chart (24 h window)."""
+    try:
+        now=int(time.time())
+        _load_nodes_traffic(now)
+        points=NODES_TRAFFIC["points"]
+        if points and now-points[-1]["time"]<10: return
+        points.append({"time":now,"nodes":[{"id":s.get("id",""),
+            "up":(s.get("rates") or {}).get("up"),"down":(s.get("rates") or {}).get("down")}
+            for s in data if s.get("online")]})
+        NODES_TRAFFIC["points"]=[p for p in points if now-p["time"]<86400][-2880:]
+        server_metrics.atomic_json(NODES_TRAFFIC_FILE,{"points":NODES_TRAFFIC["points"]})
+    except Exception as exc:
+        print("nodes history write failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+NODE_COLORS=("#41c78d","#f06f75","#a78bfa","#22d3ee","#f472b6","#fb923c","#34d399","#60a5fa","#e879f9","#fbbf24")
+def nodes_chart_series(hours):
+    """Per-node rate series for the dashboard chart, colored by registry order."""
+    try: registry=node_api.load_nodes(NODES_FILE)
+    except Exception: registry=[]
+    cutoff=int(time.time())-hours*3600
+    _load_nodes_traffic(cutoff)
+    by_id={}
+    for p in NODES_TRAFFIC.get("points",[]):
+        if p.get("time",0)<cutoff: continue
+        for item in p.get("nodes",[]):
+            by_id.setdefault(item.get("id",""),[]).append({"time":p["time"],"up":item.get("up"),"down":item.get("down")})
+    series=[]
+    for i,node in enumerate(registry):
+        pts=by_id.pop(node.get("id",""),None)
+        if not pts: continue
+        series.append({"id":node.get("id",""),
+            "name":node.get("name") or node.get("country_name") or node.get("url",""),
+            "color":NODE_COLORS[i%len(NODE_COLORS)],"points":pts})
+    return series
+def allow_subscription_request(client):
+    now=time.monotonic()
+    with SUB_RATE_LOCK:
+        for key in list(SUB_REQUESTS):
+            if SUB_REQUESTS[key][0]<now-60: del SUB_REQUESTS[key]
+        if client not in SUB_REQUESTS:
+            if len(SUB_REQUESTS)>=2048: return False
+            SUB_REQUESTS[client]=[now,0]
+        SUB_REQUESTS[client][1]+=1
+        return SUB_REQUESTS[client][1]<=30
+def validate_html(source):
+    if not source.strip(): raise ValueError("HTML не может быть пустым")
+    if len(source.encode("utf-8"))>MAX_HTML_BYTES: raise ValueError("HTML превышает лимит 1 МБ")
+    return source
+def web_link(secret):
+    return "https://t.me/webproxy?server="+DOMAIN+"&secret="+secret
+def mtproto_link(secret,port):
+    # Keep the 32-hex server secret unchanged, but request Telegram's random
+    # packet-padding mode on the client. This makes MTProxy substantially less
+    # likely to be rejected by networks that identify its packet sizes.
+    client_secret=secret if secret.startswith("dd") else "dd"+secret
+    return "https://t.me/proxy?server="+MTPROTO_HOST+"&port="+str(int(port))+"&secret="+client_secret
+def xray_path():
+    with open(XRAY_PATH_FILE,encoding="utf-8") as f: value=f.read().strip()
+    if not re.fullmatch(r"/vless-[a-f0-9]{24}",value): raise RuntimeError("Некорректный путь VLESS")
+    return value
+def proxy_link(protocol,secret,port=443,name="Proxy",username="",uid=""):
+    if protocol=="mtproto": return mtproto_link(secret,port)
+    if protocol=="web": return web_link(secret)
+    protocol_label={"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC 5","awg20":"AWG 2.0","awg31":"AWG 3.1"}.get(protocol,protocol)
+    if not (name.startswith("🌐") or (name and 0x1F1E6 <= ord(name[0]) <= 0x1F1FF)):
+        name=node_api.location_prefix(node_api.load_location(LOCATION_FILE))+" · "+protocol_label
+    label=quote(name or "Proxy",safe="")
+    bypass_state=bypass_api.normalize(load().get("bypass",{}))
+    if protocol=="vless":
+        fp=bypass_api.fp_for(uid or secret,bypass_state)
+        query=urlencode({"encryption":"none","security":"tls","sni":DOMAIN,"fp":fp,"type":"xhttp","host":DOMAIN,"path":xray_path(),"mode":"auto","alpn":"h2"})
+        return "vless://"+quote(secret,safe="-")+"@"+DOMAIN+":443?"+query+"#"+label
+    if protocol=="hysteria":
+        query=urlencode({"sni":DOMAIN,"alpn":"h3"})
+        return "hysteria2://"+quote(secret,safe="-")+"@"+DOMAIN+":"+str(HYSTERIA_PORT)+"/?"+query+"#"+label
+    if protocol=="tuic":
+        query=urlencode({"sni":DOMAIN,"alpn":"h3","congestion_control":"bbr","udp_relay_mode":"native"})
+        return "tuic://"+quote(secret,safe="-")+":"+quote(secret,safe="-")+"@"+DOMAIN+":"+str(TUIC_PORT)+"?"+query+"#"+label
+    if protocol in awg.PROTOCOLS:
+        user=next((u for u in users() if u.get("protocol")==protocol and secrets.compare_digest(str(u.get("secret","")),str(secret))),None)
+        if user is None: raise RuntimeError("Профиль AWG не найден")
+        return awg.client_config(user,DOMAIN,name)
+    raise RuntimeError("Неизвестный протокол")
+def reality_link(secret,name="Proxy",uid=""):
+    """vless:// Reality-ссылка; пустая строка, пока Reality выключен."""
+    r=reality_api.load(REALITY_FILE)
+    if not r.get("enabled"): return ""
+    fp=bypass_api.fp_for(uid or secret,bypass_api.normalize(load().get("bypass",{})))
+    return reality_api.link(r,secret,name,host=DOMAIN,fp=fp)
+
+# QR PNGs are deterministic per link and links are stable per client, so a
+# small process-lifetime FIFO cache kills the per-request qrencode subprocess
+# (the subscription page alone used to spawn N+2 of them serially).
+_QR_CACHE={}
+_QR_CACHE_ORDER=deque()
+_QR_CACHE_LOCK=threading.Lock()
+_QR_CACHE_MAX=256
+
+def qr_png_bytes(link):
+    key=str(link or "")
+    with _QR_CACHE_LOCK:
+        cached=_QR_CACHE.get(key)
+        if cached is not None:
+            return cached
+    png=subprocess.run([QR,"-o","-","-t","PNG","-s","6","-m","2",key],
+                       stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True,timeout=10).stdout
+    with _QR_CACHE_LOCK:
+        if key not in _QR_CACHE:
+            _QR_CACHE[key]=png; _QR_CACHE_ORDER.append(key)
+            while len(_QR_CACHE_ORDER)>_QR_CACHE_MAX:
+                old=_QR_CACHE_ORDER.popleft(); _QR_CACHE.pop(old,None)
+    return png
+
+def web_api_clients():
+    """Profiles as seen by the external API: id, traffic, expiry and link."""
+    expires=load().get("expires",{})
+    tr=traffic()
+    out=[]
+    for u in users():
+        uid=str(u.get("id",""))
+        if not uid: continue
+        info=traffic_info(uid,tr)
+        link=""
+        try: link=proxy_link(u.get("protocol","web"),u.get("secret",""),int(u.get("backend_port",443)),u.get("name",""),u.get("username",""),uid)
+        except Exception: pass
+        out.append({"id":uid,"name":u.get("name",""),"protocol":u.get("protocol","web"),
+                    "enabled":bool(u.get("enabled",True)),"up":info["up"],"down":info["down"],
+                    "total":info["total"],"expires":expires.get(uid),"link":link})
+    return out
+
+def web_api_find(uid):
+    uid=onyx_webapi.normalize_uid(uid)
+    for u in users():
+        if str(u.get("id",""))==uid: return u
+    raise ValueError("Клиент не найден.")
+def layout(title,body,active="",csrf=""):
+    return page_layout(title,body,PANEL_PATH,active,DOMAIN,csrf,getattr(ROLE_LOCAL,"value","admin") or "admin")
+
+def dashboard_stream_payload(csrf,hours):
+    """Один кадр живого потока дашборда: перерисованный body + статус обновлений.
+    Фрагмент прогоняется через i18n — поток не идёт через send_html/send_json."""
+    profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
+    return {"html":i18n.document(dashboard_body(server_metrics.dashboard_data(hours),subscription_registry(),profiles,traffic(),
+                PANEL_PATH,DOMAIN,csrf,proxy_link,web_updates.current_version(),hours,nodes=nodes_live(),
+                node_series=nodes_chart_series(hours),node_summary=nodes_client_summary())),
+            "update":i18n.walk(web_updates.get_status())}
+
+class Handler(BaseHTTPRequestHandler):
+    timeout=20
+    def log_message(self,*a): pass
+    def send_html(self,s,code=200):
+        s=i18n.document(s)
+        b=s.encode()
+        if len(b)>2048 and "gzip" in (self.headers.get("Accept-Encoding","") or ""):
+            try:
+                import gzip as _gzip
+                zipped=_gzip.compress(b,compresslevel=6)
+                if len(zipped)<len(b): b=zipped; self._gzip_out=True
+            except Exception: self._gzip_out=False
+        else: self._gzip_out=False
+        self.send_response(code)
+        if getattr(self,"_gzip_out",False): self.send_header("Content-Encoding","gzip")
+        self.send_header("Vary","Accept-Encoding"); self.send_header("Content-Type","text/html; charset=utf-8"); self.send_header("Content-Length",str(len(b))); self.send_header("Cache-Control","no-store"); self.send_header("X-Frame-Options","DENY"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer")
+        # srcdoc is inline content. Deny network frame navigations as well as
+        # requests from within the sandbox, including location/meta refresh.
+        self.send_header("Content-Security-Policy","default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; worker-src 'self'")
+        self.end_headers(); self.wfile.write(b)
+    def send_data(self,body,code=200,mime="text/plain; charset=utf-8",headers=None):
+        raw=body.encode("utf-8")
+        encoding=None
+        if len(raw)>2048 and "gzip" in (self.headers.get("Accept-Encoding","") or ""):
+            try:
+                import gzip as _gzip
+                zipped=_gzip.compress(raw,compresslevel=6)
+                if len(zipped)<len(raw): raw=zipped; encoding="gzip"
+            except Exception: pass
+        self.send_response(code)
+        if encoding: self.send_header("Content-Encoding",encoding)
+        self.send_header("Vary","Accept-Encoding")
+        self.send_header("Content-Type",mime)
+        self.send_header("Content-Length",str(len(raw)))
+        self.send_header("Cache-Control","no-store, private")
+        self.send_header("X-Content-Type-Options","nosniff")
+        self.send_header("Referrer-Policy","no-referrer")
+        for key,value in (headers or {}).items(): self.send_header(key,str(value))
+        self.end_headers()
+        self.wfile.write(raw)
+    def send_json(self,value,code=200):
+        if i18n.lang()=="en":
+            value=i18n.walk(value)
+        self.send_data(json.dumps(value,ensure_ascii=True),code,"application/json")
+    def send_png(self,b):
+        self.send_response(200); self.send_header("Content-Type","image/png"); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(b))); self.end_headers(); self.wfile.write(b)
+    def send_logo(self,b):
+        self.send_response(200); self.send_header("Content-Type","image/png"); self.send_header("Cache-Control","public, max-age=86400"); self.send_header("Content-Length",str(len(b))); self.end_headers(); self.wfile.write(b)
+    def send_static(self,body,mime):
+        # Versioned (?v=<panel version>) cacheable asset: the browser reuses it
+        # across navigations instead of re-downloading ~140 KB on every page.
+        raw=body.encode("utf-8")
+        encoding=None
+        if len(raw)>2048 and "gzip" in (self.headers.get("Accept-Encoding","") or ""):
+            try:
+                import gzip as _gzip
+                zipped=_gzip.compress(raw,compresslevel=6)
+                if len(zipped)<len(raw): raw=zipped; encoding="gzip"
+            except Exception: pass
+        self.send_response(200)
+        if encoding: self.send_header("Content-Encoding",encoding)
+        self.send_header("Vary","Accept-Encoding")
+        self.send_header("Content-Type",mime)
+        self.send_header("Content-Length",str(len(raw)))
+        self.send_header("Cache-Control","private, max-age=86400")
+        self.send_header("X-Content-Type-Options","nosniff")
+        self.send_header("Referrer-Policy","no-referrer")
+        self.end_headers()
+        self.wfile.write(raw)
+    def send_svg(self,b):
+        self.send_response(200); self.send_header("Content-Type","image/svg+xml"); self.send_header("Cache-Control","public, max-age=604800, immutable"); self.send_header("Content-Length",str(len(b))); self.send_header("X-Content-Type-Options","nosniff"); self.end_headers(); self.wfile.write(b)
+    def redirect(self,p):
+        self.send_response(303); self.send_header("Location",PANEL_PATH+p if p.startswith("/") else p); self.send_header("Content-Length","0"); self.end_headers()
+    def form(self,max_bytes=MAX_HTML_BYTES*3+8192):
+        try: n=int(self.headers.get("Content-Length","0"))
+        except ValueError: n=0
+        if n < 0 or n > max_bytes: raise ValueError("Invalid form size")
+        return {k:v[-1] for k,v in parse_qs(self.rfile.read(n).decode("utf-8"),max_num_fields=32).items()}
+    def auth(self):
+        c=cookies.SimpleCookie(self.headers.get("Cookie","")); v=c.get("sid")
+        if not v:return False
+        try:
+            x,_=v.value.rsplit(".",1)
+            issued=int(x.split("-",1)[0])
+            ok=secrets.compare_digest(sign(x),v.value) and 0 <= time.time()-issued < 86400
+        except Exception:
+            return False
+        if ok:
+            parts=x.split("-")
+            ROLE_LOCAL.value=parts[2] if len(parts)>2 and parts[2] in ("admin","observer") else "admin"
+        return ok
+    def role(self):
+        value=getattr(ROLE_LOCAL,"value","admin")
+        return value if value in ("admin","observer") else "admin"
+    def session_cookie(self,value,max_age):
+        # Caddy supplies this header for public requests.  Keeping Secure for
+        # HTTPS prevents accidental exposure, while loopback diagnostics still
+        # receive a usable cookie.
+        secure="; Secure" if self.headers.get("X-Forwarded-Proto","").lower()=="https" else ""
+        return f"sid={value}; Path={PANEL_PATH}; Max-Age={max_age}; HttpOnly{secure}; SameSite=Lax"
+    def csrf(self):
+        c=cookies.SimpleCookie(self.headers.get("Cookie","")); v=c.get("sid")
+        if not v: return ""
+        return hmac.new(SESSION_KEY,b"csrf:"+v.value.encode(),hashlib.sha256).hexdigest()
+    def valid_csrf(self,form):
+        return secrets.compare_digest(form.get("csrf",""),self.csrf())
+    def api_auth(self):
+        if node_api.bearer_valid(self.headers.get("Authorization",""),API_KEY): return True
+        self.send_response(401); self.send_header("WWW-Authenticate",'Bearer realm="Onyx Panel API"')
+        self.send_header("Content-Type","application/json"); body=b'{"ok":false,"message":"Unauthorized"}'
+        self.send_header("Content-Length",str(len(body))); self.send_header("Cache-Control","no-store"); self.end_headers(); self.wfile.write(body)
+        return False
+    def json_request(self,maximum=65536):
+        try: length=int(self.headers.get("Content-Length","0"))
+        except ValueError: raise ValueError("Invalid JSON size")
+        if length<2 or length>maximum: raise ValueError("Invalid JSON size")
+        value=json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(value,dict): raise ValueError("JSON object required")
+        return value
+    def web_api(self,route,method):
+        """Bearer-token REST API for external integrations (bots, billings)."""
+        try:
+            header=self.headers.get("Authorization","")
+            token=header[7:] if header.startswith("Bearer ") else ""
+            with STATE_LOCK:
+                state=load()
+                key=onyx_webapi.find_key(state.get("api_keys",[]),token)
+                if key is None:
+                    self.send_json({"ok":False,"message":"Unauthorized"},401); return
+                onyx_webapi.touch_key(state.setdefault("api_keys",[]),key); save(state)
+            if method=="GET": self.web_api_get(route)
+            else: self.web_api_post(route)
+        except ValueError as exc:
+            self.send_json({"ok":False,"message":str(exc)},400)
+        except RuntimeError as exc:
+            self.send_json({"ok":False,"message":"Операция не выполнена: "+str(exc)[-160:]},503)
+        except Exception as exc:
+            print("web api failed:",type(exc).__name__,file=sys.stderr,flush=True)
+            self.send_json({"ok":False,"message":"Internal error"},500)
+    def web_api_get(self,route):
+        if route=="ping":
+            self.send_json({"ok":True,"panel":DOMAIN,"time":int(time.time())}); return
+        if route=="clients":
+            self.send_json({"ok":True,"clients":web_api_clients()}); return
+        if route.startswith("clients/") and route.endswith("/link"):
+            user=web_api_find(route[8:-5])
+            link=proxy_link(user.get("protocol","web"),user.get("secret",""),int(user.get("backend_port",443)),user.get("name",""),user.get("username",""),str(user.get("id","")))
+            self.send_json({"ok":True,"link":link}); return
+        self.send_json({"ok":False,"message":"Not found"},404)
+    def web_api_post(self,route):
+        parts=route.split("/")
+        if route=="clients":
+            name,protocol,devices=onyx_webapi.check_create(self.json_request())
+            user=(ctl_manager_json("add-json",{"protocol":protocol,"name":name,"devices":devices})
+                  if protocol=="mtproto" else ctl("add",protocol,name))
+            self.send_json({"ok":True,"client":{"id":user.get("id"),"name":user.get("name"),"protocol":protocol}},201); return
+        if len(parts)==3 and parts[0]=="clients":
+            user=web_api_find(parts[1]); uid=str(user["id"])
+            if parts[2]=="renew":
+                days=onyx_webapi.check_renew(self.json_request())
+                with STATE_LOCK:
+                    d=load(); d.setdefault("expires",{})[uid]=int(time.time())+days*86400; save(d)
+                self.send_json({"ok":True,"expires":d["expires"][uid]}); return
+            if parts[2]=="toggle":
+                enable=bool(self.json_request().get("enabled",True))
+                ctl("set-user",uid,"1" if enable else "0")
+                self.send_json({"ok":True,"enabled":enable}); return
+            if parts[2]=="delete":
+                ctl("delete",uid)
+                with STATE_LOCK:
+                    d=load()
+                    if uid in d.get("expires",{}): d["expires"].pop(uid,None); save(d)
+                self.send_json({"ok":True}); return
+        self.send_json({"ok":False,"message":"Not found"},404)
+    def do_GET(self):
+        i18n.set_request(self.headers.get("Accept-Language",""))
+        path=urlparse(self.path).path
+        if path.startswith(node_api.API_PREFIX+"/"):
+            if not self.api_auth(): return
+            if path==node_api.API_PREFIX+"/status":
+                loc=node_api.load_location(LOCATION_FILE)
+                try: node_version=open("/etc/onyx-panel/version",encoding="ascii").read().strip()
+                except OSError: node_version="unknown"
+                self.send_json({"ok":True,"api_version":1,"version":node_version,"domain":DOMAIN,
+                    "location":loc,"capabilities":["vless","hysteria","awg20","awg31","federation"]}); return
+            if path==node_api.API_PREFIX+"/profiles":
+                result=[]
+                for user in users():
+                    if user.get("subscription_id"): continue
+                    result.append({"id":user["id"],"name":user["name"],"protocol":user["protocol"],
+                        "enabled":user.get("enabled",True),"link":proxy_link(user["protocol"],user["secret"],user.get("backend_port",443),user["name"],user.get("username",""),user["id"])})
+                self.send_json({"ok":True,"profiles":result}); return
+            if path==node_api.API_PREFIX+"/metrics":
+                # Per-profile counters for the controller dashboard. Only the
+                # opaque federation id leaves the node, never links or secrets.
+                state=traffic()
+                latest=server_metrics.read_state().get("latest",{})
+                profiles=[]
+                for user in users():
+                    item=state.get(user["id"],{})
+                    if not isinstance(item,dict): item={}
+                    last=int(item.get("last_change",0) or 0)
+                    profiles.append({"id":user["id"],"federation_id":str(user.get("federation_id","")),
+                        "protocol":user.get("protocol",""),"enabled":user.get("enabled",True),
+                        "up":max(0,int(item.get("up",0) or 0)),"down":max(0,int(item.get("down",0) or 0)),
+                        "active":bool(item.get("service_active")) and last>0 and time.time()-last<=90})
+                self.send_json({"ok":True,"version":web_updates.current_version(),
+                    "totals":{"up":max(0,int(latest.get("up",0) or 0)),"down":max(0,int(latest.get("down",0) or 0)),
+                              "up_rate":latest.get("up_rate"),"down_rate":latest.get("down_rate"),
+                              "fresh":bool(latest.get("traffic_fresh")),"time":latest.get("time",0)},
+                    "profiles":profiles}); return
+            self.send_json({"ok":False,"message":"Not found"},404); return
+        if path.startswith(SUB_PREFIX):
+            self.serve_subscription(path[len(SUB_PREFIX):]); return
+        d=load()
+        if path==PANEL_PATH+"/__health":
+            self.send_response(200)
+            self.send_header("Content-Type","text/plain; charset=utf-8")
+            self.send_header("Cache-Control","no-store")
+            body=b"OK"
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if path==PANEL_PATH+"/__favicon":
+            fav=None
+            for cand in (FAVICON,"/opt/onyx-panel/onyx-favicon.png"):
+                try:
+                    with open(cand,"rb") as f: fav=f.read(); break
+                except OSError: pass
+            if not fav:
+                fav_b64=globals().get("FAVICON_EMBEDDED")
+                if fav_b64:
+                    try: fav=base64.b64decode(fav_b64)
+                    except Exception: fav=None
+            if fav: self.send_logo(fav)
+            else: self.send_html("Favicon not found",404)
+            return
+        if path==PANEL_PATH+"/__logo":
+            logo=None
+            for cand in (LOGO,"/opt/onyx-panel/panel-logo.png"):
+                try:
+                    with open(cand,"rb") as f: logo=f.read(); break
+                except OSError: pass
+            if not logo:
+                logo_b64=globals().get("LOGO_EMBEDDED")
+                if logo_b64:
+                    try: logo=base64.b64decode(logo_b64)
+                    except Exception: logo=None
+            if logo: self.send_logo(logo)
+            else: self.send_html("Logo not found",404)
+            return
+        if path.startswith(PANEL_PATH+"/__icon/"):
+            # PWA-иконки из манифеста: честные размеры и отдельный maskable-вариант.
+            iname=path[len(PANEL_PATH+"/__icon/"):]
+            if not re.fullmatch(r"(192|512|1024|maskable)",iname):
+                self.send_response(404); self.end_headers(); return
+            icon_data=None
+            try:
+                with open("/opt/onyx-panel/icons/onyx-logo-%s.png"%iname,"rb") as f: icon_data=f.read()
+            except OSError: pass
+            if not icon_data:
+                for cand in (LOGO,"/opt/onyx-panel/panel-logo.png"):
+                    try:
+                        with open(cand,"rb") as f: icon_data=f.read(); break
+                    except OSError: pass
+            if not icon_data:
+                icon_b64=globals().get("LOGO_EMBEDDED")
+                if icon_b64:
+                    try: icon_data=base64.b64decode(icon_b64)
+                    except Exception: icon_data=None
+            if icon_data: self.send_logo(icon_data)
+            else: self.send_html("Icon not found",404)
+            return
+        if path==PANEL_PATH+"/__/manifest.webmanifest":
+            manifest={"name":"Onyx Panel","short_name":"Onyx Panel","start_url":PANEL_PATH+"/dashboard",
+                      "display":"standalone","background_color":"#071116","theme_color":"#0f2028",
+                      "id":PANEL_PATH+"/","lang":i18n.lang(),
+                      "icons":[{"src":PANEL_PATH+"/__icon/192","sizes":"192x192","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/512","sizes":"512x512","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/1024","sizes":"1024x1024","type":"image/png","purpose":"any"},
+                               {"src":PANEL_PATH+"/__icon/maskable","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
+            self.send_data(json.dumps(manifest,ensure_ascii=True),mime="application/manifest+json",
+                headers={"Cache-Control":"no-store"}); return
+        if path==PANEL_PATH+"/__/sw.js":
+            # Service worker PWA: кэширования нет — панель живая. Push приходит
+            # пустым пингом: worker сам забирает свежие уведомления колокольчика.
+            # VER в теле меняет байты sw.js каждый релиз: браузер обновляет worker,
+            # а страница, увидев смену контроллера (controllerchange), сама
+            # перезагружается один раз. Навигацию из активации (clients.navigate)
+            # не используем: она посреди загрузки страницы подвешивает Safari.
+            body=("const VER="+json.dumps(web_updates.current_version())+";const SCOPE=self.registration.scope;const ICON=SCOPE+'__favicon';"
+                  "self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim())});self.addEventListener('fetch',()=>{});"
+                  "self.addEventListener('push',e=>{e.waitUntil((async()=>{"
+                  "const show=(title,txt,tag)=>self.registration.showNotification(title,{body:txt,tag,icon:ICON,badge:ICON,data:{url:SCOPE}});"
+                  "try{const r=await fetch(SCOPE+'notifications',{cache:'no-store'});"
+                  "if(!r.ok||r.redirected)throw new Error('no session');"
+                  "const d=await r.json();const fresh=(Array.isArray(d.items)?d.items:[]).filter(i=>!i.read).slice(-3).reverse();"
+                  "if(!fresh.length)throw new Error('empty');"
+                  "await Promise.all(fresh.map(i=>{"
+                  "const v=String(i.version||'').replace(/^v/,'');"
+                  "const t=i.kind==='available'?'Доступна версия '+v:i.kind==='changelog'?'Onyx Panel '+v+' обновлена':i.kind==='alert'?'Сервер':i.kind==='limit'?'Лимит трафика':i.kind==='openflux'?'OpenFlux':'Onyx Panel';"
+                  "return show(t,(i.changes&&i.changes[0])||'Новое событие в панели',(i.kind||'')+':'+v+':'+(i.created||''))}));"
+                  "}catch(err){await show('Onyx Panel','Новое событие в панели','onyx:'+Date.now())}})())});"
+                  "self.addEventListener('notificationclick',e=>{e.waitUntil((async()=>{"
+                  "const url=(e.notification.data&&e.notification.data.url)||SCOPE;e.notification.close();"
+                  "const list=await self.clients.matchAll({type:'window',includeUncontrolled:true});"
+                  "for(const c of list){if(c.url.indexOf(url)===0){await c.focus();return}}"
+                  "await self.clients.openWindow(url)})())});").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type","text/javascript; charset=utf-8")
+            self.send_header("Content-Length",str(len(body)))
+            self.send_header("Cache-Control","no-store")
+            self.send_header("Service-Worker-Allowed",PANEL_PATH+"/")
+            self.end_headers(); self.wfile.write(body); return
+        if path=="/favicon.ico":
+            logo=None
+            for cand in (LOGO,"/opt/onyx-panel/panel-logo.png"):
+                try:
+                    with open(cand,"rb") as f: logo=f.read(); break
+                except OSError: pass
+            if not logo:
+                logo_b64=globals().get("LOGO_EMBEDDED")
+                if logo_b64:
+                    try: logo=base64.b64decode(logo_b64)
+                    except Exception: logo=None
+            if logo:
+                self.send_response(200)
+                self.send_header("Content-Type","image/png")
+                self.send_header("Content-Length",str(len(logo)))
+                self.send_header("Cache-Control","public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(logo)
+            else:
+                self.send_response(404); self.end_headers()
+            return
+        if path.startswith(PANEL_PATH+"/__font/"):
+            fname=path[len(PANEL_PATH+"/__font/"):]
+            if not re.fullmatch(r"[a-z0-9-]+\.woff2",fname):
+                self.send_response(404); self.end_headers(); return
+            try:
+                with open("/opt/onyx-panel/fonts/"+fname,"rb") as f: fontdata=f.read()
+                self.send_response(200)
+                self.send_header("Content-Type","font/woff2")
+                self.send_header("Content-Length",str(len(fontdata)))
+                self.send_header("Cache-Control","public, max-age=31536000, immutable")
+                self.end_headers()
+                self.wfile.write(fontdata)
+            except OSError:
+                self.send_response(404); self.end_headers()
+            return
+
+        # Versioned, cacheable UI assets: keeps ~140 KB of CSS/JS out of every
+        # HTML response and lets the browser reuse them across navigations.
+        if path==PANEL_PATH+"/__static/app.css":
+            self.send_static(UI_CSS,"text/css; charset=utf-8"); return
+        if path==PANEL_PATH+"/__static/app.js":
+            self.send_static(UI_COMMON_JS,"text/javascript; charset=utf-8"); return
+
+        flag_match=re.fullmatch(re.escape(PANEL_PATH)+r"/__flag/([a-z]{2})\.svg",path)
+        if flag_match:
+            flag_path=os.path.join(FLAGS,flag_match.group(1)+".svg")
+            if not os.path.isfile(flag_path): flag_path=os.path.join(FLAGS,"un.svg")
+            try:
+                with open(flag_path,"rb") as stream: flag_data=stream.read(131073)
+                if len(flag_data)>131072: raise OSError("flag is too large")
+                self.send_svg(flag_data)
+            except OSError:
+                self.send_html("Flag not found",404)
+            return
+
+        if path.startswith(PANEL_PATH+"/api/v1/"):
+            self.web_api(path[len(PANEL_PATH)+8:],"GET"); return
+
+        if path.startswith("/onyx-invite/"):
+            # Публичная страница приглашения: без сессии, но с проверкой токена.
+            invite_public(self,path[len("/onyx-invite/"):]); return
+        if path in ("/onyx-status", "/onyx-status/"):
+            # Публичная страница статуса: жива ли панель и сколько нод онлайн.
+            try:
+                live=nodes_live()
+                peers=live.get("nodes",[]) if isinstance(live.get("nodes",[]),list) else []
+                up=sum(1 for s in peers if isinstance(s,dict) and s.get("online"))
+                self.send_html(status_page_html(up,len(peers)))
+            except Exception:
+                self.send_data("Статус временно недоступен.",503)
+            return
+        if path==PANEL_PATH+"/gdrive-callback":
+            # OAuth callback: только с активной admin-сессией (SameSite=Lax
+            # шлёт cookie на top-level редиректе от Google) и валидным state.
+            if not self.auth():
+                self.send_response(303); self.send_header("Location",PANEL_PATH+"/login"); self.end_headers(); return
+            query=parse_qs(urlparse(self.path).query)
+            code=query.get("code",[""])[0]
+            error=query.get("error",[""])[0]
+            state=query.get("state",[""])[0]
+            try:
+                if error: raise RuntimeError("Google вернул отказ: "+error)
+                onyx_cloud.gdrive_exchange(code,public_base_url()+PANEL_PATH+"/gdrive-callback",state)
+                audit("cloud-connect","gdrive","Google Drive подключён по OAuth")
+                self.send_html('<!doctype html><meta charset=utf-8><meta http-equiv="refresh" content="2;'+PANEL_PATH+'/settings"><p style="font:15px system-ui;padding:24px">Google Drive подключён. Открываем настройки…</p>')
+            except Exception as exc:
+                self.send_html('<!doctype html><meta charset=utf-8><p style="font:15px system-ui;padding:24px">Не удалось подключить Google Drive: '+esc(str(exc)[:200])+'</p>',400)
+            return
+        if path==PANEL_PATH+"/login":
+            self.send_html(login_ui(PANEL_PATH,totp=bool(load().get("totp",{}).get("enabled")))); return
+        if path==PANEL_PATH+"/logout":
+            self.send_response(303); self.send_header("Set-Cookie",self.session_cookie("",0)); self.send_header("Location",PANEL_PATH+"/login"); self.end_headers(); return
+        if not self.auth():
+            # Данные-запросы (fetch/EventSource, Sec-Fetch-Dest: empty) получают честный 401:
+            # редирект на HTML-страницу Safari обрывает с "access control checks".
+            if (self.headers.get("Sec-Fetch-Dest") or "")=="empty":
+                self.send_json({"ok":False,"message":"Сессия завершена. Войдите заново."},401)
+            else:
+                self.redirect("/login")
+            return
+        if self.role()=="observer":
+            _suffix=path[len(PANEL_PATH):] if path.startswith(PANEL_PATH) else path
+            if not onyx_access.observer_can_get(_suffix or "/"):
+                self.redirect(PANEL_PATH+"/dashboard"); return
+
+        if path==PANEL_PATH+"/export":
+            try: blob=build_backup_tar()
+            except ValueError as exc: self.send_html(esc(str(exc)),500); return
+            except Exception as exc:
+                print("export failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_html("Не удалось собрать резервную копию.",500); return
+            audit('export',"","скачан архив "+human_bytes(len(blob)))
+            self.send_response(200)
+            self.send_header("Content-Type","application/gzip")
+            self.send_header("Content-Disposition",'attachment; filename="onyx-panel-backup-%s.tar.gz"'%time.strftime("%Y%m%d-%H%M%S"))
+            self.send_header("Content-Length",str(len(blob)))
+            self.send_header("Cache-Control","no-store")
+            self.end_headers()
+            self.wfile.write(blob)
+            return
+
+        if path==PANEL_PATH or path==PANEL_PATH+"/":
+            self.redirect("/dashboard"); return
+
+        if path in (PANEL_PATH+"/dashboard",PANEL_PATH+"/dashboard-data"):
+            try: hours=int(parse_qs(urlparse(self.path).query).get("hours",["1"])[0])
+            except ValueError: hours=1
+            if hours not in (1,6,24,168,720): hours=1
+            profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
+            body=dashboard_body(server_metrics.dashboard_data(hours),subscription_registry(),profiles,traffic(),
+                                PANEL_PATH,DOMAIN,self.csrf(),proxy_link,web_updates.current_version(),hours,nodes=nodes_live(),
+                                node_series=nodes_chart_series(hours),node_summary=nodes_client_summary())
+            if path.endswith("/dashboard-data"):
+                self.send_json({"html":body,"update":web_updates.get_status()})
+            else:
+                self.send_html(layout("Дашборд",dashboard_page(body,PANEL_PATH,self.csrf()),"dashboard",self.csrf()))
+            return
+
+        if path==PANEL_PATH+'/clients-state':
+            try:
+                _cc=_CLIENTS_STATE_CACHE; _now=time.time()
+                if _cc["body"] and _now-_cc["ts"]<5.0 and _cc["lang"]==i18n.lang():
+                    self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(_cc["body"]))); self.send_header("Cache-Control","no-store, private"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer"); self.end_headers(); self.wfile.write(_cc["body"]); return
+            except Exception: pass
+            profiles=[{'id':'primary','name':'Основной WEB Proxy','secret':primary(),'protocol':'web','enabled':True,'backend_port':443}]+users()
+            nodes_live()
+            records=client_records(subscription_registry(),profiles,traffic(),DOMAIN,proxy_link,node_summary=nodes_client_summary())
+            records=[r for r in records if r['id']!='primary']
+            warp_ids=set(warp_api.load(WARP_FILE).get("users",[]))
+            for r in records:
+                source=r.get('source') or {}
+                ids=source.get('profile_ids') or [source.get('id',r['id'])]
+                r['warp']=bool(warp_ids.intersection([str(i) for i in ids]))
+            clients=[{'id':r['id'],'name':r['name'],'kind':r['kind'],'enabled':r['enabled'],
+                'protocols':r['protocols'],'devices':r['devices'],'limit':r['limit'],'warp':r.get('warp',False),**r['totals']} for r in records]
+            clients.extend({'id':'openflux-'+p['id'],'name':p.get('name','OpenFlux'),'kind':'openflux',
+                'enabled':bool(p.get('enabled',True)),'protocols':['openflux'],'devices':0,'limit':0,
+                'up':0,'down':0,'active':bool(p.get('active',False))} for p in openflux.profile_states())
+            history_points=read_private(TRAFFIC_HISTORY).get('points',[])
+            limits_map=onyx_limits.limits(load())
+            for client in clients:
+                if client['kind']=='openflux': continue
+                client['limit_gb']=int(limits_map.get(client['id'],0))
+                if client['limit_gb']:
+                    ids=onyx_limits.profile_ids(client['id'],subscription_registry(),users())
+                    client['month_used']=onyx_limits.usage_for(client['id'],onyx_limits.load_bases(LIMITS_FILE),traffic(),ids)
+                spark=sparkline_for(client['id'],history_points)
+                if spark: client['spark']=spark
+            _payload={'clients':clients}
+            if i18n.lang()=="en": _payload=i18n.walk(_payload)
+            _raw=json.dumps(_payload,ensure_ascii=True).encode()
+            try: _CLIENTS_STATE_CACHE.update(ts=time.time(),lang=i18n.lang(),body=_raw)
+            except Exception: pass
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(_raw))); self.send_header("Cache-Control","no-store, private"); self.send_header("X-Content-Type-Options","nosniff"); self.send_header("Referrer-Policy","no-referrer"); self.end_headers(); self.wfile.write(_raw)
+            return
+
+        if path==PANEL_PATH+"/users":
+            profiles=[{"id":"primary","name":"Основной WEB Proxy","secret":primary(),"protocol":"web","enabled":True,"backend_port":443}]+users()
+            nodes_live()
+            warp_state=warp_api.load(WARP_FILE)
+            # Лимиты и спарклайны считаются один раз на страницу: базы месяца,
+            # почасовая история и реестр приглашений читаются здесь же.
+            subs_state=subscription_registry(); users_state=users()
+            # One read of each state file per request: the per-client loop used
+            # to re-read traffic.json for every client and load() five times.
+            panel_state=load(); traffic_state=traffic()
+            limits_map=onyx_limits.limits(panel_state); bases_map=onyx_limits.load_bases(LIMITS_FILE)
+            history_points=read_private(TRAFFIC_HISTORY).get('points',[])
+            limit_data={}; limit_info={}; sparks={}
+            def _limit_entry(cid,ids):
+                gb=int(limits_map.get(cid,0))
+                usage=onyx_limits.usage_for(cid,bases_map,traffic_state,ids) if ids else 0
+                limit_data[cid]=(usage,gb)
+                if gb: limit_info[cid]=limit_bar(usage,gb)
+                spark=sparkline_for(cid,history_points)
+                if spark: sparks[cid]=spark
+            for sub in subs_state:
+                _limit_entry(sub["id"],[str(p) for p in sub.get("profile_ids",[])])
+            for u in users_state:
+                uid=u.get("id")
+                if not uid or uid=="primary" or u.get("subscription_id"): continue
+                _limit_entry(uid,[uid])
+            invites_state=[i for i in panel_state.get("invites",[]) if isinstance(i,dict)]
+            body=users_ui(subs_state,profiles,traffic_state,PANEL_PATH,DOMAIN,self.csrf(),proxy_link,openflux.profile_states(),panel_state.get("expires",{}),node_summary=nodes_client_summary(),warp_ready=warp_api.configured(warp_state),warp_ids=set(warp_state.get("users",[])),reality_link=reality_link,limit_info=limit_info,limit_data=limit_data,sparks=sparks,invites=invites_state,plans=panel_state.get("plans",[]),trial=panel_state.get("trial",{}))
+            self.send_html(layout("Клиенты",body,"users",self.csrf())); return
+        if path==PANEL_PATH+"/nodes":
+            body=nodes_ui([node_api.public_node(n) for n in node_api.load_nodes(NODES_FILE)],
+                          node_api.load_location(LOCATION_FILE),node_api.make_connection_token(DOMAIN,API_KEY),PANEL_PATH,self.csrf())
+            self.send_html(layout("Ноды",body,"nodes",self.csrf())); return
+        if path==PANEL_PATH+"/cascade":
+            cascade_records=cascade_api.load_cascades(CASCADES_FILE)
+            panel_users=users()
+            _,_,cascade_carriers=cascade_api.route_assignment(cascade_records,panel_users)
+            items=[dict(item,transport=cascade_api.transport_label(item),
+                        carries=cascade_carriers.get(item["id"],False)) for item in cascade_records]
+            _d=load(); _fo=_d.get("failover",{}) if isinstance(_d.get("failover"),dict) else {}
+            body=cascade_ui(items,panel_users,PANEL_PATH,self.csrf(),DOMAIN,failover=bool(_fo.get("enabled")))
+            self.send_html(layout("Каскад",body,"cascade",self.csrf())); return
+        if path==PANEL_PATH+"/cascade-state":
+            cascade_records=cascade_api.load_cascades(CASCADES_FILE)
+            _,_,cascade_carriers=cascade_api.route_assignment(cascade_records,users())
+            self.send_json({"ok":True,"cascades":[cascade_state_view(c,cascade_carriers) for c in cascade_records]}); return
+        if path==PANEL_PATH+"/routing":
+            body=routing_ui(routing_api.load(ROUTING_FILE),PANEL_PATH,self.csrf(),DOMAIN,warp=warp_api.load(WARP_FILE),reality=reality_api.load(REALITY_FILE))
+            self.send_html(layout("Маршрутизация",body,"routing",self.csrf())); return
+        if path==PANEL_PATH+"/restart-status":
+            try:
+                with open(RESTART_STATUS,encoding="utf-8") as stream:
+                    self.send_json(json.load(stream))
+            except (OSError,ValueError):
+                self.send_json({"phase":"idle"})
+            return
+        if path==PANEL_PATH+"/updates":
+            self.send_html(layout("Обновления",updates_ui(PANEL_PATH,self.csrf(),web_updates.current_version()),"updates",self.csrf())); return
+        if path==PANEL_PATH+"/dashboard-stream":
+            # Живой поток дашборда вместо ежесекундного опроса: те же данные,
+            # один постоянный ответ. Отвалившийся клиент убивается записью.
+            # Кадр рендерится только когда изменился один из входных файлов
+            # (ранее — полный ререндер каждые 5 с на каждую открытую вкладку);
+            # heartbeat раз в минуту подтягивает TTL-кеши (ноды, статус обновлений).
+            try: hours=int(parse_qs(urlparse(self.path).query).get("hours",["1"])[0])
+            except ValueError: hours=1
+            if hours not in (1,6,24,168,720): hours=1
+            def _stream_token():
+                token=[]
+                for source in ("/var/lib/onyx-panel/metrics.json","/var/lib/onyx-panel/metrics-error.json",
+                               USERS,TRAFFIC,NODES_FILE,"/var/lib/onyx-panel/status.json"):
+                    try:
+                        st=os.stat(source); token.append((st.st_mtime_ns,st.st_size))
+                    except OSError:
+                        token.append(None)
+                return token
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type","text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control","no-store")
+                self.send_header("X-Accel-Buffering","no")
+                self.end_headers()
+                last_token=None; last_sent=0.0
+                while True:
+                    token=_stream_token(); now=time.time()
+                    if token!=last_token or now-last_sent>=60:
+                        payload=dashboard_stream_payload(self.csrf(),hours)
+                        self.wfile.write(b"data: "+json.dumps(payload,ensure_ascii=True).encode()+b"\n\n")
+                        self.wfile.flush()
+                        last_token=token; last_sent=now
+                    time.sleep(5)
+            except (BrokenPipeError,ConnectionResetError,TimeoutError,OSError):
+                return
+        if path==PANEL_PATH+"/logs":
+            self.send_html(layout("Журналы",logs_ui(PANEL_PATH,self.csrf()),"logs",self.csrf())); return
+        if path==PANEL_PATH+"/logs-stream":
+            units={"panel":"onyx-panel.service","xray":"onyx-panel-xray.service","relay":"tproxy-server.service",
+                   "mtproxy":"mtproxy.service","caddy":"caddy.service","awg":"onyx-panel-awg@*.service",
+                   "openflux":"onyx-panel-openflux*.service","metrics":"onyx-panel-metrics.service"}
+            unit=parse_qs(urlparse(self.path).query).get("unit",["panel"])[0]
+            pattern=units.get(unit)
+            if pattern is None: self.send_json({"message":"Неизвестный журнал."},404); return
+            try: proc=subprocess.Popen(["journalctl","-n","250","-f","-o","cat","--no-pager","-u",pattern],
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+            except (OSError,subprocess.SubprocessError):
+                self.send_json({"message":"Не удалось открыть журнал."},503); return
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type","text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control","no-store")
+                self.send_header("X-Accel-Buffering","no")
+                self.end_headers()
+                os.set_blocking(proc.stdout.fileno(),False)
+                tail=b""
+                while proc.poll() is None:
+                    ready,_,_=select.select([proc.stdout],[],[],1.0)
+                    if ready:
+                        chunk=proc.stdout.read(65536)
+                        if not chunk: break
+                        tail+=chunk
+                        if len(tail)>262144: tail=tail[-131072:]  # отрезаем поток мусора
+                        *lines,tail=tail.split(b"\n")
+                        for line in lines:
+                            if not line.strip(): continue
+                            payload=b"".join(b"data: "+part+b"\n" for part in line.split(b"\n"))+b"\n"
+                            self.wfile.write(payload)
+                    else:
+                        self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+            except (BrokenPipeError,ConnectionResetError,TimeoutError,OSError):
+                pass
+            finally:
+                try: proc.terminate(); proc.wait(timeout=4)
+                except Exception:
+                    try: proc.kill()
+                    except Exception: pass
+            return
+        if path==PANEL_PATH+"/diagnostics":
+            self.send_html(layout("Диагностика",diagnostics_ui(PANEL_PATH,self.csrf(),read_diagnostics()),"diagnostics",self.csrf())); return
+        if path==PANEL_PATH+"/diagnostics-status":
+            self.send_json({"ok":True,**read_diagnostics()}); return
+        if path==PANEL_PATH+"/client-check-status":
+            uid=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            self.send_json({"ok":True,"check":client_check_state().get(uid,{"status":"idle"})}); return
+        if path==PANEL_PATH+"/subscriptions":
+            self.redirect("/users"); return
+        if path==PANEL_PATH+"/update-status":
+            self.send_json(web_updates.get_status()); return
+        if path==PANEL_PATH+"/notifications":
+            self.send_json({"ok":True,**web_updates.notes_public()}); return
+        if path==PANEL_PATH+"/push-config":
+            # Публичный VAPID-ключ: клиент подписывается на Web Push колокольчика.
+            self.send_json({"ok":True,"publicKey":web_push.public_key()}); return
+        if path==PANEL_PATH+"/component-status":
+            self.send_json(components.status()); return
+        if path==PANEL_PATH+"/nodes-state":
+            # Живой срез состояния нод для страницы «Ноды»: версии, трафик и
+            # пользователи. Фрагменты собираются на сервере, чтобы JS просто
+            # подставлял готовый безопасный HTML.
+            live=nodes_live()
+            _up_now=int(time.time())
+            _up_points=[p for p in read_private(NODES_TRAFFIC_FILE).get("points",[]) if isinstance(p,dict) and _up_now-p.get("time",0)<86400]
+            _up_total=len(_up_points) or 1
+            _up_counts={}
+            for _p in _up_points:
+                for _n in (_p.get("nodes") or []):
+                    if isinstance(_n,dict) and _n.get("id"): _up_counts[_n["id"]]=_up_counts.get(_n["id"],0)+1
+            _uptime={k:round(v*100/_up_total) for k,v in _up_counts.items()}
+            self.send_json({"ok":True,"age":live.get("age"),
+                            "nodes":[{"id":s.get("id",""),"enabled":bool(s.get("enabled",True)),
+                                      "online":bool(s.get("online")),"outdated":bool(s.get("outdated")),
+                                      "version":str(s.get("version","") or ""),
+                                      "html":nodes_live_block(s,PANEL_PATH,_uptime.get(s.get("id","")))}
+                                     for s in live.get("nodes",[])]}); return
+        if path==PANEL_PATH+"/openflux-mailru-status":
+            self.send_json(openflux.mailru_status()); return
+        if path==PANEL_PATH+"/openflux-qr":
+            profile_id=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            profile=next((item for item in openflux.profile_states() if item.get("id")==profile_id),None)
+            if profile is None: self.send_html("Not found",404); return
+            try: self.send_png(qr_png_bytes(str(profile.get("url") or "")))
+            except (OSError,subprocess.SubprocessError):
+                self.send_json({'message':'Не удалось сформировать QR OpenFlux. Проверьте qrencode на сервере.'},503)
+            return
+        if path==PANEL_PATH+"/subscription-qr":
+            sid=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            sub=next((s for s in subscription_registry() if s["id"]==sid),None)
+            if sub is None: self.send_html("Not found",404); return
+            try: self.send_png(qr_png_bytes("https://"+DOMAIN+SUB_PREFIX+sub["token"]))
+            except (OSError,subprocess.SubprocessError): self.send_json({'message':'Не удалось сформировать QR. Проверьте qrencode на сервере.'},503)
+            return
+        if path==PANEL_PATH+"/invite-qr":
+            iid=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            inv=next((i for i in invites_registry() if i.get("id")==iid),None)
+            if inv is None: self.send_html("Not found",404); return
+            try: self.send_png(qr_png_bytes("https://"+DOMAIN+"/onyx-invite/"+str(inv.get("token",""))))
+            except (OSError,subprocess.SubprocessError): self.send_json({'message':'Не удалось сформировать QR. Проверьте qrencode на сервере.'},503)
+            return
+
+        if path==PANEL_PATH+"/__qr":
+            query=parse_qs(urlparse(self.path).query)
+            q=query.get("secret",[""])[0]; protocol=query.get("protocol",["web"])[0]
+            port=query.get("port",["443"])[0]
+            uid=query.get("id",[""])[0]
+            current_users=users()
+            matching=(next((x for x in current_users if x.get("id")==uid and x.get("protocol") in awg.PROTOCOLS),None)
+                      if uid else next((x for x in current_users if x.get("secret")==q or
+                          (x.get("protocol")=="mtproto" and q in x.get("device_secrets",[]))),None))
+            if uid and matching:
+                q=matching.get("secret",""); protocol=matching.get("protocol",""); port=str(matching.get("backend_port",0))
+            if q==primary(): matching={"protocol":"web","backend_port":443,"name":"Основной WEB Proxy"}
+            if not matching or protocol!=matching.get("protocol","web"):
+                self.send_html("Not found",404); return
+            try:
+                expected=str(int(matching.get("backend_port",443)))
+                if protocol in ("mtproto","hysteria","awg20","awg31") and port!=expected:
+                    self.send_html("Not found",404); return
+                if protocol in ("web","vless") and port!="443":
+                    self.send_html("Not found",404); return
+                self.send_png(qr_png_bytes(proxy_link(protocol,q,expected,matching.get("name","Proxy"),matching.get("username",""))))
+            except Exception:self.send_json({'message':'Не удалось сформировать QR. Проверьте qrencode на сервере.'},503)
+            return
+
+        if path==PANEL_PATH+"/awg-config":
+            uid=parse_qs(urlparse(self.path).query).get("id",[""])[0]
+            user=next((u for u in users() if u.get("id")==uid and u.get("protocol") in awg.PROTOCOLS),None)
+            if user is None: self.send_html("Not found",404); return
+            try:
+                config=awg.client_config(user,DOMAIN,user.get("name","AWG"))
+                self.send_data(config,mime="text/plain; charset=utf-8",
+                    headers={"Content-Disposition":"attachment; filename=\"onyx-%s.conf\""%uid})
+            except Exception:
+                self.send_html("Не удалось сформировать конфигурацию AWG.",503)
+            return
+
+
+        if path==PANEL_PATH+"/settings":
+            token=esc(self.csrf())
+            has_draft=os.path.exists(SITE_DRAFT)
+            try:
+                if has_draft:
+                    with open(SITE_DRAFT,encoding="utf-8") as f: site_html=f.read()
+                else: site_html=read_site_html()
+            except Exception: site_html="<!-- Не удалось прочитать исходник -->"
+            editor_all=editor_ui(site_html,PANEL_PATH,self.csrf(),all_presets(),has_draft)
+            # карточка заглушки живёт в общей сетке настроек, диалоги и скрипты — за ней
+            if '\n<dialog ' in editor_all:
+                editor_card,editor_rest=editor_all.split('\n<dialog ',1); editor_rest='\n<dialog '+editor_rest
+            else:
+                editor_card,editor_rest=editor_all,''
+            d=load()
+            admin_login=esc(d.get("admin",{}).get("user","admin"))
+            panel_url=("https://"+DOMAIN if DOMAIN else "")+PANEL_PATH
+            tg_cfg=telegram_api.normalize_config(d.get("telegram",{}))
+            backups_cfg=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+            totp_cfg=d.get("totp") if isinstance(d.get("totp"),dict) else {}
+            observer=d.get("observer") if isinstance(d.get("observer"),dict) else {}
+            api_keys=onyx_webapi.public_keys(d.get("api_keys"))
+            logins=onyx_access.last_logins(d,60)
+            hour_options=''.join(f'<option value="{h}" {"selected" if int(backups_cfg.get("hour",4))==h else ""}>{h:02d}:00</option>' for h in range(24))
+            event_labels=(("expiry","Истечение доступов"),("logins","Входы в панель"),("cascades","Каскады"),("backups","Автобэкапы"),("openflux","OpenFlux: документы"),("alerts","Состояние сервера"),("limits","Лимиты трафика"))
+            event_checks=''.join(f'<label class="choice-card"><input type="checkbox" name="event_{key}" value="1" {"checked" if tg_cfg.get("events",{}).get(key,True) else ""}><span><strong>{label}</strong></span></label>' for key,label in event_labels)
+            last_backup=backups_cfg.get("last") if isinstance(backups_cfg.get("last"),dict) else {}
+            backup_status=("Последний: %s — %s."%(time.strftime("%d.%m.%Y %H:%M",time.localtime(last_backup.get("ts",0))),last_backup.get("message",""))) if last_backup.get("ts") else "Копий пока не было."
+            totp_status="включена" if totp_cfg.get("enabled") else "выключена"
+            api_rows=''.join(f'<div class="api-key-row"><b>{esc(k.get("name",""))}</b><span class="muted">создан {time.strftime("%d.%m.%Y",time.localtime(k.get("created",0)))}</span><span class="muted">{"использован "+time.strftime("%d.%m.%Y",time.localtime(k["last_used"])) if k.get("last_used") else "не использовался"}</span><form method="post" action="{PANEL_PATH}/api-keys-delete"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="id" value="{esc(k.get("id"))}"><button class="danger">Отозвать</button></form></div>' for k in api_keys)
+            login_rows=''.join(f'<tr{" class=login-failed" if not l.get("ok",True) else ""}><td>{time.strftime("%d.%m %H:%M",time.localtime(l.get("ts",0)))}</td><td>{esc(l.get("user",""))} <span class="muted">({esc(l.get("role","admin"))})</span></td><td>{esc(l.get("ip",""))}</td><td class="muted">{esc((l.get("device","") or "")[:60])}{" · новое устройство" if l.get("new_device") else ""}{" · <b>неудачная попытка</b>" if not l.get("ok",True) else ""}</td></tr>' for l in logins) or '<tr><td colspan="4" class="muted">Пока нет записей</td></tr>'
+            extra_data={"alerts":d.get("alerts") if isinstance(d.get("alerts"),dict) else {},
+                "audit":onyx_audit.entries(d,120),"audit_actions":onyx_audit.ACTIONS,
+                "cloud":onyx_cloud.status(),"cloud_cfg":backups_cfg.get("cloud") if isinstance(backups_cfg.get("cloud"),dict) else {},
+                "gdrive_ready":bool(onyx_cloud.gdrive_config().get("client_id")),
+                "gdrive_redirect":public_base_url()+PANEL_PATH+"/gdrive-callback",
+                "fw_enabled":onyx_firewall.enabled(),
+                "fw_owned":onyx_firewall._load()["rules"],"fw_extra":firewall_extra(),
+                "fw_sockets":listening_sockets()}
+            extra_cards2=settings_extras(PANEL_PATH,token,extra_data)
+            tg_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Уведомления Telegram</h2><p>Истечение доступов, входы, каскады и автобэкапы — в ваш чат</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><form id="tgForm" action="{PANEL_PATH}/telegram-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="tgToken">Токен бота</label><input id="tgToken" name="token" value="{esc(tg_cfg.get("token"))}" placeholder="123456:ABC-DEF…" spellcheck="false" autocomplete="off"></div><div><label for="tgChat">Chat ID</label><input id="tgChat" name="chat" value="{esc(tg_cfg.get("chat"))}" placeholder="123456789 или @channel" spellcheck="false" autocomplete="off"></div></div><div class="checks choice-grid">{event_checks}</div><div class="admin-access-grid"><div><label class="check"><input type="checkbox" name="quiet_enabled" value="1" {"checked" if tg_cfg.get("quiet",{}).get("enabled") else ""}>Тихие часы (только аварии)</label></div><div style="display:flex;gap:8px"><div><label for="quietFrom">С</label><input id="quietFrom" name="quiet_from" type="number" min="0" max="23" value="{int(tg_cfg.get("quiet",{}).get("from",23))}"></div><div><label for="quietTo">До</label><input id="quietTo" name="quiet_to" type="number" min="0" max="23" value="{int(tg_cfg.get("quiet",{}).get("to",7))}"></div></div></div><div class="actions"><button type="submit" class="btn primary" name="action" value="save">Сохранить</button><button type="submit" class="btn" name="action" value="test">Проверить</button></div><p class="panel-setting-status" id="tgStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Автобэкап по расписанию</b><small>Раз в сутки архив с настройками и клиентами уходит в Telegram (если настроен) и хранится локально в /var/lib/onyx-panel/backups. {esc(backup_status)}</small></div><form id="backupForm" action="{PANEL_PATH}/backups-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="backupMode">Режим</label><select id="backupMode" name="mode"><option value="off" {"selected" if backups_cfg.get("mode","off")=="off" else ""}>Выключен</option><option value="telegram" {"selected" if backups_cfg.get("mode")=="telegram" else ""}>Ежедневно</option></select></div><div><label for="backupHour">Время</label><select id="backupHour" name="hour">{hour_options}</select></div><div><label for="backupKeep">Хранить копий</label><input id="backupKeep" name="keep" type="number" min="3" max="30" value="{int(backups_cfg.get("keep",7))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить расписание</button></div><p class="panel-setting-status" id="backupStatus" role="status"></p></form></section>
+</div>
+</div>'''
+            plans_cfg=[p for p in (d.get("plans") or []) if isinstance(p,dict)]
+            trial_cfg=d.get("trial") if isinstance(d.get("trial"),dict) else {}
+            promo_cfg=onyx_promo.normalize(d.get("promo") if isinstance(d.get("promo"),dict) else {})
+            promo_rows=''.join(f'<div class="api-key-row"><b>{esc(c.get("code",""))}</b><span class="muted">+{int(c.get("bonus_days",0))} дн. · {"без лимита" if not c.get("max_uses") else "%d/%d"%(c.get("used",0),c.get("max_uses"))}</span><form method="post" action="{PANEL_PATH}/promo-delete"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="code" value="{esc(c.get("code",""))}"><button class="danger">Удалить</button></form></div>' for c in (dict(v,code=k) for k,v in (promo_cfg.get("codes") or {}).items() if isinstance(v,dict))) or '<p class="muted" style="font-size:12px;margin:6px 0">Промокодов пока нет.</p>'
+            plan_rows=''.join(f'<div class="api-key-row"><b>{esc(p.get("name",""))}</b><span class="muted">{int(p.get("days",30))} дн. · {int(p.get("max_devices",0))} устр. · {" + ".join({"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC 5"}.get(x,x) for x in p.get("protocols",[]))}{" · %d ГБ/мес"%int(p.get("limit_gb",0)) if p.get("limit_gb") else ""}</span><form method="post" action="{PANEL_PATH}/plans-save" data-confirm="Удалить тариф?"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(p.get("id",""))}"><button class="danger">Удалить</button></form></div>' for p in plans_cfg) or '<p class="muted" style="font-size:12px;margin:6px 0">Тарифов пока нет.</p>'
+            plans_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Тарифы и триал</h2><p>Готовые наборы для новых клиентов: срок, устройства и лимит в один клик</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Тарифы</b><small>Тариф подставляется в окне создания клиента и задаёт срок, устройства, протоколы и лимит.</small></div><div>{plan_rows}</div><form id="planForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="create"><div class="admin-access-grid"><div><label for="planName">Название</label><input id="planName" name="name" maxlength="80" placeholder="Например, Месяц" required></div><div><label for="planDays">Дней</label><input id="planDays" name="days" type="number" min="1" max="3650" value="30" required></div><div><label for="planDevices">Устройств</label><input id="planDevices" name="max_devices" type="number" min="0" max="20" value="2" required></div><div><label for="planLimit">Лимит, ГБ/мес (0 — без лимита)</label><input id="planLimit" name="limit_gb" type="number" min="0" max="1000000" value="0"></div></div><div class="checks"><label class="check"><input type="checkbox" name="vless" value="1" checked>VLESS XHTTP</label><label class="check"><input type="checkbox" name="hysteria" value="1" checked>Hysteria2</label><label class="check"><input type="checkbox" name="tuic" value="1">TUIC 5</label></div><div class="actions"><button type="submit" class="btn primary">Добавить тариф</button></div></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Триал для новых клиентов</b><small>Кнопка «Триал» в окне создания клиента: доступ на несколько дней с одним устройством.</small></div><form id="trialForm" action="{PANEL_PATH}/plans-save"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="trial"><label class="check trial-check"><input type="checkbox" name="enabled" value="1" {"checked" if trial_cfg.get("enabled") else ""}>Триал включён</label><div class="admin-access-grid"><div><label for="trialDays">Дней</label><input id="trialDays" name="days" type="number" min="1" max="365" value="{int(trial_cfg.get("days",3))}"></div><div><label for="trialDevices">Устройств</label><input id="trialDevices" name="max_devices" type="number" min="0" max="20" value="{int(trial_cfg.get("max_devices",1))}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить триал</button></div></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Промокоды</b><small>Промокод даёт бонусные дни при активации.</small></div><div>{promo_rows}</div><form id="promoForm" action="{PANEL_PATH}/promo-create"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="promoCode">Код</label><input id="promoCode" name="code" maxlength="32" placeholder="ЛЕТО2026" autocomplete="off"></div><div><label for="promoBonus">Бонус, дней</label><input id="promoBonus" name="bonus_days" type="number" min="1" max="3650" value="7"></div><div><label for="promoUses">Лимит активаций (0 — без лимита)</label><input id="promoUses" name="max_uses" type="number" min="0" max="100000" value="0"></div></div><div class="actions"><button type="submit" class="btn primary">Создать промокод</button></div><p class="panel-setting-status" id="promoStatus" role="status"></p></form></section>
+</div>
+</div>'''
+            bypass_cfg=bypass_api.normalize(d.get("bypass",{}))
+            censor_cfg=onyx_censor.normalize_state(d.get("censor") if isinstance(d.get("censor"),dict) else {})
+            censor_rows=''.join(f'<tr><td>{esc(t.get("label","") or t.get("host",""))}</td><td>{esc(t.get("port",""))}</td><td>{"🟢 доступен" if t.get("status")=="up" else ("⛔ заблокирован" if t.get("status")=="blocked" else "—")}</td></tr>' for t in censor_cfg.get("targets",[])) or '<tr><td colspan="3" class="muted">Проверка запускается каждые 6 часов автоматически</td></tr>'
+            unbound_on=os.path.exists(UNBOUND_MARKER)
+            fp_pool=','.join(bypass_cfg["fp_pool"])
+            hop_ports=','.join(str(p) for p in bypass_cfg["hopping_ports"])
+            bypass_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Обход ТСПУ и защита</h2><p>Фрагментация TLS, ротация отпечатков, hopping портов, leastPing, TUIC, монитор блокировок</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Пресеты</b><small>«Стандарт» — фрагментация + ротация отпечатков; «Максимум» — плюс leastPing по каскадам (нужно 2+ активных каскада).</small></div><div class="actions"><button type="button" class="btn" data-preset="off">Выключить всё</button><button type="button" class="btn" data-preset="standard">Стандарт</button><button type="button" class="btn primary" data-preset="max">Максимум</button></div><p class="panel-setting-status" id="presetStatus" role="status"></p></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Настройки обхода</b><small>Фрагментация ClientHello режет TLS-запрос на части ещё до провайдера. Ротация отпечатков меняет fp в ссылках раз в месяц.</small></div><form id="bypassForm" action="{PANEL_PATH}/security-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="fragLevel">Фрагментация ClientHello</label><select id="fragLevel" name="fragment"><option value="off" {"selected" if bypass_cfg["fragment"]=="off" else ""}>Выключена</option><option value="light" {"selected" if bypass_cfg["fragment"]=="light" else ""}>Лёгкая (1-3 пакета)</option><option value="strong" {"selected" if bypass_cfg["fragment"]=="strong" else ""}>Сильная (2-4 пакета)</option></select></div><div><label for="fpPool">Пул отпечатков (через запятую)</label><input id="fpPool" name="fp_pool" value="{esc(fp_pool)}" placeholder="chrome,firefox,safari" spellcheck="false"></div></div><div class="admin-access-grid"><div><label for="hopPorts">Порты hopping (до 6, через запятую)</label><input id="hopPorts" name="hopping_ports" value="{esc(hop_ports)}" placeholder="2053,2083,2087" spellcheck="false"></div><div></div></div><div class="checks choice-grid"><label class="choice-card"><input type="checkbox" name="fp_rotation" value="1" {"checked" if bypass_cfg["fp_rotation"] else ""}><span><strong>Ротация отпечатков</strong><small>fp меняется в подписке</small></span></label><label class="choice-card"><input type="checkbox" name="least_ping" value="1" {"checked" if bypass_cfg["least_ping"] else ""}><span><strong>leastPing</strong><small>выбор каскада по задержке</small></span></label><label class="choice-card"><input type="checkbox" name="ipv6" value="1" {"checked" if bypass_cfg["ipv6"] else ""}><span><strong>IPv6-слушатели</strong><small>reality/hysteria/tuic на ::</small></span></label><label class="choice-card"><input type="checkbox" name="honeypot" value="1" {"checked" if bypass_cfg["honeypot"] else ""}><span><strong>Ханипот</strong><small>ban-set для сканеров (24ч)</small></span></label><label class="choice-card"><input type="checkbox" name="unbound" value="1" {"checked" if unbound_on else ""}><span><strong>DoT-резолвер</strong><small>unbound, обход DNS-отравления</small></span></label></div><div class="actions"><button type="submit" class="btn primary">Сохранить обход</button></div><p class="panel-setting-status" id="bypassStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Монитор блокировок</b><small>Панель сама проверяет TCP/TLS-доступность своих портов каждые 6 часов и сообщает в Telegram при изменении.</small></div><table class="login-log"><thead><tr><th>Цель</th><th>Порт</th><th>Статус</th></tr></thead><tbody>{censor_rows}</tbody></table></section>
+</div>
+</div>'''
+            security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Двухфакторная аутентификация (TOTP)</b><small>Статус: {totp_status}. При входе панель запросит код из приложения-аутентификатора (Google Authenticator, 1Password и любые совместимые).</small></div><div class="actions"><button type="button" class="btn primary" id="totpSetupBtn">{"Настроить заново" if totp_cfg.get("enabled") else "Включить 2FA"}</button>{f'<button type="button" class="btn danger" id="totpDisableBtn">Выключить 2FA</button>' if totp_cfg.get("enabled") else ''}</div><p class="panel-setting-status" id="totpStatus" role="status"></p></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Наблюдатель</b><small>Второй аккаунт только для чтения: дашборд, клиенты, ноды, каскады. Изменения запрещены на уровне сервера. Очистите оба поля, чтобы удалить доступ.</small></div><form id="observerForm" action="{PANEL_PATH}/observer-save"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="observerUser">Логин наблюдателя</label><input id="observerUser" name="user" value="{esc(observer.get("user",""))}" autocomplete="off" placeholder="Например, assistant"></div><div><label for="observerPass">Пароль</label><input id="observerPass" type="password" name="a" autocomplete="new-password" placeholder="{"Оставить текущий" if observer.get("hash") else "Минимум 3 символа"}"></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить наблюдателя</button></div><p class="panel-setting-status" id="observerStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Ключи внешнего API</b><small>REST API для ботов и биллингов: Bearer-токен в заголовке Authorization, адрес <code>{panel_url}/api/v1/clients</code>.</small></div><div>{api_rows or '<p class="muted" style="font-size:12px;margin:6px 0">Ключей пока нет.</p>'}</div><form id="apiKeyForm" action="{PANEL_PATH}/api-keys-create"><input type="hidden" name="csrf" value="{token}"><div class="admin-access-grid"><div><label for="apiKeyName">Название нового ключа</label><input id="apiKeyName" name="name" maxlength="60" placeholder="Например, Бот продаж" autocomplete="off"></div></div><div class="actions"><button type="submit" class="btn primary">Создать ключ</button></div><p class="panel-setting-status" id="apiKeyStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Журнал входов</b><small>Последние входы в панель. «Новое устройство» — первый вход с такого браузера.</small></div><table class="login-log"><thead><tr><th>Время</th><th>Кто</th><th>IP</th><th>Устройство</th></tr></thead><tbody id="loginLogRows">{login_rows}</tbody></table><nav class="login-pager" id="loginPager" hidden><button type="button" id="loginPrev" aria-label="Предыдущая страница">‹</button><span id="loginPageLabel">1 / 1</span><button type="button" id="loginNext" aria-label="Следующая страница">›</button></nav></section>
+</div>
+</div>'''
+            security_dialogs=f'''<dialog id="totpDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Включение 2FA</h2><p class="totp-hint">Отсканируйте QR в приложении-аутентификаторе</p><img id="totpQr" alt="QR-код TOTP" hidden><p class="totp-secret-line">Секрет: <code id="totpSecret"></code></p><p class="totp-otp-label">Введите код из приложения</p><div class="totp-cells" id="totpCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpCode"><p class="totp-status" id="totpDialogStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="primary" id="totpConfirm">Включить</button></div></dialog>
+<dialog id="totpDisableDialog" class="totp-dialog"><button type="button" class="totp-close" data-close-dialog aria-label="Закрыть">×</button><svg class="totp-mark" viewBox="0 0 128 128" aria-hidden="true"><g transform="translate(14 14)"><path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></g></svg><h2>Выключение 2FA</h2><p class="totp-hint">Введите текущий код из приложения-аутентификатора, чтобы подтвердить выключение</p><div class="totp-otp-label">Код из приложения</div><div class="totp-cells" id="totpDisableCells"><input inputmode="numeric" maxlength="1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"></div><input type="hidden" id="totpDisableCode"><p class="totp-status" id="totpDisableStatus" role="status"></p><div class="totp-actions"><button type="button" class="btn quiet" data-close-dialog>Отмена</button><button type="button" class="btn danger" id="totpDisableConfirm">Выключить</button></div></dialog>
+<dialog id="apiKeyDialog" class="create-dialog"><div class="dialog-head"><div><h2>Ключ создан</h2><small>Токен показывается только один раз — сохраните его</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><textarea class="code-editor" id="apiKeyToken" readonly style="min-height:74px"></textarea><div class="actions create-actions"><button type="button" class="btn" id="apiKeyCopy">Скопировать</button><button type="button" class="btn primary" data-close-dialog>Готово</button></div></div></dialog>'''
+            panel_js='''<script>
+(()=>{async function submit(form,status,done){
+  const btn=form.querySelector("button[type=submit]");const label=btn.textContent;btn.disabled=true;
+  status.className="panel-setting-status";status.textContent="Применяю…";
+  try{
+    const r=await fetch(form.getAttribute("action"),{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(new FormData(form))});
+    let res;try{res=await r.json()}catch(e){throw new Error("Панель недоступна. Обновите страницу и попробуйте снова.")}
+    if(!r.ok||!res.ok)throw new Error(res.message||"Операция не выполнена.");
+    status.className="panel-setting-status ok";status.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Сохранено.");
+    if(done)done(res);
+  }catch(err){status.className="panel-setting-status err";status.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}
+  finally{btn.disabled=false;btn.textContent=label}
+}
+const pathForm=document.getElementById("panelPathForm");
+if(pathForm){const status=document.getElementById("panelPathStatus");
+pathForm.addEventListener("submit",e=>{e.preventDefault();submit(pathForm,status,res=>{status.textContent="";showMove(res)})})}
+const moveOverlay=document.getElementById("moveOverlay");
+function showMove(res){
+  const url=res.newUrl||location.origin+res.newPath+"/login";
+  document.getElementById("moveUrl").textContent=url;
+  document.getElementById("moveLink").href=url;
+  moveOverlay.hidden=false;
+  requestAnimationFrame(()=>moveOverlay.classList.add("show"));
+  const ring=document.getElementById("moveRing"),secs=document.getElementById("moveSecs"),C=276.5;
+  let left=8;const total=8;
+  const setRing=()=>{ring.style.strokeDashoffset=(C*(1-Math.max(left,0)/total)).toFixed(1)};
+  secs.textContent=left;setRing();
+  const iv=setInterval(()=>{
+    left-=1;
+    if(left>0){secs.textContent=left;setRing();return}
+    clearInterval(iv);secs.textContent="…";ring.style.strokeDashoffset=C;
+  },1000);
+  const started=Date.now();
+  const probe=()=>{
+    fetch(res.newPath+"/__health",{cache:"no-store"}).then(r=>{
+      if(r.ok)location.href=url;
+      else if(Date.now()-started<30000)setTimeout(probe,1200);
+      else location.href=url;
+    }).catch(()=>{if(Date.now()-started<30000)setTimeout(probe,1200);else location.href=url});
+  };
+  setTimeout(probe,8600);
+}
+const accessForm=document.getElementById("panelAccessForm");
+if(accessForm){const status=document.getElementById("panelAccessStatus");
+accessForm.addEventListener("submit",async e=>{e.preventDefault();const btn=accessForm.querySelector("button[type=submit]");const label=btn.textContent;btn.disabled=true;status.className="panel-setting-status";status.textContent="Применяю…";
+try{
+  const csrf=accessForm.querySelector("[name=csrf]").value,user=accessForm.querySelector("[name=user]").value.trim(),pass=accessForm.querySelector("[name=a]").value;
+  const r1=await fetch(accessForm.dataset.login,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams({csrf,user})});
+  let res;try{res=await r1.json()}catch(err){throw new Error("Панель недоступна. Обновите страницу и попробуйте снова.")}
+  if(!r1.ok||!res.ok)throw new Error(res.message||"Не удалось изменить логин.");
+  if(pass){
+    const r2=await fetch(accessForm.dataset.password,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams({csrf,a:pass})});
+    let res2;try{res2=await r2.json()}catch(err){throw new Error("Панель недоступна. Обновите страницу и попробуйте снова.")}
+    if(!r2.ok||!res2.ok)throw new Error(res2.message||"Не удалось изменить пароль.");
+    status.className="panel-setting-status ok";status.textContent="Логин и пароль изменены. Открываем страницу входа…";
+    setTimeout(()=>{location.href=accessForm.dataset.goto},1900);return;
+  }
+  status.className="panel-setting-status ok";status.textContent=res.message||"Логин изменён.";
+}catch(err){status.className="panel-setting-status err";status.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}
+finally{btn.disabled=false;btn.textContent=label}})}
+const importForm=document.getElementById("importForm");
+if(importForm){const status=document.getElementById("importStatus"),file=document.getElementById("importFile"),data=document.getElementById("importData"),pick=document.getElementById("importPick"),preview=document.getElementById("importPreview");
+pick.addEventListener("click",()=>file.click());
+file.addEventListener("change",async()=>{const f=file.files&&file.files[0];if(!f)return;if(f.size>9*1024*1024){status.className="panel-setting-status err";status.textContent="Файл больше 9 МБ.";file.value="";return}
+status.className="panel-setting-status";status.textContent="Читаю архив…";
+const reader=new FileReader();
+reader.onload=async()=>{data.value=String(reader.result).split(",").pop()||"";
+try{const r=await fetch(importForm.dataset.preview,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams({csrf:importForm.querySelector("[name=csrf]").value,backup:data.value})});
+let res;try{res=await r.json()}catch(e){throw new Error("Панель вернула некорректный ответ.")}
+if(!r.ok||!res.ok)throw new Error(res.message||"Архив не читается.");
+const p=res.preview,c=p.counts||{},cur=p.current||{};
+const warn=document.getElementById("prevWarning");
+if(p.cross_domain){warn.hidden=false;warn.textContent="Копия с домена "+p.domain+" — перенесём только клиентов, сайт и политики; доменные ключи, Reality и локация останутся текущими ("+p.current_domain+").";}
+else{warn.hidden=true;warn.textContent="";}
+document.getElementById("prevVersion").textContent=(p.version||"?")+(p.domain?" · "+p.domain:"");
+document.getElementById("prevExported").textContent=p.exported?new Date(p.exported*1000).toLocaleString("ru-RU"):"—";
+document.getElementById("prevCounts").innerHTML=
+  '<tr><td>Профили</td><td><b>'+c.profiles+'</b></td><td class="muted">сейчас '+cur.profiles+'</td></tr>'+
+  '<tr><td>Подписки</td><td><b>'+c.subscriptions+'</b></td><td class="muted">сейчас '+cur.subscriptions+'</td></tr>'+
+  '<tr><td>Устройства подписок</td><td><b>'+c.devices+'</b></td><td class="muted">—</td></tr>'+
+  '<tr><td>Профили AmneziaWG</td><td><b>'+c.awg+'</b></td><td class="muted">—</td></tr>';
+document.getElementById("prevClients").textContent=p.total_new?("Новые клиенты из копии: "+p.new_clients.join(", ")+(p.total_new>p.new_clients.length?" и ещё "+(p.total_new-p.new_clients.length):"")):"Список клиентов копии совпадает с текущим.";
+status.textContent="";preview.hidden=false;preview.showModal();
+}catch(err){status.className="panel-setting-status err";status.textContent=err.message;file.value=""}};
+reader.onerror=()=>{status.className="panel-setting-status err";status.textContent="Не удалось прочитать файл.";file.value=""};
+reader.readAsDataURL(f)});
+const restoreBtn=document.getElementById("importConfirm");
+if(restoreBtn)restoreBtn.addEventListener("click",async()=>{if(!(await onyxConfirm("Заменить текущие настройки, клиентов и заглушки содержимым копии?",{title:"Восстановление из копии",ok:"Восстановить",danger:true})))return;preview.close();preview.hidden=true;file.value="";submit(importForm,status)});
+const cancelBtn=document.getElementById("importCancel");
+if(cancelBtn)cancelBtn.addEventListener("click",()=>{preview.close();preview.hidden=true;data.value="";file.value=""})};
+})();
+</script>
+<script>
+(()=>{const tbody=document.getElementById('loginLogRows');
+if(!tbody)return;
+const rows=Array.prototype.slice.call(tbody.rows);
+if(rows.length<=3)return;
+const per=3,pages=Math.ceil(rows.length/per);
+let page=0;
+const pager=document.getElementById('loginPager'),label=document.getElementById('loginPageLabel'),
+      prev=document.getElementById('loginPrev'),next=document.getElementById('loginNext');
+function render(){
+  rows.forEach((r,i)=>{r.hidden=i<page*per||i>=page*per+per});
+  label.textContent=(page+1)+' / '+pages;
+  prev.disabled=page===0;
+  next.disabled=page===pages-1;
+}
+prev.addEventListener('click',()=>{if(page>0){page--;render()}});
+next.addEventListener('click',()=>{if(page<pages-1){page++;render()}});
+pager.hidden=false;
+render();
+})();
+</script>'''
+            security_js='''<script>
+(()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
+const post=async(url,data)=>{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(data)});
+let res;try{res=await r.json()}catch(e){throw new Error("Панель вернула некорректный ответ.")}
+if(!r.ok||!res.ok)throw new Error(res.message||"Операция не выполнена.");return res};
+["tgForm","backupForm","observerForm"].forEach(id=>{const f=document.getElementById(id);if(!f)return;const s=document.getElementById(id.replace("Form","Status"));
+f.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Применяю…";
+const fd=new FormData(f),payload={};fd.forEach((v,k)=>payload[k]=v);
+try{const res=await post(f.getAttribute("action"),payload);s.className="panel-setting-status ok";s.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Сохранено.")}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}})});
+const totpSetupBtn=document.getElementById("totpSetupBtn"),totpDialog=document.getElementById("totpDialog");
+if(totpSetupBtn){const s=document.getElementById("totpDialogStatus"),codeHidden=document.getElementById("totpCode");
+const cells=Array.from(document.querySelectorAll("#totpCells input"));
+const syncCode=()=>{codeHidden.value=cells.map(c=>c.value).join("")};
+cells.forEach((cell,i)=>{cell.addEventListener("input",()=>{cell.value=cell.value.replace(/\\D/g,"").slice(0,1);if(cell.value&&i<cells.length-1)cells[i+1].focus();syncCode()});cell.addEventListener("keydown",e=>{if(e.key==="Backspace"&&!cell.value&&i>0){cells[i-1].focus();cells[i-1].value="";syncCode();e.preventDefault()}});cell.addEventListener("paste",e=>{const digits=(e.clipboardData||window.clipboardData).getData("text").replace(/\\D/g,"");if(!digits)return;e.preventDefault();digits.split("").slice(0,cells.length).forEach((d,j)=>cells[j].value=d);cells[Math.min(digits.length,cells.length-1)].focus();syncCode()})});
+totpSetupBtn.addEventListener("click",async()=>{s.className="panel-setting-status";s.textContent="Готовлю секрет…";
+try{const res=await post(PATH+"/totp-setup",{csrf:CSRF});
+document.getElementById("totpSecret").textContent=res.secret||"";
+const img=document.getElementById("totpQr");if(res.qr){img.src=res.qr;img.hidden=false}else img.hidden=true;
+const dstatus=document.getElementById("totpDialogStatus");dstatus.textContent="";dstatus.className="totp-status";
+cells.forEach(c=>c.value="");codeHidden.value="";cells[0].focus();totpDialog.showModal()}catch(err){s.className="panel-setting-status err";s.textContent=err.message}});}
+const totpConfirm=document.getElementById("totpConfirm");
+if(totpConfirm)totpConfirm.addEventListener("click",async()=>{
+const s=document.getElementById("totpDialogStatus");s.className="totp-status";s.textContent="Проверяю код…";
+try{const res=await post(PATH+"/totp-enable",{csrf:CSRF,code:document.getElementById("totpCode").value.trim()});
+s.className="panel-setting-status ok";s.textContent=res.message;document.getElementById("totpDialog").close();setTimeout(()=>location.reload(),900)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message}});
+const totpDisableBtn=document.getElementById("totpDisableBtn");
+if(totpDisableBtn){const dcells=Array.from(document.querySelectorAll("#totpDisableCells input")),dHidden=document.getElementById("totpDisableCode"),dStatus=document.getElementById("totpDisableStatus"),dDialog=document.getElementById("totpDisableDialog"),dConfirm=document.getElementById("totpDisableConfirm");
+const dSync=()=>{dHidden.value=dcells.map(c=>c.value).join("")};
+dcells.forEach((cell,i)=>{cell.addEventListener("input",()=>{cell.value=cell.value.replace(/\\D/g,"").slice(0,1);if(cell.value&&i<dcells.length-1)dcells[i+1].focus();dSync()});cell.addEventListener("keydown",e=>{if(e.key==="Backspace"&&!cell.value&&i>0){dcells[i-1].focus();dcells[i-1].value="";dSync();e.preventDefault()}});cell.addEventListener("paste",e=>{const digits=(e.clipboardData||window.clipboardData).getData("text").replace(/\\D/g,"");if(!digits)return;e.preventDefault();digits.split("").slice(0,dcells.length).forEach((d,j)=>dcells[j].value=d);dcells[Math.min(digits.length,dcells.length-1)].focus();dSync()})});
+totpDisableBtn.addEventListener("click",()=>{dStatus.textContent="";dStatus.className="totp-status";dcells.forEach(c=>c.value="");dHidden.value="";dDialog.showModal();setTimeout(()=>dcells[0].focus(),30)});
+dConfirm.addEventListener("click",async()=>{
+if(dHidden.value.trim().length!==6){dStatus.className="totp-status err";dStatus.textContent="Введите 6 цифр из приложения.";return}
+const s=document.getElementById("totpStatus");dConfirm.disabled=true;dConfirm.textContent="Выключаем…";dStatus.className="totp-status";dStatus.textContent="Выключаю…";dDialog.classList.add("working");
+try{const res=await post(PATH+"/totp-disable",{csrf:CSRF,code:dHidden.value.trim()});
+dDialog.classList.remove("working");dDialog.classList.add("done");
+dStatus.className="panel-setting-status ok";dStatus.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"2FA выключена.");
+setTimeout(()=>{dDialog.close();location.reload()},900)}
+catch(err){dStatus.className="totp-status err";dStatus.textContent=err.message}
+finally{dConfirm.disabled=false;dConfirm.textContent="Выключить"}});
+dDialog.addEventListener("close",()=>dDialog.classList.remove("working","done"));}
+const apiKeyForm=document.getElementById("apiKeyForm"),apiKeyDialog=document.getElementById("apiKeyDialog");
+if(apiKeyForm){const s=document.getElementById("apiKeyStatus");
+apiKeyForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Создаю…";
+const fd=new FormData(apiKeyForm),payload={};fd.forEach((v,k)=>payload[k]=v);
+try{const res=await post(apiKeyForm.getAttribute("action"),payload);s.textContent="";
+document.getElementById("apiKeyToken").value=res.token||"";apiKeyDialog.showModal();apiKeyForm.reset()}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message}});}
+const copyBtn=document.getElementById("apiKeyCopy");
+if(copyBtn)copyBtn.addEventListener("click",()=>{const t=document.getElementById("apiKeyToken");t.select();try{navigator.clipboard.writeText(t.value)}catch(e){document.execCommand("copy")}});
+
+// --- Обход ТСПУ и защита ---
+const bypassPost=async(url,data)=>{const r=await fetch(url,{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(data)});let j;try{j=await r.json()}catch(e){throw new Error("Панель недоступна. Обновите страницу.")}if(!r.ok||!j.ok)throw new Error(j.message||"Операция не выполнена.");return j};
+const bypassForm=document.getElementById("bypassForm");
+if(bypassForm){const s=document.getElementById("bypassStatus");
+bypassForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Применяю…";
+const fd=new FormData(bypassForm),payload={};fd.forEach((v,k)=>payload[k]=v);["fp_rotation","least_ping","ipv6","honeypot","unbound"].forEach(k=>{if(!(k in payload))payload[k]=""});
+try{const r=await fetch(bypassForm.getAttribute("action"),{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(payload)});
+let j;try{j=await r.json()}catch(err){throw new Error("Панель недоступна. Обновите страницу.")}
+if(!r.ok||!j.ok)throw new Error(j.message||"Не удалось сохранить.");
+s.className="panel-setting-status ok";s.textContent=j.message||"Сохранено. Xray применяет в фоне…";if(window.onyxToast)onyxToast(j.message||"Сохранено.");setTimeout(()=>location.reload(),1400)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}});}
+document.querySelectorAll("[data-preset]").forEach(btn=>{btn.addEventListener("click",async()=>{
+const s=document.getElementById("presetStatus");s.className="panel-setting-status";s.textContent="Применяю пресет…";
+document.querySelectorAll("[data-preset]").forEach(b=>b.disabled=true);
+try{const res=await bypassPost("{PANEL_PATH}/security-preset",{csrf:"{token}",level:btn.dataset.preset});
+s.className="panel-setting-status ok";s.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Пресет применён.");setTimeout(()=>location.reload(),700)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}
+finally{document.querySelectorAll("[data-preset]").forEach(b=>b.disabled=false)}});});
+// --- Промокоды (карточка «Тарифы и триал») ---
+const promoForm=document.getElementById("promoForm");
+if(promoForm){const s=document.getElementById("promoStatus");
+promoForm.addEventListener("submit",async e=>{e.preventDefault();s.className="panel-setting-status";s.textContent="Создаю…";
+try{const fd=new FormData(promoForm),payload={};fd.forEach((v,k)=>payload[k]=v);
+const res=await bypassPost(promoForm.getAttribute("action"),payload);if(window.onyxToast)onyxToast(res.message||"Промокод создан.");setTimeout(()=>location.reload(),500)}
+catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}});}
+})();
+</script>'''
+            body=f'''<div class="page-head"><div><span class="eyebrow">ONYX PANEL / STUDIO</span><h1>Настройки</h1><p>Оформление сайта и доступ к панели</p></div></div>
+<style>{extra_cards2["style"]}</style>
+<div class="settings-flow">
+<div class="settings-col">
+<div class="card settings-card collapsible"><div class="card-title"><div><h2>Панель</h2><p>Адрес входа и учётные данные администратора</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Адрес панели</b><small>Секретный путь входа — любой, от 4 символов: /xray, /my-vpn, /ab12. Меняйте его, если ссылка стала известна посторонним. После смены панель перезапустится — входите заново по новому адресу.</small></div><form id="panelPathForm" action="{PANEL_PATH}/panel-path"><p class="panel-current"><span>Текущий адрес</span><code>{panel_url}</code></p><input type=hidden name=csrf value="{token}"><label for="panelPathInput">Новый путь</label><input id="panelPathInput" name="path" value="{esc(PANEL_PATH)}" spellcheck="false" autocomplete="off" required><div class="actions"><button type="submit" class="btn primary">Сменить адрес</button></div><p class="panel-setting-status" id="panelPathStatus" role="status"></p></form></section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Логин и пароль</b><small>Данные для входа в панель. Смена пароля завершает все сессии — вход по новому паролю.</small></div><form id="panelAccessForm" data-login="{PANEL_PATH}/panel-login" data-password="{PANEL_PATH}/panel-password" data-goto="{PANEL_PATH}/login"><input type=hidden name=csrf value="{token}"><div class="admin-access-grid"><div><label for="panelLoginInput">Логин</label><input id="panelLoginInput" name="user" value="{admin_login}" maxlength="64" autocomplete="username" required><small>От 1 до 64 символов</small></div><div><label for="panelPasswordInput">Новый пароль</label><input id="panelPasswordInput" type=password name="a" minlength="3" autocomplete="new-password" placeholder="Оставить текущий"><small>Минимум 3 символа</small></div></div><div class="actions"><button type="submit" class="btn primary">Изменить доступ</button></div><p class="panel-setting-status" id="panelAccessStatus" role="status"></p></form></section>
+</div>
+<div class="move-overlay" id="moveOverlay" hidden><div class="move-card"><div class="move-ring"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="move-ring-bg" cx="50" cy="50" r="44"/><circle class="move-ring-fg" id="moveRing" cx="50" cy="50" r="44"/></svg><b id="moveSecs">8</b></div><h3>Панель переезжает</h3><p id="moveText">Адрес изменён. Caddy и панель перезапускаются — сейчас откроется новый адрес входа. Войдите на нём заново.</p><code id="moveUrl"></code><a class="btn primary" id="moveLink" href="#">Перейти сейчас</a></div></div>
+</div>
+{tg_card}
+{plans_card}
+	{extra_cards2['observe']}
+	{extra_cards2['ports']}
+	</div>
+	<div class="settings-col">
+	{bypass_card}
+	<div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
+	<div class="card-body">
+	<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
+	</div>
+	</div>
+	{security_card}
+	{extra_cards2['cloud']}
+	</div>
+</div>
+{editor_card}
+{editor_rest}
+{extra_cards2['script']}
+{security_dialogs}
+<dialog id="importPreview" class="create-dialog" hidden><div class="dialog-head"><div><h2>Что заменит эта копия</h2><small id="prevVersion">—</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><p class="muted" style="font-size:11px;margin:0 0 10px">Копия создана: <span id="prevExported">—</span>. Восстановление заменяет настройки, клиентов и заглушки целиком; прежнее состояние сохраняется в /var/lib/onyx-panel/import-backup.</p><p id="prevWarning" class="panel-setting-status warn" hidden style="margin:0 0 10px"></p><table class="login-log"><thead><tr><th>Что</th><th>В копии</th><th>Сейчас</th></tr></thead><tbody id="prevCounts"></tbody></table><p class="note" id="prevClients" style="margin:12px 0 0"></p><div class="actions create-actions"><button type="button" class="btn" id="importCancel">Отмена</button><button type="button" class="btn primary" id="importConfirm">Восстановить</button></div></div></dialog>
+{panel_js}{security_js.replace("@@PATH@@",json.dumps(PANEL_PATH)).replace("@@CSRF@@",json.dumps(token))}'''
+            self.send_html(layout("Настройки",body,"settings",self.csrf())); return
+
+        self.redirect("/")
+
+    def do_POST(self):
+        i18n.set_request(self.headers.get("Accept-Language",""))
+        path=urlparse(self.path).path
+
+        if path.startswith(node_api.API_PREFIX+"/"):
+            if not self.api_auth(): return
+            try:
+                request=self.json_request()
+                if path==node_api.API_PREFIX+"/federation/sync":
+                    result=ctl_manager_json("federation-sync",request)
+                    profiles=[{"id":u["id"],"protocol":u["protocol"],
+                        "link":proxy_link(u["protocol"],u["secret"],u.get("backend_port",443),u.get("name",request.get("name","")),u.get("username",""),u["id"])}
+                        for u in result.get("profiles",[])]
+                    self.send_json({"ok":True,"profiles":profiles}); return
+                if path==node_api.API_PREFIX+"/federation/delete":
+                    result=ctl_manager_json("federation-delete",request)
+                    self.send_json({"ok":True,"deleted":bool(result.get("deleted"))}); return
+                if path==node_api.API_PREFIX+"/federation/purge":
+                    result=ctl_manager_json("federation-purge",{})
+                    self.send_json({"ok":True,"deleted":int(result.get("deleted",0))}); return
+                if path==node_api.API_PREFIX+"/routing":
+                    # The controller pushes its routing policy: traffic that
+                    # terminates on this node must follow the same direct and
+                    # block rules as the panel itself.
+                    routing_api.save(ROUTING_FILE,routing_api.normalize(request))
+                    try: ctl("cascade-apply")
+                    except Exception as exc:
+                        self.send_json({"ok":False,"message":"Rules saved, apply failed: "+cascade_detail(exc)[:140]},503); return
+                    self.send_json({"ok":True}); return
+                if path==node_api.API_PREFIX+"/profiles/create":
+                    protocol=str(request.get("protocol","")); name=str(request.get("name","")).strip()
+                    if protocol not in ("web","mtproto","vless","hysteria","awg20","awg31") or not name or len(name)>80:
+                        self.send_json({"ok":False,"message":"Invalid profile"},400); return
+                    user=(ctl_manager_json("add-json",{"protocol":protocol,"name":name,
+                        "port":request.get("port"),"devices":request.get("devices",1)})
+                        if protocol=="mtproto" else ctl("add",protocol,name))
+                    self.send_json({"ok":True,"profile":{"id":user["id"],"name":user["name"],"protocol":protocol,
+                        "link":proxy_link(protocol,user["secret"],user.get("backend_port",443),name,user.get("username",""),user["id"])}},201); return
+                if path==node_api.API_PREFIX+"/profiles/delete":
+                    uid=str(request.get("id",""))
+                    if not re.fullmatch(r"[a-f0-9]{16}",uid): self.send_json({"ok":False,"message":"Invalid profile id"},400); return
+                    ctl("delete",uid); self.send_json({"ok":True}); return
+                if path==node_api.API_PREFIX+"/panel-update":
+                    # The controlling panel asks this node to bring its own
+                    # Onyx Panel up to the controller's version.
+                    wanted=str(request.get("version","") or "").strip()
+                    try: catalog=web_updates.check_release()
+                    except (OSError,subprocess.TimeoutExpired):
+                        self.send_json({"ok":False,"message":"Нода не смогла связаться с репозиторием обновлений."},503); return
+                    releases=[str(r) for r in (catalog or {}).get("releases",[]) if isinstance(r,str)]
+                    target=wanted if wanted in releases else str((catalog or {}).get("latest","") or "")
+                    if not target:
+                        self.send_json({"ok":False,"message":"Каталог релизов на ноде пуст."},503); return
+                    try: web_updates.start_update(target)
+                    except ValueError as exc:
+                        text=str(exc)
+                        if "уже установлена" in text:
+                            self.send_json({"ok":True,"message":"Нода уже на этой версии."}); return
+                        if "уже выполняется" in text:
+                            self.send_json({"ok":True,"message":"Обновление ноды уже выполняется."}); return
+                        self.send_json({"ok":False,"message":text},409); return
+                    audit('node-remote-update',target,'запущено обновление панели на ноде')
+                    self.send_json({"ok":True,"message":"Обновление ноды запущено","target":target}); return
+                self.send_json({"ok":False,"message":"Not found"},404)
+            except (ValueError,json.JSONDecodeError) as exc: self.send_json({"ok":False,"message":str(exc)},400)
+            except Exception as exc:
+                print("API request failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Node operation failed"},503)
+            return
+
+        if path.startswith(PANEL_PATH+"/api/v1/"):
+            self.web_api(path[len(PANEL_PATH)+8:],"POST"); return
+
+        # Login does not require an authenticated session.
+        if path==PANEL_PATH+"/login":
+            client=client_id(self)
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def login_json(ok,message="",field="",code=200,redirect=""):
+                body={"ok":ok}
+                if message:body["message"]=message
+                if field:body["field"]=field
+                if redirect:body["redirect"]=redirect
+                self.send_json(body,code)
+            if login_blocked(client):
+                if async_action:
+                    login_json(False,"Слишком много попыток входа. Повторите позже.","",429)
+                else:
+                    body="Слишком много попыток входа. Повторите позже.".encode("utf-8")
+                    self.send_response(429)
+                    self.send_header("Retry-After",str(LOGIN_WINDOW))
+                    self.send_header("Content-Type","text/html; charset=utf-8")
+                    self.send_header("Content-Length",str(len(body)))
+                    self.end_headers(); self.wfile.write(body)
+                return
+            try: form=self.form(8192)
+            except (ValueError,UnicodeDecodeError):
+                if async_action:login_json(False,"Некорректный запрос.","",400)
+                else:self.send_html("Некорректный запрос.",400)
+                return
+            d=load()
+            username=form.get("user","")
+            password=form.get("password","")
+            admin_ok=username==d.get("admin",{}).get("user","admin") and check_password(password,d.get("admin",{}).get("hash",""))
+            observer=d.get("observer",{}) if isinstance(d.get("observer"),dict) else {}
+            observer_ok=bool(observer.get("user")) and bool(observer.get("hash")) and username==observer.get("user") and check_password(password,observer.get("hash",""))
+            if admin_ok or observer_ok:
+                role="admin" if admin_ok else "observer"
+                totp=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
+                totp_reject=False
+                if totp.get("enabled") and totp.get("secret"):
+                    # RFC 6238 5.2: verify + сверка last_counter + запись —
+                    # атомарно под STATE_LOCK, иначе два параллельных логина
+                    # с одним кодом оба пройдут (TOCTOU).
+                    with STATE_LOCK:
+                        d2=load(); t2=d2.get("totp",{}) if isinstance(d2.get("totp"),dict) else {}
+                        counter=onyx_totp.verify_counter(t2.get("secret") or totp["secret"],form.get("code",""))
+                        try:
+                            last_counter=int(t2.get("last_counter",-1))
+                        except (TypeError,ValueError):
+                            last_counter=-1
+                        totp_reject=counter is None or counter<=last_counter
+                        if not totp_reject:
+                            t2["last_counter"]=counter; d2["totp"]=t2; save(d2)
+                if totp_reject:
+                    login_failed(client)
+                    if async_action:
+                        login_json(False,"Неверный код 2FA","code",401)
+                    else:
+                        # JS-only sign-in page sends X-Onyx-Async; a plain form
+                        # post is a non-JS client — honest 401 page instead of a
+                        # silent redirect.
+                        self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#071116;color:#e9f4f6;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #24404b;border-radius:22px;background:#0f2028}a{color:#8edcff}</style><div class=b><h2>Неверный код 2FA</h2><p>Код двухфакторной аутентификации не подошёл. Попробуйте войти ещё раз.</p><a href="%s/login">Вернуться ко входу</a></div>""" % esc(PANEL_PATH),401)
+                    return
+                token=str(int(time.time()))+"-"+secrets.token_hex(16)+"-"+role
+                sid=sign(token)
+                login_succeeded(client)
+                try:
+                    with STATE_LOCK:
+                        state=load()
+                        fresh=onyx_access.record_login(state,username,role,client_id(self),self.headers.get("User-Agent",""))
+                        onyx_audit.record(state,"login",client_id(self),"вход "+role)
+                        tg_cfg=telegram_api.normalize_config(state.get("telegram",{}))
+                        save(state)
+                    if fresh and telegram_api.configured(tg_cfg) and tg_cfg.get("events",{}).get("logins",True):
+                        threading.Thread(target=telegram_api.notify,args=(tg_cfg,"logins",
+                            "🔐 Вход в панель с нового устройства\nЛогин: %s (%s)\nIP: %s"%(username,role,client_id(self))),daemon=True).start()
+                except Exception:
+                    pass
+                if async_action:
+                    self.send_response(200)
+                    self.send_header("Set-Cookie",self.session_cookie(sid,86400))
+                    redirect_target=(PANEL_PATH+"/dashboard") if PANEL_PATH else "/dashboard"
+                    payload=json.dumps({"ok":True,"redirect":redirect_target})
+                    self.send_header("Content-Type","application/json")
+                    self.send_header("Content-Length",str(len(payload.encode())))
+                    self.end_headers()
+                    self.wfile.write(payload.encode())
+                else:
+                    self.send_response(303)
+                    self.send_header("Set-Cookie",self.session_cookie(sid,86400))
+                    self.send_header("Location",PANEL_PATH+"/dashboard")
+                    self.end_headers()
+            else:
+                login_failed(client)
+                try:
+                    with STATE_LOCK:
+                        state=load()
+                        onyx_access.record_login(state,username,"admin",client,self.headers.get("User-Agent",""),ok=False)
+                        onyx_audit.record(state,"login-failed",client,"логин: "+str(username)[:64])
+                        save(state)
+                except Exception:
+                    pass
+                if async_action:
+                    login_json(False,"Неверный логин или пароль","password",401)
+                else:
+                    # JS-only sign-in page sends X-Onyx-Async; a plain form post is
+                    # a non-JS client — return the honest 401 error page instead of
+                    # silently redirecting it back to the empty form.
+                    self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#071116;color:#e9f4f6;font:15px system-ui}.b{width:min(420px,90vw);padding:28px;border:1px solid #24404b;border-radius:22px;background:#0f2028}a{color:#8edcff}</style><div class=b><h2>Неверный логин или пароль</h2><p>Проверьте данные и попробуйте ещё раз.</p><a href="%s/login">Вернуться ко входу</a></div>""" % esc(PANEL_PATH),401)
+            return
+
+        if path.startswith("/onyx-invite/") and path.endswith("/claim"):
+            token=path[len("/onyx-invite/"):-len("/claim")]
+            if not allow_subscription_request(client_id(self)):
+                self.send_data("Слишком много запросов. Повторите через минуту.",429,headers={"Retry-After":"60"}); return
+            try:
+                sub=invite_claim(token)
+            except ValueError as exc:
+                self.send_html("""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#071116;color:#e9f4f6;font:15px system-ui}.b{width:min(430px,90vw);padding:28px;border:1px solid #24404b;border-radius:22px;background:#0f2028}a{color:#56decb}</style><div class=b><h2>Приглашение не активировано</h2><p>%s</p><a href="/onyx-invite/%s">Вернуться</a></div>""" % (esc(str(exc)),esc(token)),403); return
+            except Exception:
+                self.send_data("Не удалось активировать приглашение. Попробуйте позже.",503); return
+            audit('invite-claim',token,"создана подписка гостя")
+            target="/onyx-invite/"+token+"?sub="+sub["token"]
+            self.send_response(303); self.send_header("Location",target); self.end_headers(); return
+
+        # Everything below requires an authenticated session.
+        if not self.auth():
+            # Данные-запросы получают 401 вместо редиректа на страницу логина —
+            # Safari не следует по таким редиректам ("access control checks").
+            if (self.headers.get("Sec-Fetch-Dest") or "")=="empty":
+                self.send_json({"ok":False,"message":"Сессия завершена. Войдите заново."},401)
+            else:
+                self.redirect("/login")
+            return
+        if self.role()=="observer" and path!=PANEL_PATH+"/logout":
+            message="Режим наблюдателя: доступ только для чтения."
+            if self.headers.get("X-Onyx-Async","")=="1": self.send_json({"ok":False,"message":message},403)
+            else: self.send_html(message,403)
+            return
+
+        try: form=self.form()
+        except (ValueError,UnicodeDecodeError) as e:
+            self.send_html(esc(e),400); return
+        d=load()
+
+        if not self.valid_csrf(form):
+            self.send_html("Недействительный запрос. Обновите страницу и попробуйте снова.",403)
+            return
+
+        if path in (PANEL_PATH+"/update-check",PANEL_PATH+"/update-start"):
+            try:
+                result=web_updates.start_update(form.get("target","")) if path.endswith("/update-start") else web_updates.check_release()
+                if path.endswith("/update-start"): audit('panel-update',form.get("target",""),"запущено обновление панели")
+                self.send_json(result)
+            except ValueError as exc: self.send_json({"message":str(exc)},400)
+            except (OSError,subprocess.TimeoutExpired): self.send_json({"message":"Служба обновления недоступна. Проверьте VPS через SSH."},503)
+            return
+
+        if path in (PANEL_PATH+"/notifications-clear",PANEL_PATH+"/notifications-read"):
+            if path.endswith("-clear"): web_updates.clear_notes()
+            else: web_updates.mark_notes_read()
+            self.send_json({"ok":True}); return
+
+        if path in (PANEL_PATH+"/push-subscribe",PANEL_PATH+"/push-unsubscribe"):
+            try:
+                if path.endswith("-subscribe"): web_push.save_subscription(form.get("endpoint",""),form.get("keys",""))
+                else: web_push.remove_subscription(form.get("endpoint",""))
+                self.send_json({"ok":True})
+            except ValueError as exc: self.send_json({"message":str(exc)},400)
+            return
+
+        if path==PANEL_PATH+"/component-verify":
+            self.send_json(components.verify(form.get("component",""),form.get("target","")))
+            return
+        if path==PANEL_PATH+"/component-status":
+            # Страницы, открытые до обновления панели, продолжают POST-опрос
+            # статуса: отвечаем тем же JSON-ом, что и на GET.
+            self.send_json(components.status()); return
+        if path in (PANEL_PATH+"/component-check",PANEL_PATH+"/component-install"):
+            try:
+                result=(components.start(form.get("component",""),form.get("target",""))
+                        if path.endswith("/component-install") else components.catalog(force=True))
+                self.send_json(result)
+            except ValueError as exc:
+                self.send_json({"message":str(exc)},400)
+            except (OSError,subprocess.TimeoutExpired):
+                self.send_json({"message":"Не удалось связаться с репозиторием или службой обновления."},503)
+            return
+
+        if path==PANEL_PATH+"/node-action":
+            try:
+                operation=form.get("operation","")
+                if operation=="add":
+                    async_add=self.headers.get("X-Onyx-Async","")=="1"
+                    def add_error(message,status=400):
+                        if async_add: self.send_json({"ok":False,"message":str(message)},status)
+                        else: self.send_html(esc(str(message)),status)
+                    try:
+                        bundled=node_api.parse_connection_token(form.get("connection_token",""))
+                        candidate=bundled["url"]
+                        if urlparse(candidate).hostname==DOMAIN:
+                            raise node_api.NodeError("Нельзя добавить эту же панель как удалённую ноду.")
+                        added=node_api.add_node(NODES_FILE,form)
+                        audit('node-add',form.get("url","")[:80],form.get("name",""))
+                        # A freshly added node must serve traffic under the same
+                        # routing policy; the push runs after the redirect returns.
+                        threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
+                    except node_api.NodeError as exc:
+                        add_error(str(exc)); return
+                    if async_add:
+                        self.send_json({"ok":True,"node":added}); return
+                    self.redirect("/nodes")
+                elif operation=="delete":
+                    nodes=node_api.load_nodes(NODES_FILE); uid=form.get("id","")
+                    selected=next((n for n in nodes if n.get("id")==uid),None)
+                    if selected is None: raise node_api.NodeError("Нода не найдена.")
+                    force=form.get("force","")=="1"
+                    async_delete=self.headers.get("X-Onyx-Async","")=="1"
+                    if not force:
+                        # Revoke remotely before forgetting the only credential
+                        # that can remove controller-created profiles from this
+                        # node. Force delete skips this for dead nodes.
+                        try:
+                            node_api.purge_profiles(selected)
+                        except node_api.NodeError as exc:
+                            if async_delete:
+                                self.send_json({"ok":False,"message":str(exc),"can_force":True}); return
+                            raise
+                    with node_api.registry_lock():
+                        # Перечитываем под замком: purge_profiles ходил по сети,
+                        # за это время реестр мог измениться (гонка с add/sync).
+                        fresh_nodes=node_api.load_nodes(NODES_FILE)
+                        node_api.save_nodes(NODES_FILE,[n for n in fresh_nodes if n.get("id")!=uid])
+                    audit('node-delete',uid,(selected.get("name","") or selected.get("url",""))+(" (принудительно)" if force else ""))
+                    if async_delete:
+                        self.send_json({"ok":True}); return
+                    self.redirect("/nodes")
+                elif operation=="location":
+                    node_api.save_location(LOCATION_FILE,form)
+                elif operation=="update":
+                    # Remote panel update: ask the node to bring its own Onyx
+                    # Panel to this controller's version.
+                    uid=form.get("id","")
+                    selected=next((n for n in node_api.load_nodes(NODES_FILE) if n.get("id")==uid),None)
+                    async_update=self.headers.get("X-Onyx-Async","")=="1"
+                    def update_error(message,status=400):
+                        if async_update: self.send_json({"ok":False,"message":str(message)},status)
+                        else: self.send_html(esc(str(message)),status)
+                    if selected is None:
+                        update_error("Нода не найдена."); return
+                    try:
+                        node_api.request(selected,"POST",node_api.API_PREFIX+"/panel-update",
+                            {"version":web_updates.current_version()},timeout=40)
+                    except node_api.NodeError as exc:
+                        update_error(str(exc),502); return
+                    audit('node-update',uid,selected.get("name","") or selected.get("url",""))
+                    if async_update:
+                        self.send_json({"ok":True,"message":"Обновление ноды запущено — версия обновится через несколько минут."}); return
+                    self.redirect("/nodes")
+                else: raise node_api.NodeError("Неизвестная операция с нодой.")
+                self.redirect("/nodes")
+            except node_api.NodeError as exc:
+                self.send_html(esc(str(exc)),400)
+            return
+
+        if path==PANEL_PATH+"/create-account":
+            async_create=self.headers.get("X-Onyx-Async","")=="1"
+            def create_error(message,status=400):
+                if async_create: self.send_json({"ok":False,"message":str(message)},status)
+                else: self.send_html(esc(str(message)),status)
+            name=form.get("name","").strip()
+            kind=form.get("kind","")
+            if not name or len(name)>80 or any(ord(c)<32 for c in name):
+                create_error("Укажите имя длиной от 1 до 80 символов."); return
+            plan=None
+            plan_id=form.get("plan_id","")
+            if plan_id and kind=="subscription":
+                with STATE_LOCK: plan_data=load()
+                if plan_id=="trial":
+                    trial_cfg=plan_data.get("trial") if isinstance(plan_data.get("trial"),dict) else {}
+                    if trial_cfg.get("enabled"):
+                        plan={"days":int(trial_cfg.get("days",3)),"max_devices":int(trial_cfg.get("max_devices",1)),
+                              "protocols":["vless"],"limit_gb":0}
+                else:
+                    plan=next((p for p in (plan_data.get("plans") or []) if isinstance(p,dict)
+                               and p.get("id")==plan_id and p.get("enabled",True)),None)
+            new_id=None
+            if kind=="subscription":
+                if plan:
+                    result=ctl_subscription({"operation":"create","name":name,"max_devices":plan.get("max_devices",0),
+                                             "protocols":[p for p in ("vless","hysteria","tuic") if p in (plan.get("protocols") or [])] or ["vless"]})
+                else:
+                    result=ctl_subscription({"operation":"create","name":name,"max_devices":form.get("max_devices","2"),
+                                             "protocols":[p for p in ("vless","hysteria","tuic") if form.get(p)=="1"]})
+                if not result.get("ok"):
+                    create_error(result.get("message","Ошибка создания подписки"),int(result.get("status",400))); return
+                new_id=result.get("id")
+            elif kind in ("web","mtproto","vless","hysteria","tuic","awg20","awg31"):
+                try:
+                    if kind=="mtproto":
+                        created=ctl_manager_json("add-json",{"protocol":kind,"name":name,
+                            "port":form.get("mtproto_port",""),"devices":form.get("mtproto_devices","1")})
+                        new_id=created.get("id")
+                    else:
+                        created=ctl("add",kind,name); new_id=created.get("id")
+                except ValueError as exc:
+                    create_error(str(exc)); return
+                except Exception as exc:
+                    print("create connection failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                    create_error("Не удалось создать подключение. Проверьте службы через SSH и повторите попытку.",503); return
+            else:
+                create_error("Неизвестный тип доступа"); return
+            plan_days=int(plan.get("days",0)) if isinstance(plan,dict) else 0
+            if new_id and plan_days>0:
+                with STATE_LOCK:
+                    d=load(); d.setdefault("expires",{})[new_id]=int(time.time())+plan_days*86400; save(d)
+            expires_raw=form.get("expires","").strip()
+            if new_id and not plan_days and expires_raw:
+                try:
+                    ts=int(time.mktime(time.strptime(expires_raw,"%Y-%m-%d")))+86399
+                    if ts>time.time():
+                        with STATE_LOCK:
+                            d=load(); d.setdefault("expires",{})[new_id]=ts; save(d)
+                except ValueError:
+                    pass
+            if new_id:
+                limit_note=""
+                try:
+                    limit_gb=int(plan.get("limit_gb",0)) if isinstance(plan,dict) and plan.get("limit_gb") else onyx_limits.validate(form.get("limit_gb","0"))
+                    if limit_gb:
+                        with STATE_LOCK:
+                            d=load(); d.setdefault("traffic_limits",{})[new_id]=limit_gb; save(d)
+                        limit_note=" · лимит %d ГБ/мес"%limit_gb
+                except onyx_limits.LimitError as exc:
+                    audit('client-limit',new_id,"не применён: "+str(exc))
+                audit('client-create',new_id,name+" · "+kind+limit_note)
+            if async_create: self.send_json({"ok":True})
+            else: self.redirect("/users")
+            return
+
+        if path==PANEL_PATH+"/openflux":
+            operation=form.get("operation","")
+            try:
+                if operation=="save":
+                    openflux.configure(form.get("url",""),form.get("ios_compatible","")=="1")
+                elif operation=="enable": openflux.set_enabled(True)
+                elif operation=="disable": openflux.set_enabled(False)
+                elif operation=="rotate": openflux.rotate_key()
+                else: raise openflux.OpenFluxError("Неизвестная операция OpenFlux.")
+                self.redirect("/settings")
+            except openflux.OpenFluxError as exc:
+                self.send_html("Ошибка OpenFlux: "+esc(str(exc)),400)
+            return
+
+        if path==PANEL_PATH+"/openflux-profile":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            operation=form.get("operation","")
+            try:
+                if operation=="create":
+                    openflux.create_profile(form.get("name",""),form.get("url",""),form.get("platform",""),form.get("transport","yandex"),expires=form.get("expires",""))
+                elif operation=="enable": openflux.profile_set_enabled(form.get("id",""),True)
+                elif operation=="disable": openflux.profile_set_enabled(form.get("id",""),False)
+                elif operation=="rotate": openflux.profile_rotate(form.get("id",""))
+                elif operation=="delete": openflux.delete_profile(form.get("id",""))
+                elif operation=="set-fallback": openflux.set_fallback(form.get("id",""),form.get("fallback_url",""),form.get("fallback_transport","yandex"))
+                elif operation=="clear-fallback": openflux.clear_fallback(form.get("id",""))
+                else: raise openflux.OpenFluxError("Неизвестная операция OpenFlux.")
+                if async_action: self.send_json({"ok":True})
+                else: self.redirect("/users")
+            except openflux.OpenFluxError as exc:
+                if async_action: self.send_json({"ok":False,"message":str(exc)},400)
+                else: self.send_html("Ошибка OpenFlux: "+esc(str(exc)),400)
+            return
+
+        if path==PANEL_PATH+"/openflux-mailru-disconnect":
+            openflux.disconnect_mailru()
+            self.send_json({"ok":True,"connected":False,"email":None}); return
+
+        if path==PANEL_PATH+"/openflux-document":
+            # Автосоздание документа на Яндекс Диске от имени OAuth-токена
+            # пользователя; токен хранится в панели с правами 0600.
+            if self.headers.get("X-Onyx-Async","")!="1":
+                self.redirect("/users"); return
+            try:
+                provider=form.get("provider","yandex")
+                if provider=="mailru":
+                    email=form.get("mailru_email","").strip()
+                    password=form.get("mailru_password","")
+                    code=form.get("mailru_code","").strip()
+                    if form.get("action","")=="connect":
+                        # кнопка «Войти и подключить аккаунт»: только вход
+                        try:
+                            connected_email=openflux.save_mailru_credentials(email,password,code or None,
+                                captcha=form.get("mailru_captcha",""),captcha_token=form.get("mailru_captcha_token",""))
+                        except openflux.MailruCaptchaNeeded as cap:
+                            self.send_json({"ok":False,"need_captcha":True,"captcha_token":cap.token,
+                                "captcha_image":"data:image/jpeg;base64,"+base64.b64encode(cap.image).decode(),
+                                "message":str(cap)},400)
+                            return
+                        self.send_json({"ok":True,"connected":True,"email":connected_email})
+                        return
+                    if password:
+                        openflux.save_mailru_credentials(email,password,code or None)
+                    url=openflux.create_mailru_document(form.get("name","") or "OpenFlux")
+                else:
+                    token=form.get("token","").strip()
+                    if token: openflux.save_yandex_token(token)
+                    url=openflux.create_yandex_document(form.get("name","") or "OpenFlux")
+                self.send_json({"ok":True,"url":url})
+            except openflux.OpenFluxError as exc:
+                print("openflux document:",type(exc).__name__,str(exc)[:120],file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":str(exc)},400)
+            except Exception as exc:
+                print("openflux document:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Не удалось создать документ."},500)
+            return
+
+        if path==PANEL_PATH+"/client-action":
+            uid=form.get('id',''); kind=form.get('kind',''); operation=form.get('operation','')
+            if uid!='primary' and not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',uid):
+                self.send_json({'message':'Подключение не найдено.'},400); return
+            if uid=='primary' and operation!='secret':
+                self.send_json({'message':'У основного подключения можно изменить только секрет.'},400); return
+            if operation=='state' and form.get('enabled') not in ('0','1'):
+                self.send_json({'message':'Некорректное состояние доступа.'},400); return
+            if kind not in ('subscription','direct') or operation not in ('state','rename','secret','expiry','limit'):
+                self.send_json({'message':'Недопустимая операция.'},400); return
+            if operation=='limit':
+                try: limit_gb=onyx_limits.validate(form.get('limit_gb','0'))
+                except onyx_limits.LimitError as exc:
+                    self.send_json({'message':str(exc)},400); return
+                with STATE_LOCK:
+                    d=load()
+                    limits=d.setdefault('traffic_limits',{})
+                    if limit_gb: limits[uid]=limit_gb
+                    else: limits.pop(uid,None)
+                    save(d)
+                audit('client-limit',uid,"%d ГБ/мес"%limit_gb if limit_gb else "лимит снят")
+                self.send_json({'ok':True,'message':("Лимит %d ГБ в месяц сохранён."%limit_gb) if limit_gb else "Лимит снят."}); return
+            if operation=='state' and form.get('enabled')=='0':
+                # клиент выключен вручную: лимитный воркер не станет его включать
+                try:
+                    with STATE_LOCK:
+                        d=load()
+                        disabled=d.get('limit_disabled')
+                        if isinstance(disabled,dict): disabled.pop(uid,None)
+                        save(d)
+                except Exception: pass
+            if operation=='secret' and (kind!='direct' or not re.fullmatch(r'(?:dd)?[0-9A-Fa-f]{32}',form.get('secret','').strip())):
+                self.send_json({'message':'Секрет должен содержать 32 символа 0–9, a–f; префикс dd допускается.'},400); return
+            if operation=='rename' and (not form.get('name','').strip() or len(form['name'].strip())>80 or any(ord(c)<32 for c in form['name'])):
+                self.send_json({'message':'Имя должно содержать от 1 до 80 символов без управляющих знаков.'},400); return
+            try:
+                if operation=='expiry':
+                    raw=form.get('expires','').strip()
+                    if raw and not re.fullmatch(r"\d{4}-\d{2}-\d{2}",raw):
+                        self.send_json({'message':'Некорректная дата. Формат ГГГГ-ММ-ДД.'},400); return
+                    with STATE_LOCK:
+                        d=load(); exp=d.setdefault('expires',{})
+                        if raw: exp[uid]=int(time.mktime(time.strptime(raw,"%Y-%m-%d")))+86399
+                        else: exp.pop(uid,None)
+                        save(d)
+                    self.send_json({'ok':True}); return
+                if kind=='subscription':
+                    previous=next((s for s in subscription_registry() if s.get('id')==uid),None)
+                    request={'id':uid,'operation':'set-enabled' if operation=='state' else 'update'}
+                    if operation=='state': request['enabled']=form['enabled']=='1'
+                    else: request['name']=form.get('name','')
+                    result=ctl_subscription(request)
+                    if not result.get('ok'):
+                        self.send_json({'message':result.get('message','Изменение не применено.')},int(result.get('status',400))); return
+                    if operation=='rename' or (operation=='state' and form['enabled']=='0'):
+                        purge_remote_profiles_async(previous)
+                    if operation=='state' and form['enabled']=='1':
+                        with STATE_LOCK:
+                            d=load()
+                            if uid in d.get('expires',{}):
+                                d['expires'].pop(uid,None); save(d)
+                else:
+                    if operation=='state':
+                        ctl('set-user',uid,form['enabled'])
+                        if form['enabled']=='1':
+                            with STATE_LOCK:
+                                d=load()
+                                if uid in d.get('expires',{}):
+                                    d['expires'].pop(uid,None); save(d)
+                    elif operation=='rename': ctl('rename-user',uid,form.get('name',''))
+                    else: ctl_manager_json('set-secret',{'id':uid,'secret':form.get('secret','')})
+                if operation=='state': audit('client-toggle',uid,"доступ "+("включён" if form.get('enabled')=='1' else "выключен"))
+                elif operation=='rename': audit('client-rename',uid,form.get('name','')[:80])
+                elif operation=='secret': audit('client-secret',uid,"секрет заменён")
+                self.send_json({'ok':True})
+            except Exception:
+                self.send_json({'message':'Изменение не применено. Проверьте службы через SSH и обновите список.'},503)
+            return
+
+        if path==PANEL_PATH+"/client-check":
+            uid=form.get('id','')
+            if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',uid):
+                self.send_json({'message':'Подключение не найдено.'},400); return
+            profile=next((u for u in users() if u.get('id')==uid and u.get('protocol')=='vless' and u.get('enabled',True)),None)
+            if profile is None:
+                self.send_json({'message':'Живая проверка доступна для включённых VLESS-подключений.'},400); return
+            link=proxy_link('vless',profile.get('secret',''),int(profile.get('backend_port',443)),profile.get('name',''),profile.get('username',''),uid)
+            existing=client_check_state().get(uid,{})
+            if existing.get('status')=='running':
+                self.send_json({'ok':True,'check':existing}); return
+            client_check_bg(uid,link)
+            audit('client-check',uid,"запущена живая проверка")
+            self.send_json({'ok':True,'check':{'status':'running'}}); return
+
+        if path==PANEL_PATH+"/subscription-action":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            request={k:form[k] for k in ("operation","id","device_id","name","max_devices") if k in form}
+            if request.get("operation") not in ("create","update","toggle","rotate","delete","revoke","allow"):
+                self.send_html("Недопустимая операция",400); return
+            if request["operation"] in ("create","update"):
+                request["protocols"]=[p for p in ("vless","hysteria") if form.get(p)=="1"]
+            previous=next((s for s in subscription_registry() if s.get("id")==request.get("id")),None)
+            result=ctl_subscription(request)
+            if result.get("ok"):
+                audit({"delete":"client-delete","rotate":"subscription-rotate"}.get(request["operation"],"subscription-update"),
+                      request.get("id",""),"подписка: "+request["operation"])
+                if request["operation"] in ("update","delete","rotate","toggle"):
+                    purge_remote_profiles_async(previous)
+                elif request["operation"]=="revoke":
+                    purge_remote_profiles_async(previous,request.get("device_id"))
+                if async_action: self.send_json({"ok":True})
+                else: self.redirect("/users")
+            elif async_action: self.send_json({"ok":False,"message":result.get("message","Ошибка подписки")},int(result.get("status",400)))
+            else: self.send_html(esc(result.get("message","Ошибка подписки")),int(result.get("status",400)))
+            return
+
+        if path==PANEL_PATH+"/custom-preset":
+            try:
+                operation=form.get("operation","")
+                items=custom_presets()
+                if operation=="create":
+                    name=form.get("name","").strip()
+                    description=form.get("description","").strip() or "Пользовательская заглушка"
+                    if not 1<=len(name)<=80: raise ValueError("Название должно содержать от 1 до 80 символов.")
+                    if len(description)>180: raise ValueError("Описание не должно превышать 180 символов.")
+                    if len(items)>=20: raise ValueError("Можно сохранить не более 20 своих заглушек.")
+                    source=validate_html(form.get("html",""))
+                    items.append({"id":"custom-"+secrets.token_hex(8),"name":name,
+                                  "description":description,"html":source,"custom":True})
+                    save_custom_presets(items)
+                elif operation=="delete":
+                    preset_id=form.get("preset","")
+                    if not preset_id.startswith("custom-"): raise ValueError("Встроенный пресет удалить нельзя.")
+                    retained=[item for item in items if item.get("id")!=preset_id]
+                    if len(retained)==len(items): raise ValueError("Заглушка не найдена.")
+                    save_custom_presets(retained)
+                elif operation=="save":
+                    preset_id=form.get("preset","")
+                    if not preset_id.startswith("custom-"): raise ValueError("Встроенную заглушку изменить нельзя — создайте свою.")
+                    target=next((item for item in items if item.get("id")==preset_id),None)
+                    if target is None: raise ValueError("Заглушка не найдена.")
+                    name=form.get("name","").strip()
+                    description=form.get("description","").strip() or "Пользовательская заглушка"
+                    if not 1<=len(name)<=80: raise ValueError("Название должно содержать от 1 до 80 символов.")
+                    if len(description)>180: raise ValueError("Описание не должно превышать 180 символов.")
+                    source=validate_html(form.get("html",""))
+                    target.update(name=name,description=description,html=source)
+                    save_custom_presets(items)
+                else:
+                    raise ValueError("Неизвестная операция.")
+                self.redirect("/settings")
+            except ValueError as exc:
+                self.send_html("Ошибка сохранения заглушки: "+esc(exc),400)
+            except OSError as exc:
+                print("custom preset failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_html("Не удалось сохранить заглушку на сервере.",503)
+            return
+
+        if path in (PANEL_PATH+"/preview-html",PANEL_PATH+"/save-draft",PANEL_PATH+"/draft-preset",PANEL_PATH+"/discard-draft"):
+            try:
+                if path.endswith("/discard-draft"):
+                    with STATE_LOCK:
+                        if os.path.exists(SITE_DRAFT): os.unlink(SITE_DRAFT)
+                else:
+                    source=validate_html(get_preset(form.get("preset",""))["html"] if path.endswith("/draft-preset") else form.get("html",""))
+                    if path.endswith("/preview-html"):
+                        self.send_json({"document":preview_document(source,externalize_inline_assets)}); return
+                    with STATE_LOCK: install_private_file(SITE_DRAFT,source.encode("utf-8"))
+                self.redirect("/settings")
+            except ValueError as exc:
+                self.send_json({"message":str(exc)},400)
+            except (RuntimeError,OSError) as exc:
+                print("landing draft failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"message":"Не удалось обработать черновик. Проверьте службы через SSH."},503)
+            return
+
+        if path==PANEL_PATH+"/add-user":
+            name=form.get("name","").strip()
+            protocol=form.get("protocol","web").strip().lower()
+            if not name or len(name)>80:
+                self.send_html("Имя пользователя обязательно.",400); return
+            if protocol not in ("web","mtproto","vless","hysteria","awg20","awg31"):
+                self.send_html("Неизвестный протокол подключения.",400); return
+            try:
+                result=ctl("add",protocol,name)
+                self.redirect("/users")
+            except Exception as exc:
+                print("create user failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_html("Не удалось создать пользователя. Проверьте службы через SSH и повторите попытку.",503)
+            return
+
+        if path==PANEL_PATH+"/delete-user":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            uid=form.get("id","")
+            if not uid or uid=="primary":
+                if async_action: self.send_json({"ok":False,"message":"Нельзя удалить основной профиль."},400)
+                else: self.send_html("Нельзя удалить основной профиль.",400)
+                return
+            try:
+                ctl("delete",uid)
+                audit('client-delete',uid,"удалён через список клиентов")
+                if async_action: self.send_json({"ok":True})
+                else: self.redirect("/users")
+            except Exception as exc:
+                print("delete user failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                if async_action: self.send_json({"ok":False,"message":"Не удалось удалить пользователя. Обновите список и повторите попытку."},503)
+                else: self.send_html("Не удалось удалить пользователя. Обновите список и повторите попытку.",503)
+            return
+
+        if path==PANEL_PATH+"/client-delete-job":
+            # Удаление клиентов фоновой задачей: модалка показывает таймлайн
+            # (отзыв ключей, очистка нод) по /client-delete-status.
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def deljob_fail(msg):
+                if async_action: self.send_json({"ok":False,"message":i18n.t(msg)},400)
+                else: self.send_html(esc(msg),400)
+            try: items=json.loads(form.get("clients",""))
+            except Exception: items=None
+            if not isinstance(items,list) or not items or len(items)>100:
+                deljob_fail("Некорректный список клиентов."); return
+            clean=[]
+            for item in items:
+                if not isinstance(item,dict): continue
+                kind=item.get("kind","user"); uid=str(item.get("id",""))
+                if kind not in ("subscription","user","openflux"): continue
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}",uid) or (kind!="openflux" and uid=="primary"): continue
+                clean.append({"kind":kind,"id":uid})
+            if not clean:
+                deljob_fail("Нет клиентов для удаления."); return
+            sub_map={}
+            for item in clean:
+                if item["kind"]=="subscription":
+                    sub_map[item["id"]]=next((s for s in subscription_registry() if s.get("id")==item["id"]),None)
+            nodes=[n for n in node_api.load_nodes(NODES_FILE) if n.get("enabled",True)]
+            job_id=secrets.token_hex(8)
+            job={"steps":[
+                    {"key":"revoke","label":"Отзыв ключей доступа","status":"active","done":0,"total":len(clean),"note":""},
+                    {"key":"nodes","label":"Очистка профилей на нодах","status":"active" if nodes and sub_map else "skip","done":0,"total":len(nodes),"note":""}],
+                 "status":"running","done":0,"total":len(clean),"deleted":[],"failed":[],"message":"","ts":time.time()}
+            with DELETE_JOBS_LOCK:
+                for k in [k for k,v in DELETE_JOBS.items() if v.get("status")!="running" and time.time()-v.get("ts",0)>1800]:
+                    DELETE_JOBS.pop(k,None)
+                DELETE_JOBS[job_id]=job
+            threading.Thread(target=run_client_delete_job,args=(job_id,clean,[s for s in sub_map.values() if s],nodes),
+                             name="onyx-client-delete",daemon=True).start()
+            if async_action: self.send_json({"ok":True,"job":job_id})
+            else: self.redirect("/users")
+            return
+
+        if path==PANEL_PATH+"/client-delete-status":
+            with DELETE_JOBS_LOCK: job=DELETE_JOBS.get(form.get("job",""))
+            if job is None:
+                self.send_json({"ok":False,"message":i18n.t("Задача удаления не найдена.")},404); return
+            snapshot=json.loads(json.dumps(job))
+            if i18n.lang()=="en": snapshot=i18n.walk(snapshot)
+            self.send_json({"ok":True,"job":snapshot}); return
+
+        if path==PANEL_PATH+"/site-html":
+            try:
+                with STATE_LOCK:
+                    source=validate_html(form.get("html",""))
+                    install_private_file(SITE_DRAFT,source.encode("utf-8"))
+                    write_site_html(source)
+                    if os.path.exists(SITE_DRAFT): os.unlink(SITE_DRAFT)
+                audit('site-html',"","опубликована заглушка главной страницы")
+                self.redirect("/settings")
+            except ValueError as exc:
+                self.send_html("Ошибка сохранения HTML: "+esc(exc),400)
+            except (RuntimeError,OSError) as exc:
+                print("landing publish failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_html("Не удалось опубликовать HTML. Предыдущая страница сохранена; проверьте службы через SSH.",503)
+            return
+
+        if path==PANEL_PATH+"/apply-preset":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            try:
+                preset=get_preset(form.get("preset",""))
+                # Applying a bundled preset is an explicit publish operation.
+                # Remove a stale custom draft so it cannot overwrite the
+                # selected preset on the next save.
+                with STATE_LOCK:
+                    write_site_html(preset["html"])
+                    if os.path.exists(SITE_DRAFT): os.unlink(SITE_DRAFT)
+                audit('preset-apply',form.get("preset",""),preset.get("name",""))
+                if async_action:
+                    self.send_json({"ok":True,"message":"Заглушка применена и опубликована."})
+                else:
+                    self.redirect("/settings")
+            except ValueError as exc:
+                if async_action: self.send_json({"ok":False,"message":"Ошибка применения пресета: "+str(exc)},400)
+                else: self.send_html("Ошибка применения пресета: "+esc(exc),400)
+            except (RuntimeError,OSError) as exc:
+                print("landing preset failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                if async_action: self.send_json({"ok":False,"message":"Не удалось применить пресет. Предыдущая страница сохранена; проверьте службы через SSH."},503)
+                else: self.send_html("Не удалось применить пресет. Предыдущая страница сохранена; проверьте службы через SSH.",503)
+            return
+
+        if path==PANEL_PATH+"/service-restart":
+            target=form.get("target","")
+            if target not in ("panel","modules"):
+                self.send_json({"ok":False,"message":"Неизвестная цель перезапуска."},400); return
+            if target=="panel":
+                # The response flushes first; the restart then kills this
+                # process on purpose. The browser probes /__health until the
+                # panel is back and reloads on its own.
+                write_restart_status("running","panel","Панель перезапускается…")
+                def panel_job():
+                    time.sleep(0.6)
+                    subprocess.Popen(["systemctl","restart","onyx-panel.service"],start_new_session=True)
+                threading.Thread(target=panel_job,daemon=True).start()
+            else:
+                write_restart_status("running","modules","Перезапуск служб…")
+                def modules_job():
+                    for unit,label in (("onyx-panel-xray.service","Xray"),("tproxy-server.service","релей"),("mtproxy.service","MTProxy")):
+                        write_restart_status("running","modules","Перезапуск: "+label+"…")
+                        try: r=subprocess.run(["systemctl","restart",unit],capture_output=True,text=True,timeout=60)
+                        except subprocess.TimeoutExpired:
+                            write_restart_status("failed","modules",label+": не ответил на перезапуск."); return
+                        if r.returncode or subprocess.run(["systemctl","is-active","--quiet",unit]).returncode:
+                            st=subprocess.run(["journalctl","-u",unit,"-n","5","--no-pager"],capture_output=True,text=True)
+                            detail=((r.stderr or "")+st.stdout).strip()[-160:]
+                            write_restart_status("failed","modules",label+": "+(detail or "служба не поднялась")); return
+                    write_restart_status("done","modules","Модули перезапущены.")
+                threading.Thread(target=modules_job,daemon=True).start()
+            self.send_json({"ok":True}); return
+
+        if path==PANEL_PATH+"/routing-save":
+            try:
+                # Older clients omit block_torrents; keep the stored toggle
+                # instead of silently resetting it on every rules save.
+                torrent=form.get("block_torrents")
+                data={"direct_ips":form.get("direct_ips","").split(","),
+                      "direct_domains":form.get("direct_domains","").split(","),
+                      "ipv4_domains":form.get("ipv4_domains","").split(","),
+                      "block_torrents":routing_api.load(ROUTING_FILE).get("block_torrents",False) if torrent is None else torrent=="1"}
+                routing_api.save(ROUTING_FILE,data)
+                audit('routing-save',"","правила маршрутизации сохранены")
+                try:
+                    ctl("cascade-apply")
+                    threading.Thread(target=sync_routing_to_nodes,name="onyx-routing-sync",daemon=True).start()
+                    message="Правила сохранены — применяются на панели и нодах…"
+                except Exception as exc:
+                    raise routing_api.RoutingError("Правила сохранены, но применить не удалось: "+str(exc)[-160:])
+                self.send_json({"ok":True,"message":message}); return
+            except routing_api.RoutingError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить правила: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("routing save failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/routing-torrent":
+            enabled=form.get("enabled")
+            if enabled not in ("0","1"):
+                self.send_json({"ok":False,"message":"Некорректное значение."},400); return
+            try:
+                data=routing_api.load(ROUTING_FILE)
+                data["block_torrents"]=enabled=="1"
+                routing_api.save(ROUTING_FILE,data)
+                ctl("cascade-apply")
+                self.send_json({"ok":True,"message":"Торренты заблокированы." if enabled=="1" else "Блокировка торрентов выключена."})
+                return
+            except routing_api.RoutingError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить правила: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("routing torrent failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/reality-setup":
+            operation=form.get("operation","")
+            try:
+                if operation=="enable":
+                    port=int(form.get("port","2053") or 2053)
+                    dest=str(form.get("dest","") or "").strip()
+                    busy={80,443,8443}
+                    for u in users():
+                        try: busy.add(int(u.get("backend_port",0) or 0))
+                        except (TypeError,ValueError): pass
+                    if port in busy:
+                        raise reality_api.RealityError("Порт %d уже занят панелью или её службами — выберите другой."%port)
+                    reality_api.setup(REALITY_FILE,port=port,dest=dest)
+                    ctl("cascade-apply"); ctl("firewall")
+                    self.send_json({"ok":True,"message":"Reality включён — ссылки появятся в подписках и профилях vless-клиентов."}); return
+                if operation=="test-mask":
+                    result=reality_api.check_dest(str(form.get("dest","") or "").strip())
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Маска не проверена.")},502); return
+                    self.send_json({"ok":True,"message":result.get("message","")}); return
+                if operation=="selftest":
+                    r=reality_api.load(REALITY_FILE)
+                    user=next((u for u in users() if u.get("enabled",True) and u.get("protocol")=="vless" and u.get("secret")),None)
+                    if user is None:
+                        self.send_json({"ok":False,"message":"Нет включённых vless-клиентов для проверки."},400); return
+                    result=reality_api.selftest(r,user["secret"])
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Проверка не удалась.")},502); return
+                    self.send_json({"ok":True,"message":"Подключение через Reality работает: IP "+result.get("exit_ip","?")}); return
+                if operation=="disable":
+                    reality_api.reset(REALITY_FILE)
+                    ctl("cascade-apply"); ctl("firewall")
+                    self.send_json({"ok":True,"message":"Reality отключён — Reality-ссылки убраны из подписок."}); return
+                self.send_json({"ok":False,"message":"Неизвестная операция."},400); return
+            except reality_api.RealityError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("reality setup failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/routing-warp":
+            operation=form.get("operation","")
+            try:
+                if operation=="register":
+                    warp_api.register(WARP_FILE)
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"WARP зарегистрирован. Теперь включите выход нужным клиентам — кнопкой-облаком в списке «Клиенты»."}); return
+                if operation=="config":
+                    warp_api.import_config(WARP_FILE,form.get("config",""))
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"Конфиг WARP применён."}); return
+                if operation=="test":
+                    state=warp_api.load(WARP_FILE)
+                    result=warp_api.check(state)
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":result.get("message","Проверка не удалась.")},502); return
+                    warp_api.record_check(WARP_FILE,result)
+                    self.send_json({"ok":True,"message":"Выход через WARP работает: IP "+result.get("exit_ip","?"),"exit_ip":result.get("exit_ip","")}); return
+                if operation=="disable":
+                    warp_api.reset(WARP_FILE)
+                    ctl("cascade-apply")
+                    self.send_json({"ok":True,"message":"WARP отключён — конфигурация удалена из Xray."}); return
+                self.send_json({"ok":False,"message":"Неизвестная операция."},400); return
+            except warp_api.WarpError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("routing warp failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/warp-user":
+            uid=form.get("id",""); enabled=form.get("enabled")=="1"
+            if not re.fullmatch(r"[a-f0-9]{16}",uid or ""):
+                self.send_json({"ok":False,"message":"Некорректный идентификатор клиента."},400); return
+            try:
+                state=warp_api.load(WARP_FILE)
+                if not warp_api.configured(state):
+                    self.send_json({"ok":False,"message":"Сначала настройте WARP на вкладке «Маршрутизация»."},400); return
+                ids=warp_profile_ids(uid)
+                if not ids:
+                    self.send_json({"ok":False,"message":"Выход через WARP доступен только клиентам VLESS и Hysteria2."},400); return
+                if enabled and not state.get("exit_ip"):
+                    # Первый включение без пройденной проверки — проверяем туннель сразу.
+                    result=warp_api.check(state)
+                    if not result.get("ok"):
+                        self.send_json({"ok":False,"message":"Туннель WARP не прошёл проверку: "+result.get("message","")},502); return
+                    warp_api.record_check(WARP_FILE,result)
+                warp_api.set_users(WARP_FILE,ids,enabled)
+                ctl("cascade-apply")
+                self.send_json({"ok":True,"message":"Выход через WARP включён." if enabled else "Выход через WARP выключен.","warp":enabled}); return
+            except warp_api.WarpError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Не удалось применить конфигурацию: "+str(exc)[-160:]},503); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("warp user failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Операция не выполнена. Проверьте службы панели."},503); return
+        if path==PANEL_PATH+"/cascade-speed":
+            uid=form.get("id","")
+            if not re.fullmatch(r"[a-f0-9]{16}",uid or ""):
+                self.send_json({"ok":False,"message":"Некорректный идентификатор каскада."},400); return
+            def speed_job(uid=uid):
+                def worker():
+                    with APPLY_LOCK:
+                        record=next((c for c in cascade_api.load_cascades(CASCADES_FILE) if c.get("id")==uid),None)
+                        if record is None: return
+                        try: result=cascade_api.speedtest(record)
+                        except Exception as exc:
+                            result={"ok":False,"mbps":0.0,"seconds":0.0,
+                                    "message":cascade_detail(exc)[:160],"checked_at":int(time.time())}
+                        cascade_touch(uid,speed=result,pending=False)
+                return worker
+            threading.Thread(target=speed_job(),daemon=True).start()
+            self.send_json({"ok":True,"message":"Замер запущен — результат появится в карточке через полминуты."}); return
+        if path==PANEL_PATH+"/failover-toggle":
+            enabled=form.get("enabled")=="1"
+            with STATE_LOCK:
+                d=load()
+                fo=d.get("failover") if isinstance(d.get("failover"),dict) else {}
+                fo["enabled"]=enabled; d["failover"]=fo; save(d)
+            self.send_json({"ok":True,"message":"Автопереключение включено." if enabled else "Автопереключение выключено."}); return
+        if path==PANEL_PATH+"/telegram-save":
+            try:
+                cfg=telegram_api.normalize_config({"token":form.get("token","").strip(),"chat":form.get("chat","").strip(),
+                     "events":{k:form.get("event_"+k)=="1" for k in telegram_api.EVENT_KEYS},
+                     "quiet":{"enabled":form.get("quiet_enabled")=="1","from":form.get("quiet_from","23"),"to":form.get("quiet_to","7")}})
+                action=form.get("action","save")
+                if cfg["token"]:
+                    if action=="test":
+                        if not cfg["chat"]: raise ValueError("Укажите Chat ID — некуда отправлять проверку.")
+                        telegram_api.send_message(cfg["token"],cfg["chat"],"✅ Onyx Panel: тест уведомлений. Канал работает.")
+                        message="Тестовое сообщение отправлено в Telegram."
+                    else:
+                        telegram_api.get_me(cfg["token"])
+                        message="Настройки уведомлений сохранены."
+                else:
+                    message="Уведомления выключены: токен не задан."
+                with STATE_LOCK:
+                    d=load(); d["telegram"]=cfg; save(d)
+                if action!="test": audit('telegram-save',"",message)
+                self.send_json({"ok":True,"message":message}); return
+            except ValueError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            except RuntimeError as exc:
+                self.send_json({"ok":False,"message":"Telegram: "+str(exc)[:150]},400); return
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("telegram save failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                self.send_json({"ok":False,"message":"Не удалось связаться с Telegram. Проверьте токен и сеть."},503); return
+        if path==PANEL_PATH+"/totp-setup":
+            with STATE_LOCK:
+                d=load()
+                t=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
+                # Пересоздание секрета при включённой 2FA отключает защиту:
+                # требуем действующий код, как при totp-disable.
+                if t.get("enabled") and t.get("secret"):
+                    code=form.get("code","").strip()
+                    counter=onyx_totp.verify_counter(t["secret"],code)
+                    try:
+                        last_counter=int(t.get("last_counter",-1))
+                    except (TypeError,ValueError):
+                        last_counter=-1
+                    # Тот же replay-контроль, что и на логине: код с прошлого
+                    # входа не должен подходить для пересоздания секрета.
+                    if counter is None or counter<=last_counter:
+                        self.send_json({"ok":False,"message":"2FA уже включена. Введите текущий код, чтобы пересоздать секрет."},400); return
+                secret=onyx_totp.generate_secret()
+                d["totp"]={"secret":secret,"enabled":False}; save(d)
+                account=d.get("admin",{}).get("user","admin")
+            uri=onyx_totp.provisioning_uri(secret,account)
+            try:
+                png=qr_png_bytes(uri); qr="data:image/png;base64,"+base64.b64encode(png).decode("ascii")
+            except Exception:
+                qr=""
+            self.send_json({"ok":True,"secret":secret,"uri":uri,"qr":qr}); return
+        if path==PANEL_PATH+"/totp-enable":
+            code=form.get("code","").strip()
+            with STATE_LOCK:
+                d=load(); t=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
+                if not t.get("secret"):
+                    self.send_json({"ok":False,"message":"Сначала создайте секрет двухфакторной аутентификации."},400); return
+                if not onyx_totp.verify(t["secret"],code):
+                    self.send_json({"ok":False,"message":"Код не подошёл. Проверьте время на устройстве и попробуйте снова."},400); return
+                d["totp"]={"secret":t["secret"],"enabled":True}; save(d)
+            audit('totp-enable',"","2FA включена")
+            self.send_json({"ok":True,"message":"Двухфакторная аутентификация включена."}); return
+        if path==PANEL_PATH+"/totp-disable":
+            code=form.get("code","").strip()
+            with STATE_LOCK:
+                d=load(); t=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
+                if not t.get("enabled"):
+                    self.send_json({"ok":False,"message":"Двухфакторная аутентификация не включена."},400); return
+                if not onyx_totp.verify(t["secret"],code):
+                    self.send_json({"ok":False,"message":"Код не подошёл."},400); return
+                d["totp"]={}; save(d)
+            audit('totp-disable',"","2FA выключена")
+            self.send_json({"ok":True,"message":"Двухфакторная аутентификация выключена."}); return
+        if path==PANEL_PATH+"/api-keys-create":
+            name=form.get("name","").strip() or "Ключ"
+            if len(name)>60:
+                self.send_json({"ok":False,"message":"Название ключа: до 60 символов."},400); return
+            with STATE_LOCK:
+                d=load(); keys=d.get("api_keys",[]) if isinstance(d.get("api_keys"),list) else []
+                if len(keys)>=onyx_webapi.MAX_KEYS:
+                    self.send_json({"ok":False,"message":"Достигнут лимит ключей (%d). Отзовите ненужные."%onyx_webapi.MAX_KEYS},400); return
+                key,token=onyx_webapi.new_key(name)
+                keys.append(key); d["api_keys"]=keys; save(d)
+            audit('api-key-create',name)
+            self.send_json({"ok":True,"token":token,"message":"Ключ создан. Токен показывается один раз — скопируйте его."}); return
+        if path==PANEL_PATH+"/api-keys-delete":
+            kid=form.get("id","")
+            with STATE_LOCK:
+                d=load()
+                d["api_keys"]=[k for k in (d.get("api_keys",[]) if isinstance(d.get("api_keys"),list) else []) if k.get("id")!=kid]
+                save(d)
+            audit('api-key-delete',kid)
+            self.send_json({"ok":True,"message":"Ключ отозван."}); return
+        if path==PANEL_PATH+"/backups-save":
+            try:
+                mode=form.get("mode","off"); hour=int(form.get("hour","4")); keep=int(form.get("keep","7"))
+            except ValueError:
+                self.send_json({"ok":False,"message":"Некорректные параметры расписания."},400); return
+            if mode not in ("off","telegram") or not 0<=hour<=23 or not 3<=keep<=30:
+                self.send_json({"ok":False,"message":"Некорректные параметры расписания."},400); return
+            with STATE_LOCK:
+                d=load(); b=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+                b.update({"mode":mode,"hour":hour,"keep":keep}); d["backups"]=b; save(d)
+            audit('backups-save',"",mode+" · "+str(hour)+":00")
+            self.send_json({"ok":True,"message":"Расписание автобэкапа сохранено." if mode!="off" else "Автобэкап выключен."}); return
+        if path==PANEL_PATH+"/observer-save":
+            user=form.get("user","").strip(); password=form.get("a","")
+            if len(user)>64:
+                self.send_json({"ok":False,"message":"Логин наблюдателя: до 64 символов."},400); return
+            with STATE_LOCK:
+                d=load()
+                if not user and not password:
+                    d.pop("observer",None); save(d)
+                    audit('observer-save',"","доступ наблюдателя удалён")
+                    self.send_json({"ok":True,"message":"Доступ наблюдателя удалён."}); return
+                obs=d.get("observer") if isinstance(d.get("observer"),dict) else {}
+                if not user:
+                    self.send_json({"ok":False,"message":"Укажите логин наблюдателя."},400); return
+                if password and len(password)<3:
+                    self.send_json({"ok":False,"message":"Пароль наблюдателя: минимум 3 символа."},400); return
+                if password: obs["hash"]=hash_password(password)
+                if "hash" not in obs:
+                    self.send_json({"ok":False,"message":"Задайте пароль наблюдателя."},400); return
+                obs["user"]=user; d["observer"]=obs; save(d)
+            audit('observer-save',user,"наблюдатель сохранён")
+            self.send_json({"ok":True,"message":"Наблюдатель сохранён: только чтение, без изменений настроек."}); return
+        if path==PANEL_PATH+"/security-save":
+            try:
+                with APPLY_LOCK:
+                    with STATE_LOCK:
+                        d=load()
+                        state=bypass_api.apply_form(d.get("bypass",{}),form)
+                        unbound_on=form.get("unbound","")=="1"
+                        d["bypass"]=state; save(d)
+                if unbound_on:
+                    try:
+                        with open(UNBOUND_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                    except OSError: pass
+                else:
+                    try: os.unlink(UNBOUND_MARKER)
+                    except FileNotFoundError: pass
+                # leastPing и hopping меняют Xray-конфиг; fp-ротация — ссылки.
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+            except bypass_api.BypassError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            audit('security-save',"",("fragment=%s least_ping=%s hop=%s ipv6=%s honeypot=%s unbound=%s"%(
+                state["fragment"],state["least_ping"],",".join(map(str,state["hopping_ports"])),
+                state["ipv6"],state["honeypot"],unbound_on)))
+            self.send_json({"ok":True,"message":"Настройки обхода и защиты сохранены. Xray применяет изменения…"}); return
+        if path==PANEL_PATH+"/security-preset":
+            level=form.get("level","off")
+            try:
+                preset=bypass_api.preset_apply(level)
+            except bypass_api.BypassError as exc:
+                self.send_json({"ok":False,"message":str(exc)},400); return
+            with APPLY_LOCK:
+                with STATE_LOCK:
+                    d=load(); state=dict(d.get("bypass") or {}); state.update(preset)
+                    d["bypass"]=bypass_api.normalize(state); save(d)
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+            audit('security-preset',"",level)
+            self.send_json({"ok":True,"message":"Пресет «%s» применён."%level}); return
+        if path==PANEL_PATH+"/promo-create":
+            code=form.get("code","").strip()
+            try:
+                bonus=int(form.get("bonus_days","0")); max_uses=int(form.get("max_uses","0")); expires=int(form.get("expires_ts","0") or 0)
+            except ValueError:
+                self.send_json({"ok":False,"message":"Бонус и лимиты должны быть числами."},400); return
+            with STATE_LOCK:
+                d=load()
+                try:
+                    state=onyx_promo.create(d.get("promo") if isinstance(d.get("promo"),dict) else {},code,bonus,max_uses,expires,form.get("note",""))
+                except ValueError as exc:
+                    self.send_json({"ok":False,"message":str(exc)},400); return
+                d["promo"]=state; save(d)
+            audit('promo-create',code,"+%d дней"%bonus)
+            self.send_json({"ok":True,"message":"Промокод %s создан."%code}); return
+        if path==PANEL_PATH+"/promo-delete":
+            with STATE_LOCK:
+                d=load()
+                try:
+                    state=onyx_promo.delete(d.get("promo") if isinstance(d.get("promo"),dict) else {},form.get("code",""))
+                except ValueError as exc:
+                    self.send_json({"ok":False,"message":str(exc)},400); return
+                d["promo"]=state; save(d)
+            audit('promo-delete',form.get("code",""),"")
+            self.send_json({"ok":True,"message":"Промокод удалён."}); return
+        if path==PANEL_PATH+"/unbound-toggle":
+            enable=form.get("enable","")=="1"
+            if enable:
+                with open(UNBOUND_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                subprocess.run(["systemctl","restart","unbound"],capture_output=True,timeout=30)
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+                msg="DoT-резолвер включён: Xray резолвит через 127.0.0.1."
+            else:
+                try: os.unlink(UNBOUND_MARKER)
+                except FileNotFoundError: pass
+                threading.Thread(target=_ctl_apply_job,daemon=True).start()
+                msg="DoT-резолвер выключен: системный резолвер."
+            audit('unbound-toggle',"",str(enable))
+            self.send_json({"ok":True,"message":msg}); return
+        if path in (PANEL_PATH+"/cascade-add",PANEL_PATH+"/cascade-toggle",PANEL_PATH+"/cascade-delete",PANEL_PATH+"/cascade-users",PANEL_PATH+"/cascade-ping"):
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def cascade_fail(message,status=400):
+                if async_action: self.send_json({"ok":False,"message":message},status)
+                else: self.send_html(esc(message),status)
+            def cascade_ok(payload=None):
+                if async_action: self.send_json(payload if payload else {"ok":True})
+                else: self.redirect("/cascade")
+            try:
+                if path==PANEL_PATH+"/cascade-add":
+                    # Parsing is instant; the reachability probe and the Xray
+                    # restart run in the background while the page polls
+                    # /cascade-state. A synchronous add took 15-25 s and
+                    # proxies cut the connection mid-flight, surfacing as
+                    # random errors even though the operation had succeeded.
+                    with STATE_LOCK:
+                        record=cascade_api.prepare(form.get("link",""),form.get("name",""),DOMAIN,cascade_api.load_cascades(CASCADES_FILE))
+                        record["enabled"]=False
+                        record["pending"]=True
+                        record["op_error"]=""
+                        cascades=cascade_api.load_cascades(CASCADES_FILE)
+                        cascades.append(record)
+                        cascade_api.save_cascades(CASCADES_FILE,cascades)
+                    uid=record["id"]
+                    def add_job(uid=uid):
+                        with APPLY_LOCK:
+                            try:
+                                live=next((c for c in cascade_api.load_cascades(CASCADES_FILE) if c.get("id")==uid),None)
+                                if live is None: return
+                                check=cascade_api.ping(live)
+                                snapshot=json.dumps(cascade_api.load_cascades(CASCADES_FILE))
+                                cascade_touch(uid,check=check,pending=True)
+                                live=next((c for c in cascade_api.load_cascades(CASCADES_FILE) if c.get("id")==uid),None)
+                                if live is None: return
+                                # A dead upstream key must never take live
+                                # traffic down: stay disabled on a failed probe.
+                                live["enabled"]=bool(check.get("ok"))
+                                with STATE_LOCK:
+                                    cascades=cascade_api.load_cascades(CASCADES_FILE)
+                                    for i,c in enumerate(cascades):
+                                        if c.get("id")==uid: cascades[i]=live
+                                    cascade_api.save_cascades(CASCADES_FILE,cascades)
+                                try:
+                                    ctl("cascade-apply")
+                                    cascade_touch(uid,pending=False,op_error="")
+                                except Exception as exc:
+                                    cascade_api.save_cascades(CASCADES_FILE,json.loads(snapshot))
+                                    cascade_touch(uid,pending=False,op_error=cascade_detail(exc))
+                            except Exception as exc:
+                                cascade_touch(uid,pending=False,op_error=cascade_detail(exc))
+                    threading.Thread(target=add_job,daemon=True).start()
+                    audit('cascade-add',uid,record.get("name",""))
+                    cascade_ok({"ok":True,"message":"Каскад добавлен. Идёт проверка ключа и включение — статус появится в карточке."})
+                elif path==PANEL_PATH+"/cascade-ping":
+                    uid=form.get("id","")
+                    if next((c for c in cascade_api.load_cascades(CASCADES_FILE) if c.get("id")==uid),None) is None:
+                        raise cascade_api.CascadeError("Каскад не найден.")
+                    cascade_touch(uid,pending=True,op_error="")
+                    cascade_ping_bg(uid)
+                    cascade_ok({"ok":True,"message":"Проверка запущена."})
+                else:
+                    with STATE_LOCK:
+                        cascades=cascade_api.load_cascades(CASCADES_FILE)
+                        record=next((c for c in cascades if c.get("id")==form.get("id","")),None)
+                        if record is None: raise cascade_api.CascadeError("Каскад не найден.")
+                        uid=record["id"]
+                        if path==PANEL_PATH+"/cascade-toggle":
+                            if form.get("operation","") not in ("enable","disable"): raise cascade_api.CascadeError("Неизвестное действие.")
+                            record["enabled"]=form.get("operation")=="enable"
+                            record["pending"]=True
+                            record["op_error"]=""
+                        elif path==PANEL_PATH+"/cascade-delete":
+                            cascades.remove(record)
+                        elif path==PANEL_PATH+"/cascade-users":
+                            if form.get("mode","") not in ("all","users"): raise cascade_api.CascadeError("Неизвестный режим каскада.")
+                            record["mode"]=form.get("mode")
+                            record["users"]=[value for value in form.get("users","").split(",") if re.fullmatch(r"[a-f0-9]{16}",value)]
+                            record["pending"]=True
+                            record["op_error"]=""
+                        snapshot=json.dumps(cascades)
+                        cascade_api.save_cascades(CASCADES_FILE,cascades)
+                    if path==PANEL_PATH+"/cascade-toggle": audit('cascade-toggle',uid,form.get("operation",""))
+                    elif path==PANEL_PATH+"/cascade-delete": audit('cascade-delete',uid,record.get("name",""))
+                    elif path==PANEL_PATH+"/cascade-users": audit('cascade-users',uid,form.get("mode",""))
+                    cascade_apply_bg(uid,snapshot)
+                    cascade_ok()
+            except cascade_api.CascadeError as exc:
+                cascade_fail(str(exc))
+            except (OSError,subprocess.TimeoutExpired) as exc:
+                print("cascade operation failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                cascade_fail("Операция не выполнена. Проверьте службы панели и повторите попытку.",503)
+            return
+
+        if path==PANEL_PATH+"/invite-action":
+            operation=form.get('operation','')
+            try:
+                if operation=='create':
+                    name=onyx_subscriptions.clean_name(form.get('name',''))
+                    protocols=[p for p in INVITE_PROTOCOLS if form.get(p)=='1'] or list(INVITE_PROTOCOLS)
+                    try: max_devices=onyx_subscriptions.limits(form.get('max_devices','1'))
+                    except onyx_subscriptions.SubscriptionError as exc:
+                        raise ValueError(str(exc))
+                    ttl=max(1,min(365,int(form.get('ttl_days','7') or 7)))
+                    uses=max(0,min(50,int(form.get('max_uses','1') or 1)))
+                    invite={"id":secrets.token_hex(8),"token":secrets.token_hex(16),"name":name,
+                            "protocols":protocols,"max_devices":max_devices,"ttl_days":ttl,
+                            "max_uses":uses,"uses":0,"enabled":True,
+                            "created_at":int(time.time()),"expires_at":int(time.time())+ttl*86400,"claimed":[]}
+                    with STATE_LOCK:
+                        d=load()
+                        if len(invites_registry(d))>=64: raise ValueError("Достигнут лимит приглашений (64).")
+                        invites_registry(d).append(invite); save(d)
+                    audit('invite-create',invite["id"],name+" · "+str(ttl)+" дн.")
+                    self.send_json({'ok':True,'invite':{'id':invite['id'],'token':invite['token']}})
+                elif operation in ('delete','toggle'):
+                    uid=form.get('id','')
+                    with STATE_LOCK:
+                        d=load()
+                        items=invites_registry(d)
+                        invite=next((i for i in items if i.get('id')==uid),None)
+                        if invite is None: raise ValueError("Приглашение не найдено.")
+                        if operation=='delete': items.remove(invite)
+                        else: invite['enabled']=not invite.get('enabled',True)
+                        save(d)
+                    audit('invite-delete' if operation=='delete' else 'invite-toggle',uid,invite.get('name',''))
+                    self.send_json({'ok':True})
+                else: raise ValueError("Неизвестная операция.")
+            except ValueError as exc:
+                self.send_json({'message':str(exc)},400)
+            except onyx_subscriptions.SubscriptionError as exc:
+                self.send_json({'message':str(exc)},int(getattr(exc,'status',400)))
+            return
+
+        if path==PANEL_PATH+"/import-preview":
+            # Предпросмотр восстановления: показать, что заменится, ДО записи.
+            import tarfile
+            try:
+                raw=form.get('backup','')
+                blob=base64.b64decode(raw.split(",")[-1]) if raw else b""
+                if not blob: raise ValueError("Файл копии не передан.")
+                self.send_json({"ok":True,"preview":backup_preview(blob)})
+            except (ValueError,OSError) as exc:
+                self.send_json({"message":"Архив не читается: "+str(exc)[-160:]},400)
+            except tarfile.TarError:
+                self.send_json({"message":"Это не похоже на архив резервной копии панели."},400)
+            return
+
+        if path==PANEL_PATH+"/alerts-save":
+            enabled=form.get('enabled')=='1'
+            def num(name,default,minimum,maximum):
+                try: value=float(str(form.get(name,default)).replace(",","."))
+                except ValueError: raise ValueError("Порог «%s» — число."%name)
+                if not minimum<=value<=maximum: raise ValueError("Порог «%s» — от %s до %s."%(name,minimum,maximum))
+                return value
+            try:
+                cfg={"enabled":enabled,
+                     "cpu":num('cpu',90,10,100),"ram":num('ram',90,10,100),"disk":num('disk',85,10,100),
+                     "load":num('load',4,0.1,64),"cooldown":max(600,min(86400,int(form.get('cooldown','3600') or 3600)))}
+            except ValueError as exc:
+                self.send_json({"message":str(exc)},400); return
+            with STATE_LOCK:
+                d=load(); d["alerts"]=cfg
+                if not enabled: d.pop("alert_marks",None)
+                save(d)
+            audit('alerts-save',"",("включены: CPU %.0f%%, RAM %.0f%%, диск %.0f%%, load %.1f"%(cfg['cpu'],cfg['ram'],cfg['disk'],cfg['load'])) if enabled else "выключены")
+            self.send_json({"ok":True,"message":"Пороги сохранены."}); return
+
+        if path==PANEL_PATH+"/audit-clear":
+            with STATE_LOCK:
+                d=load(); d.pop("audit",None); save(d)
+            self.send_json({"ok":True}); return
+
+        if path==PANEL_PATH+"/backup-now":
+            # «Копия сейчас» идёт этапами, чтобы модалка показывала живой статус:
+            # build -> local -> cloud (по каждому включённому хранилищу) -> finish.
+            # Пустой stage сохраняет прежнее поведение одним запросом (совместимость).
+            stage=form.get('stage','all')
+            cloud_names={"yandex":"Яндекс Диск","mailru":"Облако Mail.ru","gdrive":"Google Drive"}
+            def backup_enabled_targets():
+                with STATE_LOCK:
+                    d=load(); b=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+                    cloud_targets=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+                return [t for t in onyx_cloud.TARGETS
+                        if (cloud_targets.get(t) if isinstance(cloud_targets.get(t),dict) else {}).get("enabled")]
+            def backup_job(job_id):
+                rec=BACKUP_JOBS.get(str(job_id or ""))
+                if not rec or time.time()-rec["ts"]>1800:
+                    BACKUP_JOBS.pop(str(job_id or ""),None)
+                    raise ValueError("Сессия копии истекла — начните заново.")
+                return rec
+            def backup_merge_cloud(b,cloud_state):
+                # Обновляем только статус (ts/ok/message): флаг enabled каждого
+                # хранилища обязан пережить выгрузку, иначе следующая копия
+                # молча пропустит облако.
+                merged=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+                for target,st in cloud_state.items():
+                    entry=merged.get(target) if isinstance(merged.get(target),dict) else {}
+                    entry.update(st); merged[target]=entry
+                b["cloud"]=merged
+            if stage=="build":
+                try:
+                    blob=build_backup_tar()
+                except (ValueError,OSError) as exc:
+                    self.send_json({"message":"Не удалось собрать копию: "+str(exc)[-160:]},503); return
+                job=secrets.token_hex(8)
+                with BACKUP_JOBS_LOCK:
+                    for k in [k for k,v in BACKUP_JOBS.items() if time.time()-v["ts"]>1800]: BACKUP_JOBS.pop(k,None)
+                    BACKUP_JOBS[job]={"blob":blob,"name":"onyx-backup-%s.tar.gz"%time.strftime("%Y%m%d-%H%M%S"),
+                                      "ts":time.time(),"saved":False,"cloud":{}}
+                targets=[{"key":t,"label":cloud_names.get(t,t)} for t in backup_enabled_targets()]
+                self.send_json({"ok":True,"job":job,"name":BACKUP_JOBS[job]["name"],"size":len(blob),"targets":targets}); return
+            if stage=="local":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                directory="/var/lib/onyx-panel/backups"
+                os.makedirs(directory,exist_ok=True)
+                with open(os.path.join(directory,rec["name"]),"wb") as f: f.write(rec["blob"])
+                with STATE_LOCK:
+                    d=load(); bc=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+                    keep=max(3,int(bc.get("keep",7) or 7))
+                for old in sorted(os.listdir(directory))[:-keep]:
+                    if old.endswith(".tar.gz"):
+                        try: os.unlink(os.path.join(directory,old))
+                        except OSError: pass
+                rec["saved"]=True
+                self.send_json({"ok":True,"name":rec["name"],"size":len(rec["blob"])}); return
+            if stage=="cloud":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                target=form.get('target','')
+                if target not in onyx_cloud.TARGETS:
+                    self.send_json({"message":"Неизвестное хранилище."},400); return
+                try:
+                    onyx_cloud.upload(target,rec["name"],rec["blob"],7)
+                    rec["cloud"][target]={"ok":True,"message":"выгружено"}
+                    self.send_json({"ok":True,"message":cloud_names.get(target,target)+": копия выгружена"}); return
+                except Exception as exc:
+                    rec["cloud"][target]={"ok":False,"message":str(exc)[-200:]}
+                    self.send_json({"ok":False,"message":cloud_names.get(target,target)+": "+str(exc)[-160:]}); return
+            if stage=="finish":
+                try: rec=backup_job(form.get('job'))
+                except ValueError as exc:
+                    self.send_json({"message":str(exc)},409); return
+                if not rec.get("saved"):
+                    self.send_json({"message":"Локальная копия не сохранена — начните заново."},409); return
+                cloud_state={t:{"ts":int(time.time()),"ok":st["ok"],"message":st["message"]} for t,st in rec["cloud"].items()}
+                cloud_ok=all(st["ok"] for st in rec["cloud"].values()) if rec["cloud"] else True
+                cloud_notes=[cloud_names.get(t,t)+": "+st["message"] for t,st in sorted(rec["cloud"].items())]
+                note="ручная копия сохранена локально"
+                if cloud_notes: note+=", облака: "+", ".join(cloud_notes)
+                with STATE_LOCK:
+                    d=load(); b=d.setdefault("backups",{})
+                    b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":cloud_ok,"message":note,"size":len(rec["blob"])}
+                    if cloud_state: backup_merge_cloud(b,cloud_state)
+                    save(d)
+                audit('backup-run',rec["name"],human_bytes(len(rec["blob"]))+(" · "+note if cloud_notes else ""))
+                for t in sorted(rec["cloud"]): audit('backup-run',cloud_names.get(t,t),t+": "+rec["cloud"][t]["message"])
+                with BACKUP_JOBS_LOCK: BACKUP_JOBS.pop(str(form.get('job')),None)
+                message="Копия сохранена локально ("+human_bytes(len(rec["blob"]))+")."
+                if cloud_notes: message="Копия сохранена ("+human_bytes(len(rec["blob"]))+"). Облака: "+", ".join(cloud_notes)+"."
+                self.send_json({"ok":True,"message":message}); return
+            # stage=all — прежний однозапросный сценарий (внешние вызовы, старые клиенты)
+            try:
+                blob=build_backup_tar()
+            except (ValueError,OSError) as exc:
+                self.send_json({"message":"Не удалось собрать копию: "+str(exc)[-160:]},503); return
+            directory="/var/lib/onyx-panel/backups"
+            os.makedirs(directory,exist_ok=True)
+            name="onyx-backup-%s.tar.gz"%time.strftime("%Y%m%d-%H%M%S")
+            with open(os.path.join(directory,name),"wb") as f: f.write(blob)
+            audit('backup-run',name,human_bytes(len(blob)))
+            cloud_notes=[];cloud_state={};cloud_ok=True
+            for target in backup_enabled_targets():
+                try:
+                    onyx_cloud.upload(target,name,blob,7)
+                    cloud_notes.append(cloud_names.get(target,target)+": выгружено")
+                    cloud_state[target]={"ts":int(time.time()),"ok":True,"message":"загружено"}
+                except Exception as exc:
+                    cloud_ok=False
+                    cloud_notes.append(cloud_names.get(target,target)+": "+str(exc)[-110:])
+                    cloud_state[target]={"ts":int(time.time()),"ok":False,"message":str(exc)[-200:]}
+                audit('backup-run',cloud_names.get(target,target),cloud_names.get(target,target)+": "+cloud_state[target]["message"])
+            note="ручная копия сохранена локально"
+            if cloud_notes: note+=", облака: "+", ".join(cloud_notes)
+            with STATE_LOCK:
+                d=load(); b=d.setdefault("backups",{})
+                b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":cloud_ok,"message":note,"size":len(blob)}
+                if cloud_state: backup_merge_cloud(b,cloud_state)
+                save(d)
+            message="Копия сохранена локально ("+human_bytes(len(blob))+")."
+            if cloud_notes: message="Копия сохранена ("+human_bytes(len(blob))+"). Облака: "+", ".join(cloud_notes)+"."
+            self.send_json({"ok":True,"message":message}); return
+
+        if path==PANEL_PATH+"/plans-save":
+            try:
+                op=form.get("operation","")
+                with STATE_LOCK:
+                    d=load()
+                    plans=d.setdefault("plans",[])
+                    if not isinstance(plans,list): plans=[]; d["plans"]=plans
+                    trial=d.setdefault("trial",{})
+                    if not isinstance(trial,dict): trial={}; d["trial"]=trial
+                    if op=="create":
+                        name=form.get("name","").strip()
+                        if not name or len(name)>80 or any(ord(c)<32 for c in name):
+                            raise ValueError("Укажите название тарифа длиной от 1 до 80 символов.")
+                        try: days=int(form.get("days","30"))
+                        except (TypeError,ValueError): raise ValueError("Срок тарифа: число дней от 1 до 3650.")
+                        if not 1<=days<=3650: raise ValueError("Срок тарифа: число дней от 1 до 3650.")
+                        try: devices=int(form.get("max_devices","2"))
+                        except (TypeError,ValueError): raise ValueError("Устройства: число от 0 до 20.")
+                        if not 0<=devices<=20: raise ValueError("Устройства: число от 0 до 20.")
+                        protocols=[p for p in ("vless","hysteria","tuic") if form.get(p)=="1"]
+                        if not protocols: raise ValueError("Выберите хотя бы один протокол.")
+                        try: limit_gb=onyx_limits.validate(form.get("limit_gb","0"))
+                        except onyx_limits.LimitError as exc: raise ValueError(str(exc))
+                        if len(plans)>=32: raise ValueError("Слишком много тарифов (максимум 32).")
+                        plans.append({"id":secrets.token_hex(4),"name":name,"days":days,
+                                      "max_devices":devices,"protocols":protocols,"limit_gb":limit_gb,
+                                      "enabled":True,"created_at":int(time.time())})
+                        audit('plans-save',name,"%d дн. · %d устр."%(days,devices))
+                    elif op=="delete":
+                        d["plans"]=[p for p in plans if p.get("id")!=form.get("id","")]
+                        audit('plans-save',form.get("id",""),"тариф удалён")
+                    elif op=="trial":
+                        try: tdays=int(form.get("days","3"))
+                        except (TypeError,ValueError): raise ValueError("Триал: срок числом от 1 до 365 дней.")
+                        if not 1<=tdays<=365: raise ValueError("Триал: срок числом от 1 до 365 дней.")
+                        try: tdev=int(form.get("max_devices","1"))
+                        except (TypeError,ValueError): raise ValueError("Триал: устройства числом от 0 до 20.")
+                        if not 0<=tdev<=20: raise ValueError("Триал: устройства числом от 0 до 20.")
+                        trial.update({"enabled":form.get("enabled")=="1","days":tdays,"max_devices":tdev})
+                        audit('plans-save',"trial","триал: %s, %d дн."%("вкл" if trial["enabled"] else "выкл",tdays))
+                    else:
+                        raise ValueError("Неизвестная операция.")
+                    save(d)
+                self.redirect("/settings"); return
+            except ValueError as exc:
+                self.send_html(esc(str(exc)),400); return
+        if path==PANEL_PATH+"/backup-cloud-save":
+            targets=form.get('targets','')
+            enabled={t:form.get('enable_'+t)=='1' for t in onyx_cloud.TARGETS}
+            with STATE_LOCK:
+                d=load(); b=d.setdefault("backups",{})
+                cloud=b.setdefault("cloud",{})
+                for target,value in enabled.items(): cloud.setdefault(target,{})["enabled"]=value
+                save(d)
+            audit('backup-cloud-save',",".join(t for t,v in enabled.items() if v),"цели облаков")
+            self.send_json({"ok":True,"message":"Цели облачных копий сохранены."}); return
+
+        if path==PANEL_PATH+"/gdrive-start":
+            gdrive_client_id=form.get('client_id','').strip(); gdrive_client_secret=form.get('client_secret','').strip()
+            if not gdrive_client_id or not gdrive_client_secret:
+                self.send_json({"message":"Укажите Client ID и Client Secret из Google Cloud Console."},400); return
+            if not DOMAIN:
+                self.send_json({"message":"Для OAuth нужен домен панели."},400); return
+            try:
+                onyx_cloud.gdrive_save_client(gdrive_client_id,gdrive_client_secret)
+                url=onyx_cloud.gdrive_oauth_url(public_base_url()+PANEL_PATH+"/gdrive-callback")
+            except Exception as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            audit('backup-cloud-save','gdrive',"настроен OAuth-клиент")
+            self.send_json({"ok":True,"redirect":url}); return
+
+        if path==PANEL_PATH+"/yandex-connect":
+            yandex_token=form.get('token','').strip()
+            if not yandex_token:
+                self.send_json({"message":"Вставьте OAuth-токен Яндекс Диска (y0_…)."},400); return
+            try:
+                onyx_cloud.yandex_save_token(yandex_token)
+            except Exception as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            audit('backup-cloud-save','yandex',"подключён свой OAuth-токен")
+            self.send_json({"ok":True,"message":"Яндекс Диск подключён: токен проверен живым запросом."}); return
+
+        if path==PANEL_PATH+"/yandex-disconnect":
+            onyx_cloud.yandex_disconnect()
+            audit('backup-cloud-save','yandex',"отключён")
+            self.send_json({"ok":True,"message":"Яндекс Диск отключён."}); return
+
+        if path==PANEL_PATH+"/mailru-connect":
+            mailru_email=form.get('email','').strip(); mailru_password=form.get('password','')
+            try:
+                onyx_cloud.mailru_connect(mailru_email,mailru_password)
+            except Exception as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            audit('backup-cloud-save','mailru',"подключён свой аккаунт")
+            self.send_json({"ok":True,"message":"Облако Mail.ru подключено: вход проверен живым запросом."}); return
+
+        if path==PANEL_PATH+"/mailru-disconnect":
+            onyx_cloud.mailru_disconnect()
+            audit('backup-cloud-save','mailru',"отключён")
+            self.send_json({"ok":True,"message":"Облако Mail.ru отключено."}); return
+
+        if path==PANEL_PATH+"/gdrive-disconnect":
+            onyx_cloud.gdrive_disconnect()
+            audit('backup-cloud-save','gdrive',"отключён")
+            self.send_json({"ok":True,"message":"Google Drive отключён."}); return
+
+        if path==PANEL_PATH+"/firewall-port":
+            spec=str(form.get('port','')).strip()+"/"+("udp" if form.get('proto')=='udp' else "tcp")
+            open_it=form.get('operation','open')=='open'
+            try:
+                firewall_port(spec,open_it)
+            except (ValueError,OSError) as exc:
+                self.send_json({"message":str(exc)[-200:]},400); return
+            except subprocess.SubprocessError:
+                self.send_json({"message":"ufw не ответил."},503); return
+            audit('firewall-port',spec,"порт открыт" if open_it else "порт закрыт")
+            self.send_json({"ok":True,"message":"Порт %s %s."%(spec,"открыт" if open_it else "закрыт")}); return
+
+        if path==PANEL_PATH+"/diagnostics-run":
+            diagnostics_bg()
+            self.send_json({"ok":True,"phase":"running"}); return
+
+        if path==PANEL_PATH+"/import":
+            import io, tarfile
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def imp_fail(msg):
+                if async_action: self.send_json({"ok":False,"message":msg},400)
+                else: self.send_html(esc(msg),400)
+            raw=form.get("backup","").strip()
+            if raw.startswith("data:"): raw=raw.split(",",1)[-1].strip()
+            raw=re.sub(r"\s+","",raw)
+            if not raw:
+                imp_fail("Выберите файл резервной копии или вставьте его содержимое."); return
+            try: blob=base64.b64decode(raw,validate=True)
+            except Exception:
+                imp_fail("Не удалось прочитать файл как резервную копию. Выберите заново файл .tar.gz из Экспорта и попробуйте ещё раз."); return
+            if len(blob)>12*1024*1024:
+                imp_fail("Архив слишком большой (лимит 12 МБ)."); return
+            try:
+                tar=tarfile.open(fileobj=io.BytesIO(blob),mode="r:*")
+                members=tar.getmembers()
+            except Exception:
+                imp_fail("Архив повреждён или это не резервная копия панели."); return
+            if len(members)>200:
+                imp_fail("В архиве слишком много файлов."); return
+            allow={"panel","onyx-panel","onyx-xray"}
+            restore={}; total=0; meta_ok=False
+            try:
+                for m in members:
+                    if not m.isfile(): raise ValueError("Архив содержит нестандартные элементы.")
+                    if m.size>4*1024*1024: raise ValueError("Файл в архиве слишком большой: "+m.name)
+                    total+=m.size
+                    if total>12*1024*1024: raise ValueError("Архив слишком большой.")
+                    name=m.name
+                    if name.startswith("./"): name=name[2:]
+                    parts=name.split("/")
+                    if parts==["manifest.json"]:
+                        try: meta=json.loads(tar.extractfile(m).read().decode("utf-8"))
+                        except Exception: raise ValueError("manifest.json повреждён.")
+                        if not isinstance(meta,dict) or meta.get("app")!="onyx-panel":
+                            raise ValueError("Это резервная копия другого приложения.")
+                        meta_ok=True; continue
+                    if len(parts)==2 and parts[0] in allow and re.fullmatch(r"[A-Za-z0-9._-]{1,80}",parts[1]):
+                        restore[name]=tar.extractfile(m).read(); continue
+                    if len(parts)==3 and parts[0]=="onyx-panel" and parts[1]=="awg" and re.fullmatch(r"[a-f0-9]{16}\.json",parts[2]):
+                        restore[name]=tar.extractfile(m).read(); continue
+                    raise ValueError("Архив содержит неожиданный файл: "+name)
+            except ValueError as exc:
+                imp_fail(str(exc)); return
+            except Exception:
+                imp_fail("Не удалось прочитать архив."); return
+            if not meta_ok or "panel/data.json" not in restore:
+                imp_fail("В архиве нет настроек панели (panel/data.json) — это не полная копия."); return
+            try: json.loads(restore["panel/data.json"].decode("utf-8"))
+            except Exception:
+                imp_fail("panel/data.json в архиве повреждён."); return
+            if "onyx-panel/users.json" in restore:
+                try:
+                    parsed=json.loads(restore["onyx-panel/users.json"].decode("utf-8"))
+                    if not isinstance(parsed,dict) or not isinstance(parsed.get("users"),list) or not isinstance(parsed.get("subscriptions"),list):
+                        raise ValueError
+                except Exception:
+                    imp_fail("onyx-panel/users.json в архиве повреждён."); return
+            try:
+                stamp=time.strftime("%Y%m%d-%H%M%S")
+                backup_path="/var/lib/onyx-panel/import-backup-%s.tar.gz"%stamp
+                with open(backup_path,"wb") as f: f.write(build_backup_tar())
+                os.chmod(backup_path,0o600)
+                src_domain=str(meta.get("domain",""))
+                cross_domain=bool(src_domain) and src_domain!=DOMAIN
+                if cross_domain:
+                    # Кросс-доменный перенос: пропускаем файлы, привязанные к
+                    # исходному серверу — ключ федерации нод, MTProto-хост,
+                    # Reality, локацию, manifest, xray-path и config.json
+                    # (он производный — пересоберём из целевой reality +
+                    # импортированных пользователей).
+                    skip={"panel/api.key","onyx-panel/mtproto-host","panel/location.json",
+                          "onyx-panel/manifest","panel/reality.json","onyx-panel/xray-path",
+                          "onyx-xray/config.json"}
+                    for arc in list(restore):
+                        if arc in skip: del restore[arc]
+                    # data.json сливаем: переносим клиентов, подписки, сайт и
+                    # политики; сохраняем учётки, интеграции и доменные ключи
+                    # целевой панели.
+                    if "panel/data.json" in restore:
+                        try: src_data=json.loads(restore["panel/data.json"].decode("utf-8"))
+                        except Exception: src_data={}
+                        try:
+                            with open("/var/lib/onyx-panel/data.json",encoding="utf-8") as f: tgt_data=json.load(f)
+                        except Exception: tgt_data={}
+                        for k in ("subscriptions","users","expires","site","max_devices",
+                                  "limit_disabled","failover","pending","op_error","device_secrets",
+                                  "plans","trial"):
+                            if k in src_data: tgt_data[k]=src_data[k]
+                        restore["panel/data.json"]=json.dumps(tgt_data,ensure_ascii=False).encode("utf-8")
+                dest_map={arc:(phys,0o640 if arc=="onyx-xray/config.json" else 0o600) for arc,phys,_ in BACKUP_FILES}
+                for arc,data in restore.items():
+                    if arc.startswith("onyx-panel/awg/"):
+                        os.makedirs("/etc/onyx-panel/awg",exist_ok=True)
+                        phys,mode=("/etc/onyx-panel/awg/"+arc.split("/")[2],0o600)
+                    else: phys,mode=dest_map[arc]
+                    os.makedirs(os.path.dirname(phys),exist_ok=True)
+                    with open(phys,"wb") as f: f.write(data)
+                    os.chmod(phys,mode)
+                    if arc=="onyx-xray/config.json":
+                        try: os.chown(phys,os.getuid(),grp.getgrnam("xray").gr_gid)
+                        except Exception: pass
+            except OSError as exc:
+                print("import apply failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                imp_fail("Не удалось записать файлы. Проверьте диск и повторите."); return
+            xray="onyx-xray/config.json" in restore
+            cascade_err=""
+            if cross_domain:
+                # config.json не копировали — пересобираем из целевой reality/
+                # routing/warp/cascades + импортированных пользователей.
+                try: ctl("cascade-apply")
+                except Exception as exc:
+                    cascade_err=cascade_detail(exc)
+                    print("cross-domain cascade-apply failed:",cascade_err,file=sys.stderr,flush=True)
+                xray=True
+            else:
+                if "onyx-panel/xray-path" in restore:
+                    def _sync_caddy_vless():
+                        try:
+                            new_path=open("/etc/onyx-panel/xray-path",encoding="utf-8").read().strip()
+                            s=open("/etc/caddy/Caddyfile",encoding="utf-8").read()
+                            s2,n=re.subn(r"/vless-[a-f0-9]{24}",new_path,s)
+                            if n and s2!=s:
+                                open("/etc/caddy/Caddyfile","w",encoding="utf-8").write(s2)
+                                subprocess.run(["caddy","fmt","--overwrite","/etc/caddy/Caddyfile"],capture_output=True,timeout=20)
+                                subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60,start_new_session=True)
+                        except Exception:
+                            pass
+                    timer=threading.Timer(1.5,_sync_caddy_vless); timer.daemon=True; timer.start()
+                if xray:
+                    def _restart_xray():
+                        try:
+                            chk=subprocess.run([XRAY_BIN,"run","-test","-config","/etc/onyx-panel-xray/config.json"],capture_output=True,timeout=60)
+                            if chk.returncode:
+                                print("imported xray config failed check, restart skipped:",chk.stderr.decode("utf-8","replace")[-300:],file=sys.stderr,flush=True)
+                                return
+                            subprocess.run(["systemctl","restart","onyx-panel-xray.service"],capture_output=True,timeout=60)
+                        except Exception: pass
+                    timer=threading.Timer(1.0,_restart_xray); timer.daemon=True; timer.start()
+            if cross_domain:
+                msg="Кросс-доменный импорт (%s → %s): перенесено файлов %d — клиенты, сайт и политики; доменные ключи, Reality и локация сохранены текущими."%(src_domain,DOMAIN,len(restore))
+                if cascade_err: msg+=" Xray не пересобран (%s) — проверьте Reality."%cascade_err[:80]
+                else: msg+=" Xray пересобран."
+                msg+=" Предыдущее состояние: %s."%backup_path
+            else:
+                msg="Импортировано файлов: %d. Предыдущее состояние сохранено: %s."%(len(restore),backup_path)+(" Xray перезапускается." if xray else "")
+            audit('import',backup_path,msg)
+            if async_action: self.send_json({"ok":True,"message":msg})
+            else: self.redirect("/settings")
+            return
+
+        if path==PANEL_PATH+"/panel-password":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            a=form.get("a","")
+            if len(a)<3:
+                msg="Пароль должен содержать минимум 3 символа."
+                if async_action: self.send_json({"ok":False,"message":msg},400)
+                else: self.send_html(msg,400)
+                return
+            with STATE_LOCK:
+                d=load()
+                d["admin"]["hash"]=hash_password(a)
+                save(d)
+            rotate_session_key()
+            audit('panel-password',"","пароль администратора изменён, сессии завершены")
+            if async_action:
+                self.send_json({"ok":True,"message":"Пароль изменён. Все сессии завершены — открываем страницу входа."})
+            else:
+                self.send_response(303)
+                self.send_header("Set-Cookie",self.session_cookie("",0))
+                self.send_header("Location",PANEL_PATH+"/login")
+                self.end_headers()
+            return
+
+        if path==PANEL_PATH+"/panel-login":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            new_user=form.get("user","").strip()
+            if not 1<=len(new_user)<=64:
+                msg="Логин должен содержать от 1 до 64 символов."
+                if async_action: self.send_json({"ok":False,"message":msg},400)
+                else: self.send_html(esc(msg),400)
+                return
+            with STATE_LOCK:
+                d=load()
+                d["admin"]["user"]=new_user
+                save(d)
+            audit('panel-login',new_user,"логин администратора изменён")
+            if async_action:
+                self.send_json({"ok":True,"message":"Логин изменён. Используйте его при следующем входе.","login":new_user})
+            else:
+                self.redirect("/settings")
+            return
+
+        if path==PANEL_PATH+"/panel-path":
+            async_action=self.headers.get("X-Onyx-Async","")=="1"
+            def path_fail(msg):
+                if async_action: self.send_json({"ok":False,"message":msg},400)
+                else: self.send_html(esc(msg),400)
+            new_path=form.get("path","").strip().rstrip("/").lower()
+            old_path=PANEL_PATH
+            if not re.fullmatch(r"/[a-z0-9][a-z0-9-]{2,58}[a-z0-9]",new_path):
+                path_fail("Путь — от 4 до 60 символов после /: латиница, цифры и дефис, без дефиса по краям. Например /xray или /my-vpn.")
+                return
+            if new_path.strip("/") in ("onyx-sub","onyx-invite","wpp-sub"):
+                path_fail("Этот путь занят маршрутами подписок. Выберите другой.")
+                return
+            if new_path==old_path:
+                path_fail("Этот путь уже используется.")
+                return
+            import fcntl
+            lock=open("/run/lock/onyx-panel.lock","a")
+            try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                path_fail("Выполняется другая операция с панелью. Повторите позже.")
+                return
+            caddy_path="/etc/caddy/Caddyfile"
+            service_path="/etc/systemd/system/onyx-panel.service"
+            tmp_caddy=caddy_path+".newpath"
+            try:
+                s=open(caddy_path,encoding="utf-8").read()
+                pattern=r'\n\s*handle(?:_path)?\s+'+re.escape(old_path)+r'/\*\s*\{\s*reverse_proxy\s+127\.0\.0\.1:8090\s*\}\s*'
+                s,n=re.subn(pattern,'\n',s,count=1,flags=re.S)
+                if n!=1: raise ValueError("Не найден текущий маршрут панели в Caddy. Смените путь через консольную команду ONYX.")
+                m=re.search(r'(?m)^\s*reverse_proxy 127\.0\.0\.1:8080\s*\{',s)
+                if not m: raise ValueError("Не найден маршрут WEB Proxy в конфигурации Caddy.")
+                route="    handle "+new_path+"/* {\n        reverse_proxy 127.0.0.1:8090\n    }\n\n"
+                s=s[:m.start()]+route+s[m.start():]
+                with open(tmp_caddy,"w",encoding="utf-8") as f: f.write(s)
+                u=open(service_path,encoding="utf-8").read()
+                u,n2=re.subn(r'(?m)^Environment=ONYX_PANEL_PATH=.*$',"Environment=ONYX_PANEL_PATH="+new_path,u,count=1)
+                if n2!=1: raise ValueError("Не найден путь панели в systemd-службе. Смените путь через консольную команду ONYX.")
+                subprocess.run(["caddy","fmt","--overwrite",tmp_caddy],capture_output=True,timeout=20)
+                check=subprocess.run(["caddy","validate","--config",tmp_caddy,"--adapter","caddyfile"],capture_output=True,timeout=30)
+                if check.returncode!=0: raise ValueError("Новая конфигурация Caddy не прошла проверку.")
+                # Write in place so the root:caddy owner group of the Caddyfile survives.
+                with open(caddy_path,"w",encoding="utf-8") as f: f.write(s)
+                with open(service_path,"w",encoding="utf-8") as f: f.write(u)
+            except ValueError as exc:
+                try: os.unlink(tmp_caddy)
+                except OSError: pass
+                path_fail(str(exc))
+                return
+            except (OSError,subprocess.TimeoutExpired):
+                try: os.unlink(tmp_caddy)
+                except OSError: pass
+                path_fail("Не удалось изменить конфигурацию. Используйте консольную команду ONYX.")
+                return
+            new_url=("https://"+DOMAIN if DOMAIN else "")+new_path+"/login"
+            def _apply_restart():
+                try:
+                    subprocess.run(["systemctl","daemon-reload"],capture_output=True,timeout=30)
+                    # Caddy first: the new routing must be live even if this
+                    # process is killed by the panel restart that follows.
+                    subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60,start_new_session=True)
+                    subprocess.run(["systemctl","restart","onyx-panel.service"],capture_output=True,timeout=60,start_new_session=True)
+                except Exception:
+                    pass
+            audit('panel-path',new_path,"адрес панели изменён с "+old_path)
+            restart=threading.Timer(1.2,_apply_restart)
+            restart.daemon=True
+            restart.start()
+            if async_action:
+                self.send_json({"ok":True,"message":"Адрес панели изменён. Службы перезапускаются.","newPath":new_path,"newUrl":new_url})
+            else:
+                self.redirect(new_url)
+            return
+
+        self.send_html("Not found",404)
+
+    def serve_subscription(self,token):
+        if not re.fullmatch(r"[a-f0-9]{64}",token):
+            self.send_data("Not found",404); return
+        if not allow_subscription_request(client_id(self)):
+            self.send_data("Слишком много запросов. Повторите через минуту.",429,headers={"Retry-After":"60"}); return
+        if not SUB_FETCH_SLOTS.acquire(blocking=False):
+            self.send_data("Сервис занят. Повторите позже.",503,headers={"Retry-After":"15"}); return
+        try:
+            # Reject unknown URLs before spawning any privileged helper.
+            if not any(s.get("enabled") and secrets.compare_digest(s["token"],token) for s in subscription_registry()):
+                self.send_data("Not found",404); return
+            if "text/html" in self.headers.get("Accept",""):
+                self.serve_subscription_page(token); return
+            result=ctl_subscription({"operation":"fetch","token":token,"hwid":self.headers.get("X-HWID","")})
+            if not result.get("ok"):
+                headers={"X-Hwid-Active":"true","subscription-always-hwid-enable":"true"}
+                if result.get("code")=="hwid_required": headers["X-Hwid-Not-Supported"]="true"
+                if result.get("code")=="device_limit": headers.update({"X-Hwid-Limit":"true","X-Hwid-Max-Devices-Reached":"true"})
+                self.send_data(result.get("message","Подписка недоступна"),int(result.get("status",503)),headers=headers); return
+            labels={"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC5"}
+            local_name=node_api.location_prefix(node_api.load_location(LOCATION_FILE))
+            lines=[proxy_link(u["protocol"],u["secret"],u["backend_port"],local_name+" · "+labels[u["protocol"]],u.get("username",""),u.get("id","")) for u in result["users"]]
+            lines+=[link for link in (reality_link(u["secret"],local_name+" · Reality",u.get("id","")) for u in result["users"] if u["protocol"]=="vless") if link]
+            if result["users"]:
+                first=result["users"][0]
+                remote_id=federation_id(first.get("subscription_id",""),first.get("device_id",""))
+                wanted=[u["protocol"] for u in result["users"] if u["protocol"] in ("vless","hysteria")]
+                # Ноды идут в подписку от быстрых к медленным: latency измеряет
+                # фоновый опрос нод, а не блокирует выдачу.
+                live={n.get("url"):n for n in nodes_live().get("nodes",[]) if isinstance(n,dict)}
+                nodes_list=sorted((n for n in node_api.load_nodes(NODES_FILE) if n.get("enabled",True)),
+                                  key=lambda n: (lambda l: (l is None, l or 0))((live.get(n.get("url")) or {}).get("latency_ms")))
+                for node in nodes_list:
+                    try:
+                        remote=node_api.sync_profile(node,remote_id,node_api.location_prefix(node),wanted)
+                        links=[p["link"] for p in remote.get("profiles",[]) if isinstance(p,dict) and isinstance(p.get("link"),str)]
+                        latency=(live.get(node.get("url")) or {}).get("latency_ms")
+                        if latency:
+                            links.sort(key=lambda _: latency)
+                        lines.extend(links)
+                    except node_api.NodeError as exc:
+                        print("node subscription sync failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+            state=traffic()
+            up=sum(int(state.get(u["id"],{}).get("up",0)) for u in result["users"])
+            down=sum(int(state.get(u["id"],{}).get("down",0)) for u in result["users"])
+            _,limit_gb=client_month_usage(result["users"][0].get("subscription_id","")) if result["users"] else (0,0)
+            headers={"profile-title":"base64:"+base64.b64encode(result["name"].encode()).decode(),"profile-update-interval":"6",
+                     "subscription-userinfo":f"upload={up}; download={down}; total={limit_gb*2**30 if limit_gb else 0}; expire=0"}
+            if result["limited"]: headers.update({"X-Hwid-Active":"true","subscription-always-hwid-enable":"true"})
+            self.send_data(base64.b64encode(("\n".join(lines)+"\n").encode()).decode(),headers=headers)
+        except Exception:
+            self.send_data("Подписка временно недоступна.",503)
+        finally:
+            SUB_FETCH_SLOTS.release()
+
+    def serve_subscription_page(self,token):
+        """Личная страница клиента по ссылке подписки: QR, инструкция, лимиты."""
+        try:
+            subs=subscription_registry()
+            sub=next((s for s in subs if s.get("enabled") and secrets.compare_digest(s["token"],token)),None)
+            if sub is None: self.send_data("Not found",404); return
+            expires=load().get("expires",{})
+            expiry=expires.get(sub["id"])
+            used,limit_gb=client_month_usage(sub["id"])
+            profiles=[u for u in users() if u.get("subscription_id")==sub["id"] and u.get("enabled",True)]
+            labels={"vless":"VLESS XHTTP · TLS через домен","hysteria":"Hysteria2 · быстрый QUIC","tuic":"TUIC 5 · быстрый QUIC + BBR"}
+            qrs=[]
+            for profile in profiles:
+                proto=profile.get("protocol","")
+                if proto not in labels: continue
+                try: link=proxy_link(proto,profile["secret"],int(profile.get("backend_port",443)),sub.get("name",""),profile.get("username",""),profile.get("id",""))
+                except Exception: continue
+                png=""
+                try: png=base64.b64encode(qr_png_bytes(link)).decode("ascii")
+                except Exception: pass
+                qrs.append({"label":labels[proto],"hint":profile.get("name",""),"link":link,"png":png})
+            if not qrs:
+                # Свежая подписка ещё не выдавала ключи устройствам: профили
+                # создаются при первом импорте клиентом. Пока — QR самой ссылки:
+                # приложение импортирует подписку, панель выдаст профили сама.
+                sub_url="https://"+DOMAIN+"/onyx-sub/"+token
+                png=""
+                try: png=base64.b64encode(qr_png_bytes(sub_url)).decode("ascii")
+                except Exception: pass
+                qrs.append({"label":"Ссылка подписки","hint":"Добавьте в приложение — все профили появятся автоматически","link":sub_url,"png":png})
+            if any(u.get("protocol")=="vless" for u in profiles):
+                vless_profile=next((u for u in profiles if u.get("protocol")=="vless"),{})
+                reality=reality_link(vless_profile.get("secret",""),sub.get("name","")+" · Reality",vless_profile.get("id",""))
+                if reality:
+                    png=""
+                    try: png=base64.b64encode(qr_png_bytes(reality)).decode("ascii")
+                    except Exception: pass
+                    qrs.append({"label":"VLESS Reality · маскировка TLS","hint":"Тот же ключ, иной handshake","link":reality,"png":png})
+            self.send_html(subscription_page_html(sub,profiles,used,limit_gb,expiry,DOMAIN,qrs),200)
+        except Exception as exc:
+            print("subscription page failed:",type(exc).__name__,str(exc)[:120],file=sys.stderr,flush=True)
+            self.send_data("Страница временно недоступна.",503)
+
+def backup_manifest():
+    try: ver=open("/etc/onyx-panel/version",encoding="ascii").read().strip()
+    except OSError: ver="unknown"
+    return {"app":"onyx-panel","version":ver,"domain":DOMAIN,"exported":int(time.time())}
+
+BACKUP_FILES=(
+    ("panel/data.json","/var/lib/onyx-panel/data.json",True),
+    ("panel/site-draft.html","/var/lib/onyx-panel/site-draft.html",False),
+    ("panel/custom-presets.json","/var/lib/onyx-panel/custom-presets.json",False),
+    ("panel/cascades.json","/var/lib/onyx-panel/cascades.json",False),
+    ("panel/routing.json","/var/lib/onyx-panel/routing.json",False),
+    ("panel/warp.json","/var/lib/onyx-panel/warp.json",False),
+    ("panel/reality.json","/var/lib/onyx-panel/reality.json",False),
+    ("panel/location.json","/var/lib/onyx-panel/location.json",False),
+    ("panel/api.key","/var/lib/onyx-panel/api.key",False),
+    ("onyx-panel/users.json","/etc/onyx-panel/users.json",True),
+    ("onyx-panel/mtproxy-secrets","/etc/onyx-panel/mtproxy-secrets",False),
+    ("onyx-panel/mtproto-host","/etc/onyx-panel/mtproto-host",False),
+    ("onyx-panel/manifest","/etc/onyx-panel/manifest",False),
+    ("onyx-panel/xray-path","/etc/onyx-panel/xray-path",False),
+    ("onyx-xray/config.json","/etc/onyx-panel-xray/config.json",False),
+)
+
+def build_backup_tar():
+    import io, tarfile
+    buf=io.BytesIO()
+    with tarfile.open(fileobj=buf,mode="w:gz") as tar:
+        payload=json.dumps(backup_manifest(),ensure_ascii=False).encode("utf-8")
+        info=tarfile.TarInfo("manifest.json"); info.size=len(payload)
+        info.mtime=int(time.time()); tar.addfile(info,io.BytesIO(payload))
+        for arc,phys,required in BACKUP_FILES:
+            if not os.path.exists(phys):
+                if required: raise ValueError("Файл не найден: "+arc)
+                continue
+            with open(phys,"rb") as f: data=f.read()
+            info=tarfile.TarInfo(arc); info.size=len(data)
+            info.mtime=int(time.time()); info.mode=0o600
+            tar.addfile(info,io.BytesIO(data))
+        awg_dir="/etc/onyx-panel/awg"
+        if os.path.isdir(awg_dir):
+            for name in sorted(os.listdir(awg_dir)):
+                if not re.fullmatch(r"[a-f0-9]{16}\.json",name): continue
+                with open(os.path.join(awg_dir,name),"rb") as f: data=f.read()
+                info=tarfile.TarInfo("onyx-panel/awg/"+name); info.size=len(data)
+                info.mtime=int(time.time()); info.mode=0o600
+                tar.addfile(info,io.BytesIO(data))
+    return buf.getvalue()
+
+def backup_preview(blob):
+    """Содержимое архива копии без применения: счётчики и имена клиентов."""
+    import io, tarfile
+    with tarfile.open(fileobj=io.BytesIO(blob),mode="r:gz") as tar:
+        names=tar.getnames()
+        def read_json(member):
+            handle=tar.extractfile(member)
+            return json.loads(handle.read().decode("utf-8")) if handle else {}
+        data=read_json("panel/data.json") if "panel/data.json" in names else {}
+        users_data=read_json("onyx-panel/users.json") if "onyx-panel/users.json" in names else {}
+        manifest=read_json("manifest.json") if "manifest.json" in names else {}
+    profiles=[u for u in users_data.get("users",[]) if isinstance(u,dict) and u.get("id")!="primary"]
+    subs=[s for s in data.get("subscriptions",[]) if isinstance(s,dict)]
+    devices=sum(sum(1 for d in s.get("devices",[]) if not d.get("revoked")) for s in subs)
+    current_subscriptions=subscription_registry()
+    current_users=[u for u in users() if u.get("id")!="primary"]
+    new_names=sorted({str(u.get("name","")) for u in profiles}-({str(u.get("name","")) for u in current_users}))
+    src_domain=str(manifest.get("domain",""))
+    cross_domain=bool(src_domain) and src_domain!=DOMAIN
+    return {"version":str(manifest.get("version","?")),"exported":int(manifest.get("exported",0) or 0),
+            "domain":src_domain,"current_domain":DOMAIN,"cross_domain":cross_domain,
+            "counts":{"profiles":len(profiles),"subscriptions":len(subs),"devices":devices,
+                      "expires":len(data.get("expires",{}) or {}),"awg":len([n for n in names if n.startswith("onyx-panel/awg/")])},
+            "current":{"profiles":len(current_users),"subscriptions":len(current_subscriptions)},
+            "draft":"panel/site-draft.html" in names,
+            "new_clients":new_names[:8],"total_new":len(new_names)}
+
+def openflux_watchdog():
+    # OpenFlux живёт, пока жив публичный документ: раз в 5 минут проверяем
+    # доступность, отзываем просроченные профили, звоним в колокольчик и
+    # Telegram, при настроенном резерве переключаем профиль на него.
+    time.sleep(75)
+    while True:
+        try:
+            for event in openflux.watchdog_tick():
+                message=event.get("message","")
+                try:
+                    web_updates.add_note("openflux",event.get("name","OpenFlux"),
+                        changes=[message]+([event["url"]] if event.get("url") else []))
+                except Exception as exc:
+                    print("openflux bell:",type(exc).__name__,file=sys.stderr,flush=True)
+                try:
+                    with STATE_LOCK:
+                        state=load()
+                    telegram_api.notify(state.get("telegram",{}) if isinstance(state.get("telegram"),dict) else {},"openflux",message)
+                except Exception as exc:
+                    print("openflux telegram:",type(exc).__name__,file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("openflux watchdog:",type(exc).__name__,exc,file=sys.stderr,flush=True)
+        time.sleep(300)
+
+
+def expiry_sweep():
+    # Auto-disable clients whose access date has passed; runs every minute.
+    while True:
+        time.sleep(60)
+        try:
+            now=int(time.time())
+            with STATE_LOCK:
+                pending={k:v for k,v in load().get("expires",{}).items() if v<=now}
+            if not pending: continue
+            subs={s.get("id"):s for s in subscription_registry()}
+            profiles={u.get("id"):u for u in users()}
+            names={s.get("id"):s.get("name",s.get("id")) for s in subscription_registry()}
+            names.update({u.get("id"):u.get("name",u.get("id")) for u in users()})
+            turned_off=[]
+            for uid,ts in pending.items():
+                    s=subs.get(uid)
+                    if s is not None:
+                        if s.get("enabled",True):
+                            try:
+                                if ctl_subscription({"id":uid,"operation":"set-enabled","enabled":False}).get("ok"):
+                                    purge_remote_profiles_async(s)
+                                    turned_off.append(names.get(uid,uid))
+                                    print("access expired, disabled:",uid,file=sys.stderr,flush=True)
+                            except Exception:
+                                print("expiry disable failed:",uid,file=sys.stderr,flush=True)
+                    else:
+                        u=profiles.get(uid)
+                        if u is not None and u.get("enabled",True):
+                            try:
+                                ctl("set-user",uid,"0")
+                                turned_off.append(names.get(uid,uid))
+                            except Exception:
+                                print("expiry disable failed:",uid,file=sys.stderr,flush=True)
+            if turned_off:
+                threading.Thread(target=telegram_notify,args=("expiry","⛔ Доступ отключён (истёк срок):\n"+"\n".join("• "+str(n) for n in turned_off)),daemon=True).start()
+                if s is None and uid not in profiles:
+                    with STATE_LOCK:
+                        d=load()
+                        if uid in d.get("expires",{}):
+                            d["expires"].pop(uid,None); save(d)
+        except Exception as exc:
+            print("expiry sweep failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def telegram_notify(event,text):
+    """Fire-and-forget Telegram delivery; never raises into the caller."""
+    try:
+        with STATE_LOCK: cfg=telegram_api.normalize_config(load().get("telegram",{}))
+        if telegram_api.quiet_active(cfg) and event not in telegram_api.QUIET_CRITICAL:
+            print("telegram muted by quiet hours:",event,file=sys.stderr,flush=True)
+            return
+        if telegram_api.configured(cfg): telegram_api.notify(cfg,event,text)
+    except Exception as exc:
+        print("telegram notify failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def expiry_notifications():
+    # One reminder per client per day while its access is within 3 days.
+    with STATE_LOCK: d=load()
+    cfg=telegram_api.normalize_config(d.get("telegram",{}))
+    if not telegram_api.configured(cfg) or not cfg.get("events",{}).get("expiry",True): return
+    expires=d.get("expires",{}) if isinstance(d.get("expires"),dict) else {}
+    if not expires: return
+    now=int(time.time()); today=time.strftime("%Y-%m-%d")
+    marks=d.get("notify_marks",{}) if isinstance(d.get("notify_marks"),dict) else {}
+    subs={s.get("id"):s for s in subscription_registry()}
+    profiles={u.get("id"):u for u in users()}
+    lines=[]; touched=False
+    for uid,ts in expires.items():
+        try: ts=int(ts)
+        except (TypeError,ValueError): continue
+        if not now<=ts<=now+3*86400: continue
+        mark=marks.get(uid)
+        if isinstance(mark,dict) and mark.get("day")==today: continue
+        name=(subs.get(uid) or profiles.get(uid) or {}).get("name",uid)
+        days=max(1,(ts-now)//86400)
+        lines.append("• %s — доступ истекает через %d дн. (%s)"%(name,days,time.strftime("%d.%m.%Y %H:%M",time.localtime(ts))))
+        marks[uid]={"day":today}; touched=True
+    if not lines: return
+    telegram_notify("expiry","⏳ Истекающие доступы:\n"+"\n".join(lines))
+    if touched:
+        for uid in list(marks):
+            if uid not in expires: marks.pop(uid,None)
+        with STATE_LOCK:
+            d=load(); d["notify_marks"]=marks; save(d)
+
+def notifications_worker():
+    while True:
+        time.sleep(300)
+        try: expiry_notifications()
+        except Exception as exc:
+            print("notifications worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def run_scheduled_backup():
+    blob=build_backup_tar()
+    with STATE_LOCK: cfg=telegram_api.normalize_config(load().get("telegram",{}))
+    with STATE_LOCK: d=load()
+    backups_cfg=d.get("backups",{}) if isinstance(d.get("backups"),dict) else {}
+    keep=max(3,int(backups_cfg.get("keep",7)))
+    directory="/var/lib/onyx-panel/backups"
+    os.makedirs(directory,exist_ok=True)
+    name="onyx-backup-%s.tar.gz"%time.strftime("%Y%m%d-%H%M%S")
+    with open(os.path.join(directory,name),"wb") as f: f.write(blob)
+    for old in sorted(os.listdir(directory))[:-keep]:
+        if old.endswith(".tar.gz"):
+            try: os.unlink(os.path.join(directory,old))
+            except OSError: pass
+    ok,note=True,""
+    try:
+        if telegram_api.configured(cfg):
+            telegram_api.send_document(cfg["token"],cfg["chat"],name,blob)
+            note="отправлен в Telegram"
+        else:
+            note="сохранён локально (Telegram не настроен)"
+    except Exception as exc:
+        ok=False; note="ошибка отправки: "+str(exc)[-120:]
+    cloud_notes=[]
+    targets=backups_cfg.get("cloud") if isinstance(backups_cfg.get("cloud"),dict) else {}
+    cloud_state={}
+    for target in onyx_cloud.TARGETS:
+        if not (targets.get(target) if isinstance(targets.get(target),dict) else {}).get("enabled"): continue
+        try:
+            onyx_cloud.upload(target,name,blob,keep)
+            cloud_notes.append(target+": ок")
+            cloud_state[target]={"ts":int(time.time()),"ok":True,"message":"загружено"}
+        except Exception as exc:
+            ok=False
+            cloud_notes.append(target+": "+str(exc)[-120:])
+            cloud_state[target]={"ts":int(time.time()),"ok":False,"message":str(exc)[-200:]}
+    if cloud_notes: note+=", облака: "+", ".join(cloud_notes)
+    with STATE_LOCK:
+        d=load(); b=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+        b["last"]={"day":time.strftime("%Y-%m-%d"),"ts":int(time.time()),"ok":ok,
+                   "message":note,"size":len(blob)}
+        if cloud_state:
+            merged=b.get("cloud") if isinstance(b.get("cloud"),dict) else {}
+            for target,st in cloud_state.items():
+                entry=merged.get(target) if isinstance(merged.get(target),dict) else {}
+                entry.update(st); merged[target]=entry
+            b["cloud"]=merged
+        d["backups"]=b; save(d)
+    telegram_notify("backups",("✅ Автобэкап %s (%s)."%(note,human_bytes(len(blob)))) if ok else ("⚠️ Автобэкап: %s"%note))
+
+def backup_worker():
+    # Hourly tick: the copy happens once per day at the configured hour.
+    while True:
+        time.sleep(3600)
+        try:
+            with STATE_LOCK: d=load()
+            cfg=d.get("backups",{}) if isinstance(d.get("backups"),dict) else {}
+            if cfg.get("mode")!="telegram": continue
+            if time.localtime().tm_hour!=int(cfg.get("hour",4)): continue
+            last=cfg.get("last",{}) if isinstance(cfg.get("last"),dict) else {}
+            if last.get("day")==time.strftime("%Y-%m-%d"): continue
+            run_scheduled_backup()
+        except Exception as exc:
+            print("backup worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+FAILOVER_FAILURES={}
+def failover_worker():
+    # Watches the active catch-all cascade; swaps to a standby after two
+    # consecutive failed checks and reports the switch to Telegram.
+    while True:
+        time.sleep(90)
+        try:
+            with STATE_LOCK: d=load()
+            if not (d.get("failover",{}) or {}).get("enabled"): continue
+            cascades=cascade_api.load_cascades(CASCADES_FILE)
+            active=onyx_failover.active_cascade(cascades)
+            if active is None: continue
+            result=cascade_api.ping(active)
+            onyx_failover.note_result(FAILOVER_FAILURES,active["id"],bool(result.get("ok")))
+            cascade_touch(active["id"],check=result,pending=False)
+            if result.get("ok"): continue
+            action=onyx_failover.decide(cascades,FAILOVER_FAILURES)
+            if not action: continue
+            target=next((c for c in cascades if c.get("id")==action["enable"]),None)
+            for c in cascades:
+                if c.get("id")==action["disable"]: c["enabled"]=False
+                if c.get("id")==action["enable"]: c["enabled"]=True
+            cascade_api.save_cascades(CASCADES_FILE,cascades)
+            FAILOVER_FAILURES.clear()
+            try: ctl("cascade-apply")
+            except Exception as exc:
+                print("failover apply failed:",cascade_detail(exc),file=sys.stderr,flush=True)
+            telegram_notify("cascades","🔁 Каскад «%s» не отвечает (%s). Клиенты переключены на «%s»."
+                            %(active.get("name",""),(result.get("message") or "")[:120],
+                              (target or {}).get("name","?")))
+        except Exception as exc:
+            print("failover worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def cert_watch():
+    """Warn once a day when the panel domain cert expires within 14 days."""
+    try:
+        domain = str(DOMAIN or "").strip().lower()
+    except NameError:
+        return
+    if not domain:
+        return
+    today = time.strftime("%Y-%m-%d")
+    try:
+        with STATE_LOCK:
+            d = load()
+        mark = d.get("cert_mark") if isinstance(d.get("cert_mark"), dict) else {}
+        if mark.get("day") == today:
+            return
+        import datetime as _dt
+        import socket as _socket
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        with _socket.create_connection(("127.0.0.1", 443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=domain) as tls:
+                cert = tls.getpeercert()
+        exp = _dt.datetime.strptime(str(cert.get("notAfter", "")), "%b %d %H:%M:%S %Y %Z")
+        days = (exp - _dt.datetime.utcnow()).days
+        with STATE_LOCK:
+            d = load()
+            if days > 14:
+                if "cert_mark" in d:
+                    d.pop("cert_mark", None)
+                    save(d)
+                return
+            d["cert_mark"] = {"day": today, "days": days}
+            save(d)
+        bell_note("alert", "cert:" + today, ["cert"])
+        threading.Thread(target=telegram_notify,
+                         args=("alerts", "🔒 Сертификат %s истекает через %d дн." % (domain, max(days, 0))),
+                         daemon=True).start()
+    except Exception as exc:
+        print("cert watch failed:", type(exc).__name__, file=sys.stderr, flush=True)
+
+
+def bell_note(kind,version,changes):
+    try: web_updates.add_note(kind,version,changes=changes)
+    except Exception as exc:
+        print("bell note failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def limits_client_disable(cid):
+    """Выключить клиента, исчерпавшего лимит; тем же путём, что и срок доступа."""
+    subs=subscription_registry()
+    sub=next((s for s in subs if s.get("id")==cid),None)
+    if sub is not None:
+        if ctl_subscription({"id":cid,"operation":"set-enabled","enabled":False}).get("ok"):
+            purge_remote_profiles_async(sub)
+        return
+    users_list=users()
+    if any(u.get("id")==cid for u in users_list): ctl("set-user",cid,"0")
+
+def limits_client_enable(cid):
+    subs=subscription_registry()
+    sub=next((s for s in subs if s.get("id")==cid),None)
+    if sub is not None:
+        ctl_subscription({"id":cid,"operation":"set-enabled","enabled":True}); return
+    users_list=users()
+    if any(u.get("id")==cid for u in users_list): ctl("set-user",cid,"1")
+
+def limits_worker():
+    # Раз в минуту: базы месяца, пороги 80%/100%, отключение и возврат доступа.
+    time.sleep(120)
+    while True:
+        try:
+            now=int(time.time()); month=onyx_limits.month_key(now)
+            subs=subscription_registry(); users_list=users(); state=traffic()
+            all_ids=[u.get("id") for u in users_list if u.get("id")]
+            for s in subs: all_ids.extend(str(p) for p in s.get("profile_ids",[]))
+            bases=onyx_limits.load_bases(LIMITS_FILE)
+            if onyx_limits.roll(bases,state,all_ids,now):
+                try: onyx_limits.save_bases(LIMITS_FILE,bases)
+                except OSError: pass
+            ops=[]; notes=[]; changed=False
+            with STATE_LOCK:
+                d=load()
+                stale_marks,stale_disabled=onyx_limits.expired_marks(d,now)
+                limits=onyx_limits.limits(d)
+                for cid,gb in limits.items():
+                    ids=onyx_limits.profile_ids(cid,subs,users_list)
+                    if not ids: continue
+                    usage=onyx_limits.usage_for(cid,bases,state,ids,now)
+                    verdict=onyx_limits.evaluate(cid,gb,usage,now)
+                    name=onyx_limits.client_name(cid,subs,users_list)
+                    mark=d.setdefault("limit_marks",{}).setdefault(cid,{})
+                    if verdict=="stop" and onyx_limits.is_enabled(cid,subs,users_list):
+                        mark.update({"month":month,"warned":True,"stopped":True})
+                        d.setdefault("limit_disabled",{})[cid]={"month":month,"usage":usage}
+                        ops.append(("disable",cid)); changed=True
+                        text="⛔ Клиент «%s» исчерпал месячный лимит %d ГБ и отключён до нового месяца."%(name,gb)
+                        notes.append((cid,text))
+                    elif verdict=="warn" and not mark.get("warned"):
+                        mark.update({"month":month,"warned":True})
+                        changed=True
+                        notes.append((cid,"⚠️ Клиент «%s» израсходовал 80%% месячного лимита (%s из %d ГБ)."%(name,human_bytes(usage),gb)))
+                    elif verdict is None:
+                        mark_month=mark.get("month")
+                        if mark_month==month and (mark.get("warned") or mark.get("stopped")):
+                            mark.pop("warned",None); mark.pop("stopped",None); changed=True
+                        if d.get("limit_disabled",{}).get(cid,{}).get("month")==month:
+                            d["limit_disabled"].pop(cid,None); changed=True
+                            ops.append(("enable",cid))
+                            notes.append((cid,"✅ Клиенту «%s» возвращён доступ: потребление ниже лимита."%name))
+                # месяц сменился — лимитным отключениям пора на возврат
+                for cid in list(d.get("limit_disabled",{})):
+                    entry=d["limit_disabled"][cid]
+                    if entry.get("month")==month: continue
+                    d["limit_disabled"].pop(cid,None); changed=True
+                    if onyx_limits.profile_ids(cid,subs,users_list):
+                        ops.append(("enable",cid))
+                        name=onyx_limits.client_name(cid,subs,users_list)
+                        notes.append((cid,"✅ Клиенту «%s» возвращён доступ: начался новый месяц."%name))
+                if changed: save(d)
+            for op,cid in ops:
+                try: limits_client_enable(cid) if op=="enable" else limits_client_disable(cid)
+                except Exception as exc:
+                    print("limit op failed:",op,type(exc).__name__,file=sys.stderr,flush=True)
+            for cid,text in notes:
+                bell_note("limit",cid,[text])
+                threading.Thread(target=telegram_notify,args=("limits",text),daemon=True).start()
+        except Exception as exc:
+            print("limits worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(60)
+
+ALERT_KEYS=(("cpu","Процессор","%"),("ram","Память","%"),("disk","Диск","%"),("load","Нагрузка (1 мин)",""))
+def alerts_worker():
+    # Раз в минуту смотрит на свежий сэмпл метрик и зовёт колокольчик и Telegram.
+    time.sleep(150)
+    while True:
+        try:
+            # Сертификат не зависит от включения пороговых алертов.
+            try: cert_watch()
+            except Exception: pass
+            with STATE_LOCK: d=load()
+            cfg=d.get("alerts") if isinstance(d.get("alerts"),dict) else {}
+            if not cfg.get("enabled"): 
+                time.sleep(60); continue
+            latest=server_metrics.read_state().get("latest",{})
+            values={"cpu":latest.get("cpu"),
+                    "ram":(100.0*latest.get("ram_used",0)/latest.get("ram_total")) if latest.get("ram_total") else None,
+                    "disk":(100.0*latest.get("disk_used",0)/latest.get("disk_total")) if latest.get("disk_total") else None,
+                    "load":(latest.get("load") or [None])[0]}
+            now=int(time.time()); marks=d.get("alert_marks") if isinstance(d.get("alert_marks"),dict) else {}
+            cooldown=max(600,int(cfg.get("cooldown",3600)))
+            fired=[]; recovered=[]; changed=False
+            for key,label,unit in ALERT_KEYS:
+                threshold=cfg.get(key)
+                try: threshold=float(threshold)
+                except (TypeError,ValueError): continue
+                value=values.get(key)
+                if value is None: continue
+                mark=marks.get(key) if isinstance(marks.get(key),dict) else {}
+                if value>=threshold:
+                    if not mark.get("since") or now-int(mark["since"])>=cooldown:
+                        marks[key]={"since":now}; changed=True
+                        fired.append("%s: %s при пороге %s%s"%(label,("%.1f%%"%value) if unit else ("%.2f"%value),("%.0f"%threshold),unit))
+                elif mark.get("since"):
+                    marks.pop(key,None); changed=True
+                    recovered.append("%s вернулся в норму: %s"%(label,("%.1f%%"%value) if unit else ("%.2f"%value)))
+            if changed:
+                with STATE_LOCK:
+                    d=load(); d["alert_marks"]=marks; save(d)
+            if fired:
+                text="🔥 Нагрузка сервера:\n"+"\n".join("• "+line for line in fired)
+                bell_note("alert","alert:"+str(now//cooldown),fired)
+                threading.Thread(target=telegram_notify,args=("alerts",text),daemon=True).start()
+            if recovered:
+                text="😌 Сервер пришёл в норму:\n"+"\n".join("• "+line for line in recovered)
+                bell_note("alert","recover:"+str(now//cooldown),recovered)
+                threading.Thread(target=telegram_notify,args=("alerts",text),daemon=True).start()
+        except Exception as exc:
+            print("alerts worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(60)
+
+def traffic_sampler():
+    # Раз в 5 минут снимает суммарный трафик по клиентам: спарклайны в списке
+    # клиентов и дневная история потребления. Счётчики кумулятивные — дельты
+    # считает тот, кто рисует.
+    time.sleep(100)
+    while True:
+        try:
+            state=traffic(); subs=subscription_registry(); users_list=users()
+            totals={}
+            for sub in subs:
+                totals[sub["id"]]=sum(
+                    max(0,int((state.get(str(p)) or {}).get("up",0) or 0))+max(0,int((state.get(str(p)) or {}).get("down",0) or 0))
+                    for p in sub.get("profile_ids",[]))
+            for u in users_list:
+                uid=u.get("id")
+                if not uid or uid=="primary" or u.get("subscription_id"): continue
+                item=state.get(uid) if isinstance(state.get(uid),dict) else {}
+                totals[uid]=max(0,int(item.get("up",0) or 0))+max(0,int(item.get("down",0) or 0))
+            now=int(time.time()); doc=read_private(TRAFFIC_HISTORY)
+            points=[p for p in doc.get("points",[]) if isinstance(p,dict) and now-30*3600<=p.get("ts",0)<now]
+            points.append({"ts":now,"totals":totals})
+            day=time.strftime("%Y-%m-%d",time.gmtime(now))
+            daily={k:v for k,v in doc.get("daily",{}).items() if isinstance(v,dict) and k>=time.strftime("%Y-%m-%d",time.gmtime(now-40*86400))}
+            daily[day]=totals
+            try: atomic_private(TRAFFIC_HISTORY,{"points":points[-360:],"daily":daily})
+            except OSError: pass
+        except Exception as exc:
+            print("traffic sampler failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(300)
+
+def sparkline_for(cid,points=None):
+    """24 почасовые дельты трафика клиента, от старых к новым (для спарклайна)."""
+    doc=read_private(TRAFFIC_HISTORY) if points is None else {"points":points}
+    series=[(int(p.get("ts",0)),int((p.get("totals") or {}).get(cid,0) or 0))
+            for p in doc.get("points",[]) if isinstance(p,dict)]
+    if len(series)<2: return []
+    buckets={}
+    previous=series[0]
+    for ts,total in series[1:]:
+        hour=int(ts)//3600*3600
+        buckets[hour]=buckets.get(hour,0)+max(0,total-previous[1])
+        previous=(ts,total)
+    hours=sorted(buckets)[-24:]
+    return [buckets[h] for h in hours]
+
+def client_month_usage(cid):
+    """(использовано за месяц, лимит ГБ) для клиента; лимит 0 — выключен."""
+    subs=subscription_registry(); users_list=users(); state=traffic()
+    ids=onyx_limits.profile_ids(cid,subs,users_list)
+    if not ids: return 0,0
+    usage=onyx_limits.usage_for(cid,onyx_limits.load_bases(LIMITS_FILE),state,ids)
+    return usage,onyx_limits.limits(load()).get(cid,0)
+
+def public_base_url():
+    return "https://"+DOMAIN if DOMAIN else ""
+
+INVITE_PROTOCOLS=("vless","hysteria")
+def invites_registry(d=None):
+    value=(d if d is not None else load()).setdefault("invites",[])
+    if not isinstance(value,list): raise ValueError("Повреждён реестр приглашений.")
+    return value
+
+def invite_valid(invite,now=None):
+    now=int(time.time()) if now is None else now
+    if not invite.get("enabled",True): return "Приглашение отключено администратором."
+    if int(invite.get("expires_at",0) or 0) and now>int(invite["expires_at"]): return "Срок действия приглашения истёк."
+    if int(invite.get("max_uses",1))>0 and int(invite.get("uses",0))>=int(invite["max_uses"]): return "Лимит активаций приглашения исчерпан."
+    return ""
+
+def invite_claim(token):
+    """Активировать приглашение: создать подписку, вернуть её токен."""
+    if not re.fullmatch(r"[a-f0-9]{32}",str(token) or ""):
+        raise ValueError("Приглашение не найдено.")
+    name="Гость"
+    with STATE_LOCK:
+        d=load()
+        invite=next((i for i in invites_registry(d) if secrets.compare_digest(str(i.get("token","")),token)),None)
+        if invite is None: raise ValueError("Приглашение не найдено.")
+        problem=invite_valid(invite)
+        if problem: raise ValueError(problem)
+        name=str(invite.get("name") or "Гость")[:80]
+    result=ctl_subscription({"operation":"create","name":name,"max_devices":int(invite.get("max_devices",1) or 1),
+                             "protocols":[p for p in INVITE_PROTOCOLS if p in (invite.get("protocols") or ["vless","hysteria"])]})
+    if not result.get("ok"):
+        raise ValueError(result.get("message","Не удалось создать доступ."))
+    with STATE_LOCK:
+        d=load()
+        invite=next((i for i in invites_registry(d) if i.get("id")==invite["id"]),None)
+        if invite is not None:
+            invite["uses"]=int(invite.get("uses",0))+1
+            invite.setdefault("claimed",[]).append({"ts":int(time.time()),"sub":result.get("id","")})
+            del invite["claimed"][:-50]
+            save(d)
+    sub=next((s for s in subscription_registry() if s.get("id")==result.get("id")),None)
+    return sub
+
+def invite_public(handler,rest):
+    """GET публичной страницы приглашения (токен или токен+статус активации)."""
+    rest=str(rest or "")
+    claimed_sub=None
+    query=parse_qs(urlparse(handler.path).query)
+    if rest.endswith("/claim"): handler.send_data("Не найдено",404); return
+    token=rest.split("/")[0]
+    invite=None
+    if re.fullmatch(r"[a-f0-9]{32}",token):
+        d=load()
+        invite=next((i for i in (d.get("invites") if isinstance(d.get("invites"),list) else [])
+                     if secrets.compare_digest(str(i.get("token","")),token)),None)
+    if query.get("sub",[""])[0] and re.fullmatch(r"[a-f0-9]{64}",query["sub"][0]):
+        sub=next((s for s in subscription_registry()
+                  if s.get("enabled") and secrets.compare_digest(s["token"],query["sub"][0])),None)
+        claimed_sub=sub
+    qr_b64=""
+    if claimed_sub is not None:
+        try:
+            import base64 as _b64
+            qr_b64=_b64.b64encode(qr_png_bytes("https://"+DOMAIN+"/onyx-sub/"+claimed_sub["token"])).decode("ascii")
+        except Exception:
+            qr_b64=""
+    try:
+        handler.send_html(invite_page_html(invite,claimed_sub,domain=DOMAIN,path="/onyx-invite/"+token,qr_b64=qr_b64),200)
+    except Exception:
+        handler.send_data("Страница временно недоступна.",503)
+
+# --------------------------- Проверка доступа ---------------------------
+
+def client_check_config(link,socks_port):
+    """Клиентский конфиг Xray из vless://-ссылки панели (xhttp+tls или reality)."""
+    parsed=urlparse(link); query=parse_qs(parsed.query)
+    host=parsed.hostname or DOMAIN; port=parsed.port or 443
+    net=(query.get("type",["xhttp"])[0] or "xhttp").lower()
+    security=(query.get("security",["tls"])[0] or "tls").lower()
+    sni=query.get("sni",[host])[0]
+    stream={"network":net,"security":security,
+            "tlsSettings":{"serverName":sni,"fingerprint":"chrome","alpn":["h2"]} if security=="tls" else None,
+            "realitySettings":{"serverName":sni,"fingerprint":"chrome",
+                "publicKey":query.get("pbk",[""])[0],"shortId":query.get("sid",[""])[0],
+                "spiderX":query.get("spath",["/"])[0]} if security=="reality" else None}
+    settings_key={"xhttp":"xhttpSettings","httpupgrade":"httpupgradeSettings","ws":"wsSettings","grpc":"grpcSettings","tcp":"tcpSettings"}.get(net,"xhttpSettings")
+    stream[settings_key]={"host":query.get("host",[host])[0],"path":query.get("path",["/"])[0],"mode":query.get("mode",["auto"])[0]} if net=="xhttp" else {"host":query.get("host",[host])[0],"path":query.get("path",["/"])[0]}
+    if security=="reality": stream["tlsSettings"]=None
+    return {"log":{"loglevel":"warning"},
+            "inbounds":[{"listen":"127.0.0.1","port":socks_port,"protocol":"socks","settings":{"udp":False}}],
+            "outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":host,"port":port,
+                "users":[{"id":parsed.username or "","encryption":"none","level":0}]}]},
+                "streamSettings":{k:v for k,v in stream.items() if v is not None}}]}
+
+def client_check_bg(uid,link):
+    """Живая проверка профиля: временный Xray-клиент + curl через SOCKS."""
+    def worker():
+        result={"ts":int(time.time()),"status":"running"}
+        write_client_check(uid,result)
+        cfg_path=None; proc=None
+        try:
+            socks_port=None
+            for _ in range(8):
+                candidate=20000+secrets.randbelow(19000)
+                with socket.socket() as probe:
+                    probe.settimeout(0.4)
+                    if probe.connect_ex(("127.0.0.1",candidate))!=0:
+                        socks_port=candidate; break
+            if socks_port is None: raise RuntimeError("Нет свободного локального порта для проверки.")
+            fd,cfg_path=tempfile.mkstemp(prefix="onyx-check-",suffix=".json")
+            with os.fdopen(fd,"w",encoding="utf-8") as f: json.dump(client_check_config(link,socks_port),f)
+            proc=subprocess.Popen([XRAY_BIN,"run","-c",cfg_path],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            deadline=time.time()+8
+            while time.time()<deadline:
+                with socket.socket() as probe:
+                    probe.settimeout(0.4)
+                    if probe.connect_ex(("127.0.0.1",socks_port))==0: break
+                time.sleep(0.3)
+            proxy="socks5h://127.0.0.1:%d"%socks_port
+            ip_run=subprocess.run(["curl","-4","-sS","--max-time","15","-x",proxy,
+                "-w","\\n%{time_total} %{http_code}","https://api.ipify.org"],
+                capture_output=True,text=True,timeout=20)
+            body,*tail=ip_run.stdout.strip().rsplit("\n",1)
+            timing=tail[0].split() if tail else ["",""]
+            if ip_run.returncode or (len(timing)>1 and timing[1]!="200"):
+                raise RuntimeError("Выход через профиль не отвечает"+((" ("+ip_run.stderr.strip()[-80:]+")") if ip_run.stderr else ""))
+            exit_ip=body.strip()[:64]; delay=int(float(timing[0])*1000)
+            speed_run=subprocess.run(["curl","-4","-sS","--max-time","25","-x",proxy,"-o","/dev/null",
+                "-w","%{speed_download} %{http_code}","https://speed.cloudflare.com/__down?bytes=25000000"],
+                capture_output=True,text=True,timeout=30)
+            parts=speed_run.stdout.split()
+            speed=int(float(parts[0])) if parts and parts[0].replace(".","",1).isdigit() else 0
+            result={"ts":int(time.time()),"status":"ok","ip":exit_ip,"delay":delay,"speed":speed}
+        except Exception as exc:
+            result={"ts":int(time.time()),"status":"error","message":str(exc)[-200:]}
+        finally:
+            if proc is not None:
+                try: proc.terminate(); proc.wait(timeout=5)
+                except Exception:
+                    try: proc.kill()
+                    except Exception: pass
+            if cfg_path:
+                try: os.unlink(cfg_path)
+                except OSError: pass
+            write_client_check(uid,result)
+    threading.Thread(target=worker,daemon=True,name="onyx-client-check").start()
+
+# ----------------------------- Диагностика -----------------------------
+
+def _diag_check(label):
+    def deco(fn):
+        fn._diag_label=label; return fn
+    return deco
+
+@_diag_check("DNS домена")
+def _diag_dns():
+    import socket
+    try:
+        addrs={a[4][0] for a in socket.getaddrinfo(DOMAIN,443)}
+        return True,"Домен "+DOMAIN+" → "+", ".join(sorted(addrs)[:3])
+    except Exception as exc:
+        return False,"Не резолвится: "+str(exc)[:120]
+
+@_diag_check("TLS-сертификат")
+def _diag_cert():
+    # Без sh -c: домен — из env установщика, но shell-интерполяции в панели
+    # не место в принципе (сегодня env, завтра — поле в UI).
+    if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}",DOMAIN or ""):
+        return False,"Домен панели содержит недопустимые символы."
+    probe=subprocess.run(["openssl","s_client","-connect",DOMAIN+":443","-servername",DOMAIN],
+        input="",capture_output=True,text=True,timeout=25)
+    run=subprocess.run(["openssl","x509","-noout","-enddate"],
+        input=probe.stdout,capture_output=True,text=True,timeout=25)
+    m=re.search(r"notAfter=(.+)",run.stdout or "")
+    if not m: return False,"Не удалось прочитать сертификат."
+    import calendar
+    try: expires=calendar.timegm(time.strptime(m.group(1).strip(),"%b %d %H:%M:%S %Y GMT"))
+    except ValueError: return False,"Не удалось разобрать дату сертификата."
+    days=int((expires-time.time())//86400)
+    if days<0: return False,"Сертификат истёк."
+    return (days>=14),"Сертификат действует ещё %d дн."%days
+
+@_diag_check("Панель снаружи")
+def _diag_public():
+    try:
+        request=urllib.request.Request("https://"+DOMAIN+PANEL_PATH+"/__health",headers={"User-Agent":"OnyxPanel-Diag"})
+        with urllib.request.urlopen(request,timeout=15) as r:
+            body=r.read().decode("utf-8","replace")
+        return (r.status==200 and body.strip()=="OK"),"HTTPS-ответ "+str(r.status)+", health OK"
+    except Exception as exc:
+        return False,"Панель недоступна снаружи: "+str(exc)[:140]
+
+@_diag_check("Службы")
+def _diag_services():
+    units={"xray":"onyx-panel-xray.service","panel":"onyx-panel.service","caddy":"caddy.service",
+           "relay":"tproxy-server.service","mtproxy":"mtproxy.service"}
+    bad=[]
+    for name,unit in units.items():
+        run=subprocess.run(["systemctl","is-active","--quiet",unit],capture_output=True,timeout=10)
+        if run.returncode: bad.append(name)
+    if bad: return False,"Не активны: "+", ".join(bad)
+    return True,"Панель, Xray, Caddy, релей и MTProxy работают"
+
+@_diag_check("Конфиг Xray")
+def _diag_xray():
+    run=subprocess.run([XRAY_BIN,"run","-test","-c","/etc/onyx-panel-xray/config.json"],
+        capture_output=True,text=True,timeout=20)
+    if run.returncode: return False,((run.stderr or run.stdout or "")[-200:] or "конфиг не прошёл проверку")
+    return True,"Конфигурация Xray валидна"
+
+@_diag_check("Firewall-таблица")
+def _diag_nft():
+    run=subprocess.run(["nft","list","table","inet","onyx_panel"],capture_output=True,text=True,timeout=10)
+    if run.returncode: return False,"Таблица inet onyx_panel отсутствует."
+    counters=len(re.findall(r"onyx:[A-Za-z0-9_-]+:(up|down)",run.stdout))
+    return True,"Таблица на месте, счётчиков трафика: %d"%counters
+
+@_diag_check("Порты слушаются")
+def _diag_ports():
+    def listening(path):
+        rows=[]
+        try:
+            with open(path,encoding="ascii") as f: next(f); rows=[line.split() for line in f if len(line.split())>3]
+        except OSError: return rows
+        return rows
+    tcp=[int(r[1].split(":")[1],16) for r in listening("/proc/net/tcp")+listening("/proc/net/tcp6") if r[3]=="0A"]
+    udp=[int(r[1].split(":")[1],16) for r in listening("/proc/net/udp")+listening("/proc/net/udp6")]
+    missing=[]
+    if 443 not in tcp: missing.append("443/tcp")
+    if 8090 not in tcp: missing.append("8090/tcp (панель)")
+    if HYSTERIA_PORT not in udp: missing.append("%d/udp (Hysteria2)"%HYSTERIA_PORT)
+    if missing: return False,"Не слушаются: "+", ".join(missing)
+    return True,"443/tcp, %d/udp и локальный порт панели слушаются"%HYSTERIA_PORT
+
+@_diag_check("Сборщики метрик")
+def _diag_collectors():
+    metrics=server_metrics.read_state().get("latest",{})
+    fresh_metrics=int(time.time())-int(metrics.get("time",0) or 0)<90
+    traffic_state=traffic()
+    fresh_traffic=any(isinstance(v,dict) and int(v.get("updated_at",0) or 0)>time.time()-180 for v in traffic_state.values())
+    if not fresh_metrics and not fresh_traffic:
+        return False,"Метрики и счётчики трафика не обновляются (таймеры onyx-panel-metrics/traffic)."
+    if not fresh_metrics: return False,"Метрики VPS не обновляются (onyx-panel-metrics.timer)."
+    if not fresh_traffic: return False,"Счётчики трафика не обновляются (onyx-panel-traffic.timer)."
+    return True,"Метрики и счётчики трафика свежие"
+
+@_diag_check("Место на диске")
+def _diag_disk():
+    usage=shutil.disk_usage("/")
+    percent=100.0*usage.used/usage.total
+    free=usage.free
+    if percent>=90 or free<2*1024**3: return False,"Занято %.0f%%, свободно %s"%(percent,human_bytes(free))
+    return True,"Занято %.0f%%, свободно %s"%(percent,human_bytes(free))
+
+@_diag_check("Резервная копия")
+def _diag_backup():
+    d=load(); cfg=d.get("backups") if isinstance(d.get("backups"),dict) else {}
+    last=cfg.get("last") if isinstance(cfg.get("last"),dict) else {}
+    if not last.get("ts"): return False,"Автобэкап ещё ни разу не выполнялся."
+    age=int(time.time())-int(last.get("ts",0))
+    if age>2*86400: return False,"Последняя копия старше двух суток: "+str(last.get("message",""))[:100]
+    return True,"Последняя копия %s назад: %s"%(duration(age),str(last.get("message",""))[:80])
+
+DIAG_CHECKS=(_diag_dns,_diag_cert,_diag_public,_diag_services,_diag_xray,_diag_nft,
+             _diag_ports,_diag_collectors,_diag_disk,_diag_backup)
+
+def diagnostics_bg():
+    def worker():
+        results=[]
+        write_diagnostics({"started":int(time.time()),"phase":"running","checks":[{ "key":fn.__name__,"label":fn._diag_label,"status":"pending"} for fn in DIAG_CHECKS]})
+        for fn in DIAG_CHECKS:
+            try: ok,detail=fn()
+            except Exception as exc: ok,detail=False,type(exc).__name__+": "+str(exc)[:120]
+            results.append({"key":fn.__name__,"label":fn._diag_label,"ok":bool(ok),"detail":str(detail)[:300],"status":"done"})
+            write_diagnostics({"started":int(time.time()),"phase":"running","checks":results})
+        write_diagnostics({"started":int(time.time()),"phase":"done","checks":results})
+    threading.Thread(target=worker,daemon=True,name="onyx-diagnostics").start()
+
+# --------------------------- Порты и firewall ---------------------------
+
+UFW_EXTRA="/etc/onyx-panel/ufw-extra.json"
+def firewall_extra():
+    value=read_private(UFW_EXTRA).get("rules")
+    return value if isinstance(value,list) else []
+
+def firewall_port(spec,open_it):
+    spec=str(spec).strip()
+    if not re.fullmatch(r"\d{1,5}/(tcp|udp)",spec) or not 1<=int(spec.split("/")[0])<=65535:
+        raise ValueError("Некорректный порт.")
+    rules=onyx_firewall._load()["rules"]+firewall_extra()
+    if open_it and spec in rules: raise ValueError("Порт уже открыт панелью.")
+    if not open_it and spec not in firewall_extra(): raise ValueError("Порт не найден среди открытых вручную.")
+    if open_it:
+        run=subprocess.run(["ufw","allow",spec,"comment","Onyx Panel"],capture_output=True,text=True,timeout=25)
+    else:
+        run=subprocess.run(["ufw","--force","delete","allow",spec],capture_output=True,text=True,timeout=25)
+    if run.returncode: raise ValueError((run.stderr or run.stdout or "ufw отклонил правило")[-160:])
+    extra=[r for r in firewall_extra() if r!=spec]
+    if open_it: extra.append(spec)
+    atomic_private(UFW_EXTRA,{"rules":extra})
+
+def listening_sockets():
+    """Открытые слушающие порты с именами процессов (ss -lntup, LC_ALL=C)."""
+    try:
+        run=subprocess.run(["ss","-lntup"],capture_output=True,text=True,timeout=10,
+            env={**os.environ,"LC_ALL":"C"})
+    except (OSError,subprocess.SubprocessError):
+        return []  # ss недоступен (например, проверка вне Linux) — карточка покажет пусто
+    rows=[]
+    for line in (run.stdout or "").splitlines()[1:]:
+        parts=line.split()
+        if len(parts)<6 or parts[0] not in ("tcp","udp"): continue
+        local=parts[4] if len(parts)>4 else ""
+        port=local.rsplit(":",1)[-1] if ":" in local else ""
+        process=parts[-1] if not parts[-1].startswith(("tcp","udp")) else ""
+        name=process.split('"')[1] if '"' in process else ("users:" in process and "—" or "—")
+        if not port.isdigit(): continue
+        rows.append({"port":int(port),"proto":"udp" if parts[0]=="udp" else "tcp","process":name if name else "—"})
+    seen=set(); unique=[]
+    for row in rows:
+        key=(row["port"],row["proto"])
+        if key in seen: continue
+        seen.add(key); unique.append(row)
+    return sorted(unique,key=lambda r:(r["port"],r["proto"]))
+
+def heal_caddy_route():
+    # If a path change was interrupted before caddy restarted, the Caddyfile
+    # already names the new path while the running caddy still routes the old
+    # one and the panel ends up stranded behind the landing page. Reconcile on
+    # every start: remove stale panel routes, add the current one if missing.
+    caddy_path="/etc/caddy/Caddyfile"
+    try: s=open(caddy_path,encoding="utf-8").read()
+    except OSError: return
+    known={"/onyx-api/*","/onyx-sub/*","/onyx-invite/*","/wpp-sub/*","/wpp-api/*",PANEL_PATH+"/*"}
+    route="    handle "+PANEL_PATH+"/* {\n        reverse_proxy 127.0.0.1:8090\n    }\n"
+    blocks=[(m.start(),m.end(),m.group(1)) for m in re.finditer(
+        r"(?m)^[ \t]*handle\s+(/\S+/\*)\s*\{\s*\n[ \t]*reverse_proxy 127\.0\.0\.1:8090[ \t]*\n[ \t]*\}[ \t]*\n?",s)]
+    stale=[]; seen=set()
+    for b in blocks:
+        if b[2] not in known or b[2] in seen: stale.append(b)
+        else: seen.add(b[2])
+    has_current=PANEL_PATH+"/*" in seen
+    if not stale and has_current: return
+    for start,end,_ in sorted(stale,key=lambda b:-b[0]):
+        s=s[:start]+s[end:]
+    if not has_current:
+        m=re.search(r'(?m)^[ \t]*reverse_proxy 127\.0\.0\.1:8080[ \t]*\{',s)
+        if not m: return
+        s=s[:m.start()]+route+"\n"+s[m.start():]
+    open(caddy_path,"w",encoding="utf-8").write(s)
+    subprocess.run(["caddy","fmt","--overwrite",caddy_path],capture_output=True,timeout=20)
+    check=subprocess.run(["caddy","validate","--config",caddy_path,"--adapter","caddyfile"],capture_output=True,timeout=30)
+    if check.returncode!=0:
+        print("caddy route heal skipped: config invalid",file=sys.stderr,flush=True); return
+    r=subprocess.run(["systemctl","reload","caddy.service"],capture_output=True,timeout=30)
+    if r.returncode: subprocess.run(["systemctl","restart","caddy.service"],capture_output=True,timeout=60)
+    print("caddy route healed for",PANEL_PATH,file=sys.stderr,flush=True)
+
+def _ctl_apply_job():
+    # Пересобрать Xray после смены настроек обхода (leastPing/hopping/ipv6/unbound).
+    try:
+        with APPLY_LOCK:
+            ctl("sync")
+    except Exception as exc:
+        print("ctl sync failed:",type(exc).__name__,str(exc)[:150],file=sys.stderr,flush=True)
+
+def censor_worker():
+    # Каждые 6 часов (плюс старт через 3 минуты) проверяет TCP/TLS-доступность
+    # портов панели извне: переход порта в «blocked» = вероятная блокировка
+    # провайдером, уведомление уходит в Telegram.
+    time.sleep(180)
+    while True:
+        try:
+            with STATE_LOCK: d=load()
+            cfg=d.get("censor") if isinstance(d.get("censor"),dict) else {}
+            targets=onyx_censor.normalize_state(cfg.get("targets")).get("targets",[])
+            if not targets:
+                targets=onyx_censor.default_targets(DOMAIN,int((reality_api.load(REALITY_FILE) or {}).get("port",0) or 0))
+            results=onyx_censor.run_probes(targets)
+            state=onyx_censor.normalize_state(cfg)
+            transitions=onyx_censor.transitions(state.get("results",{}),results)
+            state=onyx_censor.record_round(state,results)
+            with STATE_LOCK:
+                d=load(); d["censor"]=state; save(d)
+            blocked=[t for t in transitions if transitions[t]=="blocked"]
+            restored=[t for t in transitions if transitions[t]=="up"]
+            if blocked or restored:
+                lines=[]
+                if blocked: lines.append("⛔ Заблокированы порты: "+", ".join(blocked))
+                if restored: lines.append("🟢 Порты снова доступны: "+", ".join(restored))
+                threading.Thread(target=telegram_notify,args=("alerts","\n".join(lines)),daemon=True).start()
+        except Exception as exc:
+            print("censor worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(6*3600)
+
+DEFENSE_STATE={"running":False,"banned":0}
+def defense_worker():
+    # Ханипот включается/выключается вместе с тумблером в настройках обхода;
+    # слушатель — поток onyx_defense внутри ядра, остановка — onyx_defense.stop().
+    # Если поток умер (например, порт был занят при старте) — поднимаем заново.
+    was_on=False
+    while True:
+        try:
+            with STATE_LOCK: d=load()
+            on=bool((d.get("bypass") or {}).get("honeypot",False))
+            if on:
+                if not onyx_defense.running():
+                    port=onyx_defense.normalize_state(d.get("defense")).get("port",onyx_defense.DEFAULT_PORT)
+                    onyx_defense.start(port=port,on_hit=_defense_on_hit,on_ban=_defense_on_ban)
+                DEFENSE_STATE["running"]=onyx_defense.running()
+            elif was_on:
+                onyx_defense.stop()
+                DEFENSE_STATE["running"]=False
+            was_on=on
+        except Exception as exc:
+            print("defense worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(30)
+
+def _defense_on_hit(source_ip,port,kind):
+    # Каждый коннект на ханипот — в журнал data.json для вкладки Security,
+    # но не чаще раза в минуту на IP: иначе сканер гоняет полный цикл
+    # load→save data.json тысячами раз и душит STATE_LOCK.
+    try:
+        with STATE_LOCK:
+            d=load()
+            state=onyx_defense.normalize_state(d.get("defense"))
+            journal=state.get("journal") or []
+            now=int(time.time())
+            if any(e.get("ip")==str(source_ip) and now-int(e.get("ts",0))<60 for e in journal[-20:]):
+                return
+            journal,_entry=onyx_defense.note_hit(journal,source_ip,port,kind)
+            state["journal"]=journal
+            d["defense"]=state
+            save(d)
+    except Exception as exc:
+        print("defense hit logging failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def _defense_on_ban(source_ip):
+    try:
+        command=onyx_defense.ban_command(source_ip)
+        subprocess.run(command.split(),capture_output=True,timeout=10)
+        DEFENSE_STATE["banned"]+=1
+    except Exception as exc:
+        print("defense ban failed:",type(exc).__name__,file=sys.stderr,flush=True)
+
+def unbound_worker():
+    # Watchdog DoT-резолвера: unbound установлен установщиком; если служба
+    # упала при включённом маркере — пробуем поднять, иначе снимаем маркер,
+    # чтобы Xray вернулся на системный резолвер и трафик не встал.
+    while True:
+        try:
+            marker=os.path.exists(UNBOUND_MARKER)
+            if marker:
+                check=subprocess.run(["systemctl","is-active","--quiet","unbound"],capture_output=True,timeout=10)
+                if check.returncode:
+                    subprocess.run(["systemctl","restart","unbound"],capture_output=True,timeout=30)
+                    time.sleep(5)
+                    if subprocess.run(["systemctl","is-active","--quiet","unbound"],capture_output=True,timeout=10).returncode:
+                        os.unlink(UNBOUND_MARKER)
+                        print("unbound degraded: marker removed",file=sys.stderr,flush=True)
+        except Exception as exc:
+            print("unbound worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(300)
+
+def main():
+    heal_caddy_route()
+    threading.Thread(target=expiry_sweep,daemon=True).start()
+    threading.Thread(target=notifications_worker,daemon=True).start()
+    threading.Thread(target=backup_worker,daemon=True).start()
+    threading.Thread(target=failover_worker,daemon=True).start()
+    threading.Thread(target=openflux_watchdog,daemon=True).start()
+    threading.Thread(target=limits_worker,daemon=True).start()
+    threading.Thread(target=alerts_worker,daemon=True).start()
+    threading.Thread(target=traffic_sampler,daemon=True).start()
+    threading.Thread(target=censor_worker,daemon=True).start()
+    threading.Thread(target=defense_worker,daemon=True).start()
+    threading.Thread(target=unbound_worker,daemon=True).start()
+    ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
+
+if __name__=="__main__":
+    if len(sys.argv)==2 and sys.argv[1]=="--repair-site":
+        write_site_html(read_site_html())
+        print("Public landing page assets repaired.")
+    else:
+        main()
+
+
+

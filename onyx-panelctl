@@ -1,0 +1,1018 @@
+#!/usr/bin/env python3
+import copy, fcntl, grp, json, os, re, secrets, shutil, subprocess, sys, time, uuid
+sys.path.insert(0,"/opt/onyx-panel")
+from onyx_subscriptions import mutate as mutate_subscription, issue as issue_subscription, SubscriptionError
+import onyx_awg
+import onyx_firewall
+import onyx_cascade
+import onyx_routing
+import onyx_warp
+import onyx_reality
+import onyx_bypass
+
+USERS="/etc/onyx-panel/users.json"
+PROFILES="/etc/tproxy-server/profiles.json"
+PRIMARY_SECRET="/etc/onyx-panel/primary-secret"
+MT_ENV="/etc/mtproxy/mtproxy.env"
+UNIT_DIR="/etc/systemd/system"
+FIREWALL_SCRIPT="/usr/local/sbin/onyx-panel-user-firewall"
+MT_BIN="/opt/MTProxy/objs/bin/mtproto-proxy"
+MT_AES="/etc/mtproxy/proxy-secret"
+MT_CONF="/etc/mtproxy/proxy-multi.conf"
+XRAY_BIN="/opt/onyx-panel/xray/xray"
+XRAY_CONFIG="/etc/onyx-panel-xray/config.json"
+XRAY_PATH_FILE="/etc/onyx-panel/xray-path"
+XRAY_CERT="/etc/onyx-panel-xray/tls/domain.crt"
+XRAY_KEY="/etc/onyx-panel-xray/tls/domain.key"
+XRAY_SERVICE="onyx-panel-xray.service"
+XRAY_TLS_SYNC="/usr/local/sbin/onyx-panel-sync-tls"
+XRAY_VLESS_PORT=10000
+XRAY_API="127.0.0.1:10085"
+HYSTERIA_PORT=8443
+TUIC_PORT=9443
+PANEL_DATA="/var/lib/onyx-panel/data.json"
+UNBOUND_MARKER="/etc/onyx-panel/unbound.enabled"
+CADDYFILE="/etc/caddy/Caddyfile"
+TRAFFIC_FILE="/var/lib/onyx-panel/traffic.json"
+TRAFFIC_LOCK="/var/lib/onyx-panel/traffic.lock"
+CASCADES_FILE="/var/lib/onyx-panel/cascades.json"
+ROUTING_FILE="/var/lib/onyx-panel/routing.json"
+WARP_FILE="/var/lib/onyx-panel/warp.json"
+REALITY_FILE="/var/lib/onyx-panel/reality.json"
+UFW_HYSTERIA_MARKER="/etc/onyx-panel/hysteria-ufw-owned"
+UFW_MTPROTO_MARKER="/etc/onyx-panel/mtproto-ufw-owned"
+UFW_AWG_MARKER="/etc/onyx-panel/awg-ufw-owned"
+UFW_AWG_ROUTE_MARKER="/etc/onyx-panel/awg-route-ufw-owned"
+BASE_PORT=2399
+BASE_STATS=8889
+MAX_USERS=32
+
+def run(*args, check=False, timeout=60):
+    p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=timeout)
+    if check and p.returncode:
+        raise RuntimeError(p.stderr.strip() or "command failed")
+    return p
+
+def load():
+    try:
+        with open(USERS,encoding="utf-8") as f:
+            d=json.load(f)
+            d.setdefault("users",[])
+            d.setdefault("traffic",{})
+            d.setdefault("subscriptions",[])
+            # Remove the two withdrawn experimental protocols. Subscription
+            # records keep working with their stable VLESS/Hysteria2 profiles.
+            d["users"]=[u for u in d["users"] if u.get("protocol","web") not in ("mieru","naive")]
+            for sub in d["subscriptions"]:
+                supported=[p for p in sub.get("protocols",[]) if p in ("vless","hysteria","tuic")]
+                sub["protocols"]=supported or ["vless","hysteria"]
+            d["users"]=[u for u in d["users"] if not (u.get("subscription_id") and u.get("protocol")=="web")]
+            for u in d["users"]:
+                protocol=u.setdefault("protocol","web")
+                # V2.2 briefly exposed experimental per-profile transports and
+                # ports.  Stable V2.1 deliberately has one tested VLESS XHTTP
+                # listener behind Caddy/443 and one Hysteria2 UDP/8443 listener.
+                # Normalize those records while preserving IDs and secrets.
+                if protocol=="vless":
+                    u["backend_port"]=443
+                    for key in ("transport","path","xray_port","xhttp_mode","fingerprint","legacy_shared"):
+                        u.pop(key,None)
+                elif protocol=="hysteria":
+                    u["backend_port"]=HYSTERIA_PORT
+                    for key in ("udp_idle_timeout","masquerade"):
+                        u.pop(key,None)
+                elif protocol=="tuic":
+                    u["backend_port"]=TUIC_PORT
+                    for key in ("udp_idle_timeout","masquerade"):
+                        u.pop(key,None)
+            return d
+    except FileNotFoundError:
+        return {"users":[],"traffic":{},"subscriptions":[]}
+
+def save(d):
+    tmp=USERS+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f:
+        json.dump(d,f,ensure_ascii=True,indent=2)
+    os.chmod(tmp,0o600)
+    os.replace(tmp,USERS)
+
+def atomic_text(path,value,mode,group="root"):
+    tmp=path+".tmp"
+    try:
+        with open(tmp,"w",encoding="utf-8") as f:
+            f.write(value); f.flush(); os.fsync(f.fileno())
+        os.chown(tmp,0,grp.getgrnam(group).gr_gid if group!="root" else 0)
+        os.chmod(tmp,mode)
+        os.replace(tmp,path)
+    except Exception:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+        raise
+
+def normalize_proxy_secret(value):
+    value=str(value or "").strip().lower()
+    if not re.fullmatch(r"(?:dd)?[0-9a-f]{32}",value):
+        raise ValueError("Секрет должен содержать 32 шестнадцатеричных символа; префикс dd допускается.")
+    return value[2:] if value.startswith("dd") else value
+
+def port_in_use(port):
+    # Do not rely solely on users.json: a stopped/old installation can still
+    # have an MTProxy process listening on a port that is absent from the file.
+    sockets=run("ss","-lnt").stdout or ""
+    return re.search(r"[:.]%d\b" % int(port),sockets) is not None
+
+def alloc_ports(d,requested_port=None):
+    used={int(u.get("backend_port",0)) for u in d["users"] if u.get("backend_port")}
+    used_stats={int(u.get("stats_port",0)) for u in d["users"] if u.get("stats_port")}
+    if requested_port not in (None,""):
+        try: p=int(requested_port)
+        except (TypeError,ValueError): raise ValueError("Порт MTProto должен быть числом от 1024 до 65535.")
+        if p<1024 or p>65535:
+            raise ValueError("Порт MTProto должен быть в диапазоне 1024–65535.")
+        if p in {2398,443,8080,8081,8090} or p in used or p in used_stats or port_in_use(p):
+            raise ValueError("Этот порт уже занят. Выберите другой порт MTProto.")
+    else:
+        p=BASE_PORT
+        while p in used or p in used_stats or port_in_use(p): p+=1
+        if p>=BASE_PORT+MAX_USERS:
+            raise RuntimeError("Maximum panel users reached")
+    s=BASE_STATS
+    while s==p or s in used or s in used_stats or port_in_use(s): s+=1
+    if s>65535: raise RuntimeError("Не удалось подобрать служебный порт MTProto.")
+    return p,s
+
+def mtproto_secrets(u):
+    values=u.get("device_secrets")
+    if not isinstance(values,list) or not values: values=[u.get("secret","")]
+    result=[]
+    for value in values:
+        try: value=normalize_proxy_secret(value)
+        except ValueError: continue
+        if value not in result: result.append(value)
+    if not result: result=[normalize_proxy_secret(u.get("secret",""))]
+    return result
+
+def write_unit(u):
+    if u.get("protocol","web") not in ("web","mtproto"):
+        return
+    path=os.path.join(UNIT_DIR,f"onyx-user-{u['id']}.service")
+    secret_args=" ".join("-S "+value for value in (mtproto_secrets(u) if u.get("protocol")=="mtproto" else [u["secret"]]))
+    content=f"""[Unit]
+Description=WEB Proxy User {u['id']}
+After=network-online.target onyx-panel-firewall.service
+Wants=network-online.target
+Requires=onyx-panel-firewall.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart={MT_BIN} -u nobody -p {int(u['stats_port'])} -H {int(u['backend_port'])} {secret_args} --aes-pwd {MT_AES} {MT_CONF} -M 1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+"""
+    tmp=path+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f: f.write(content)
+    os.chmod(tmp,0o644)
+    os.replace(tmp,path)
+
+def _panel_bypass():
+    # Bypass section lives in the panel's data.json (settings tab), while the
+    # manager only owns users.json — read it read-only for firewall/xray needs.
+    try:
+        with open(PANEL_DATA,encoding="utf-8") as f: raw=json.load(f)
+        return onyx_bypass.normalize(raw.get("bypass") if isinstance(raw,dict) else {})
+    except Exception:
+        return onyx_bypass.normalize({})
+
+def sync_firewall(d):
+    # Preserve the last counters before recreating the nftables table.
+    try: collect_traffic(d)
+    except Exception: pass
+    web_ports=[int(u["backend_port"]) for u in d["users"] if u.get("enabled",True) and u.get("protocol","web")=="web"]
+    mtproto_ports=[int(u["backend_port"]) for u in d["users"] if u.get("enabled",True) and u.get("protocol","web")=="mtproto"]
+    stats=[int(u["stats_port"]) for u in d["users"] if u.get("enabled",True) and u.get("protocol","web") in ("web","mtproto") and u.get("stats_port")]
+    hysteria_enabled=any(u.get("enabled",True) and u.get("protocol")=="hysteria" for u in d["users"])
+    tuic_enabled=any(u.get("enabled",True) and u.get("protocol")=="tuic" for u in d["users"])
+    bypass=_panel_bypass()
+    awg_users=[u for u in d["users"] if u.get("enabled",True) and u.get("protocol") in onyx_awg.PROTOCOLS]
+    lines=[
+        "#!/usr/bin/env bash",
+        "set -e",
+        "nft list table inet onyx_panel >/dev/null 2>&1 && nft delete table inet onyx_panel || true",
+        "nft add table inet onyx_panel",
+        "nft 'add chain inet onyx_panel input { type filter hook input priority -20; policy accept; }'",
+        "nft 'add chain inet onyx_panel output { type filter hook output priority -20; policy accept; }'",
+        # Honeypot defense bans live in dynamic sets with a 24h timeout; the
+        # drop rules must precede every accept so banned hosts stay blocked.
+        "nft 'add set inet onyx_panel ban4 { type ipv4_addr; flags dynamic,timeout; timeout 24h; }'",
+        "nft 'add set inet onyx_panel ban6 { type ipv6_addr; flags dynamic,timeout; timeout 24h; }'",
+        "nft 'add rule inet onyx_panel input ip saddr @ban4 counter drop'",
+        "nft 'add rule inet onyx_panel input ip6 saddr @ban6 counter drop'",
+        "nft 'add rule inet onyx_panel output oifname \"lo\" tcp dport 2398 counter comment \"onyx:primary:up\"'",
+        "nft 'add rule inet onyx_panel input iifname \"lo\" tcp sport 2398 counter comment \"onyx:primary:down\"'"
+    ]
+    for u in d["users"]:
+        if u.get("enabled",True) and u.get("protocol","web")=="web":
+            uid=u["id"]
+            port=int(u["backend_port"])
+            lines.append("nft 'add rule inet onyx_panel output oifname \"lo\" tcp dport %d counter comment \"onyx:%s:up\"'"%(port,uid))
+            lines.append("nft 'add rule inet onyx_panel input iifname \"lo\" tcp sport %d counter comment \"onyx:%s:down\"'"%(port,uid))
+        elif u.get("enabled",True) and u.get("protocol")=="mtproto":
+            uid=u["id"]
+            port=int(u["backend_port"])
+            # Keep MTProto rules compatible with both Ubuntu 22.04 and 24.04
+            # nftables. Earlier packet-fingerprint expressions were rejected
+            # by some nft versions and made client creation roll back.
+            lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" tcp dport %d counter accept comment \"onyx:%s:up\"'"%(port,uid))
+            lines.append("nft 'add rule inet onyx_panel output oifname != \"lo\" tcp sport %d counter accept comment \"onyx:%s:down\"'"%(port,uid))
+    if web_ports:
+        lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" tcp dport { %s } counter drop'" % ",".join(map(str,sorted(web_ports))))
+    if stats:
+        lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" tcp dport { %s } counter drop'" % ",".join(map(str,sorted(stats))))
+    if hysteria_enabled:
+        lines.append("nft 'add rule inet onyx_panel input udp dport %d counter accept'" % HYSTERIA_PORT)
+    if tuic_enabled:
+        lines.append("nft 'add rule inet onyx_panel input udp dport %d counter accept'" % TUIC_PORT)
+    # Hopping ports are extra public TCP listeners that clone the Reality
+    # inbound; without an accept rule the panel would open them in Xray only.
+    # Открываем порты только когда Xray реально их слушает: reality-inbound
+    # существует лишь при включённом Reality и наличии vless-клиентов.
+    reality_state=onyx_reality.load(REALITY_FILE)
+    reality_live=onyx_reality.inbound(reality_state,d.get("users",[])) is not None
+    hop_ports=[int(p) for p in bypass["hopping_ports"] if reality_live]
+    for hop in hop_ports:
+        lines.append("nft 'add rule inet onyx_panel input tcp dport %d counter accept'" % hop)
+    for u in awg_users:
+        uid=u["id"]; port=int(u["backend_port"])
+        lines.append("nft 'add rule inet onyx_panel input iifname != \"lo\" udp dport %d counter accept comment \"onyx:%s:up\"'"%(port,uid))
+        lines.append("nft 'add rule inet onyx_panel output oifname != \"lo\" udp sport %d counter accept comment \"onyx:%s:down\"'"%(port,uid))
+    lines.extend([
+        "nft list table ip onyx_awg >/dev/null 2>&1 && nft delete table ip onyx_awg || true",
+        "nft add table ip onyx_awg",
+        "nft 'add chain ip onyx_awg forward { type filter hook forward priority -20; policy accept; }'",
+        "nft 'add chain ip onyx_awg postrouting { type nat hook postrouting priority srcnat; policy accept; }'"
+    ])
+    for u in awg_users:
+        iface=u["awg_interface"]; network=u["awg_network"]
+        lines.append("nft 'add rule ip onyx_awg forward iifname \"%s\" counter accept'" % iface)
+        lines.append("nft 'add rule ip onyx_awg forward oifname \"%s\" ct state related,established counter accept'" % iface)
+        lines.append("nft 'add rule ip onyx_awg postrouting ip saddr %s oifname != \"%s\" counter masquerade'" % (network,iface))
+    tmp=FIREWALL_SCRIPT+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f: f.write("\n".join(lines)+"\n")
+    os.chmod(tmp,0o750)
+    os.replace(tmp,FIREWALL_SCRIPT)
+    run(FIREWALL_SCRIPT,check=True)
+    # UFW output is localized on many VPS images, so all UFW state management
+    # lives in onyx_firewall and reads /etc/ufw/ufw.conf instead.  Fixed HTTPS
+    # ports and every dynamic client port are reconciled in one transaction.
+    route=run("ip","-4","route","show","default").stdout or ""
+    match=re.search(r"\bdev\s+([A-Za-z0-9_.:-]+)",route)
+    external_if=match.group(1) if match else ""
+    reality_tcp={int(reality_state["port"])} if reality_live else set()
+    onyx_firewall.reconcile(
+        tcp={80,443,*mtproto_ports,*reality_tcp,*hop_ports},
+        udp=({HYSTERIA_PORT} if hysteria_enabled else set()) | ({TUIC_PORT} if tuic_enabled else set()) | {int(u["backend_port"]) for u in awg_users},
+        routes={(u["awg_interface"],external_if) for u in awg_users if external_if},
+    )
+
+def sync_profiles(d):
+    with open(PROFILES,encoding="utf-8") as f:
+        old=json.load(f)
+    keep=[p for p in old.get("profiles",[]) if not str(p.get("name","")).startswith("panel:")]
+    for u in d["users"]:
+        if u.get("enabled",True) and u.get("protocol","web")=="web":
+            keep.append({
+                "name":"panel:"+u["id"],
+                "secret":u["secret"],
+                "backend":"127.0.0.1:%d"%int(u["backend_port"]),
+                "carrier_mode":"https"
+            })
+    tmp=PROFILES+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f:
+        json.dump({"profiles":keep},f,ensure_ascii=True,indent=2)
+    os.chmod(tmp,0o400)
+    c=run("/usr/local/bin/tproxy-server","-config","/etc/tproxy-server/config.json","-profiles-file",tmp,"-check")
+    if c.returncode:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+        raise RuntimeError("tproxy-server config check failed: "+(c.stderr or c.stdout)[-2000:])
+    os.replace(tmp,PROFILES)
+
+def sync_xray(d):
+    with open(XRAY_PATH_FILE,encoding="utf-8") as f:
+        xray_path=f.read().strip()
+    if not re.fullmatch(r"/vless-[a-f0-9]{24}",xray_path):
+        raise RuntimeError("Invalid stored VLESS path")
+    bypass=_panel_bypass()
+    vless=[]
+    hysteria=[]
+    tuic=[]
+    for u in d["users"]:
+        if not u.get("enabled",True):
+            continue
+        protocol=u.get("protocol","web")
+        if protocol=="vless":
+            vless.append({"id":u["secret"],"email":"panel:"+u["id"],"level":0})
+        elif protocol=="hysteria":
+            hysteria.append({"auth":u["secret"],"email":"panel:"+u["id"],"level":0})
+        elif protocol=="tuic":
+            tuic.append({"id":u["secret"],"password":u["secret"],"email":"panel:"+u["id"],"level":0})
+    inbounds=[]
+    # Reality-вход: тот же набор vless-пользователей с flow vision; пока выключен
+    # или клиентов нет — конфиг не меняется.
+    reality_state=onyx_reality.load(REALITY_FILE)
+    reality_inbound=onyx_reality.inbound(reality_state,d.get("users",[]))
+    if reality_inbound:
+        if bypass["ipv6"]:
+            reality_inbound["listen"]="::"
+        inbounds.append(reality_inbound)
+        # Hopping: клони основной Reality-вход на каждый дополнительный порт —
+        # клиенты прыгают между портами, DPI не может приклеиться к одному.
+        for hop in bypass["hopping_ports"]:
+            clone=json.loads(json.dumps(reality_inbound))
+            clone["tag"]="vless-reality-"+str(hop)
+            clone["port"]=hop
+            inbounds.append(clone)
+    if vless:
+        inbounds.append({
+            "tag":"vless-xhttp",
+            "listen":"127.0.0.1",
+            "port":XRAY_VLESS_PORT,
+            "protocol":"vless",
+            "settings":{"clients":vless,"decryption":"none"},
+            "streamSettings":{
+                # Xray's JSON stream selector is named "network".
+                "network":"xhttp",
+                "security":"none",
+                "xhttpSettings":{"path":xray_path,"mode":"auto"}
+            },
+            "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+        })
+    if hysteria:
+        if not (os.path.isfile(XRAY_CERT) and os.path.isfile(XRAY_KEY)):
+            raise RuntimeError("TLS certificate for Hysteria 2 is not ready")
+        inbounds.append({
+            "tag":"hysteria2",
+            "listen":"::" if bypass["ipv6"] else "0.0.0.0",
+            "port":HYSTERIA_PORT,
+            "protocol":"hysteria",
+            "settings":{"version":2,"clients":hysteria},
+            "streamSettings":{
+                "network":"hysteria",
+                "security":"tls",
+                "tlsSettings":{
+                    "alpn":["h3"],
+                    "minVersion":"1.3",
+                    "certificates":[{"certificateFile":XRAY_CERT,"keyFile":XRAY_KEY}]
+                },
+                "hysteriaSettings":{"version":2,"udpIdleTimeout":60}
+            },
+            "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+        })
+    if tuic:
+        if not (os.path.isfile(XRAY_CERT) and os.path.isfile(XRAY_KEY)):
+            raise RuntimeError("TLS certificate for TUIC is not ready")
+        inbounds.append({
+            "tag":"tuic5",
+            "listen":"::" if bypass["ipv6"] else "0.0.0.0",
+            "port":TUIC_PORT,
+            "protocol":"tuic",
+            "settings":{"version":5,"congestion_control":"bbr","auth_mode":"uuid",
+                        "zero_rtt_handshake":False,"clients":tuic},
+            "streamSettings":{
+                "network":"tcp",
+                "security":"tls",
+                "tlsSettings":{
+                    "alpn":["h3"],
+                    "minVersion":"1.3",
+                    "certificates":[{"certificateFile":XRAY_CERT,"keyFile":XRAY_KEY}]
+                }
+            },
+            "sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True}
+        })
+    config={
+        "log":{"loglevel":"warning"},
+        "api":{"tag":"api","listen":XRAY_API,"services":["StatsService"]},
+        "stats":{},
+        "policy":{
+            "levels":{"0":{"statsUserUplink":True,"statsUserDownlink":True}},
+            "system":{"statsInboundUplink":True,"statsInboundDownlink":True}
+        },
+        "inbounds":inbounds,
+        "outbounds":[{"tag":"direct","protocol":"freedom"}]
+    }
+    # Unbound DoT: пока /etc/onyx-panel/unbound.enabled существует, Xray резолвит
+    # через локальный 127.0.0.1 — иначе через системный резолвер.
+    if os.path.exists(UNBOUND_MARKER):
+        config["dns"]={"servers":["127.0.0.1"]}
+    # Routing-tab rules (direct IPs/domains, IPv4, torrent block) always come
+    # BEFORE cascade rules: the first matching rule wins, so matched traffic
+    # leaves the panel directly even with an active cascade. Cascade outbounds
+    # extend the direct default; empty registries yield today's config.
+    routing_outbounds,routing_rules=onyx_routing.xray_additions(
+        onyx_routing.load(ROUTING_FILE))
+    # WARP-выход для отмеченных клиентов: после правил вкладки «Маршрутизация»
+    # (торренты и прямые списки сильнее WARP) и до каскадов (warp-клиенты
+    # каскад не видят). Пустой список клиентов = конфиг без warp вообще.
+    warp_enabled=[u["id"] for u in d.get("users",[])
+                  if u.get("enabled",True) and u.get("protocol","web") in ("vless","hysteria","tuic")
+                  and str(u.get("id","")) in set(onyx_warp.load(WARP_FILE).get("users",[]))]
+    warp_outbounds,warp_rules=onyx_warp.xray_additions(onyx_warp.load(WARP_FILE),warp_enabled)
+    cascade_outbounds,cascade_rules=onyx_cascade.xray_additions(
+        onyx_cascade.load_cascades(CASCADES_FILE),d.get("users",[]),bypass["least_ping"])
+    extra_outbounds=routing_outbounds+warp_outbounds+cascade_outbounds
+    extra_rules=routing_rules+warp_rules+cascade_rules
+    if extra_outbounds:
+        config["outbounds"]+=extra_outbounds
+    if extra_rules:
+        config["routing"]={"rules":extra_rules}
+    # leastPing: observatory + balancer поверх каскадов; без активных каскадов
+    # или при выключенной опции возвращается None и конфиг не меняется.
+    # Балансеры валидны только в routing.balancers, observatory — верхний уровень.
+    balancer=onyx_cascade.xray_balancer(onyx_cascade.load_cascades(CASCADES_FILE),bypass["least_ping"])
+    if balancer:
+        config["observatory"]=balancer["observatory"]
+        config.setdefault("routing",{})["balancers"]=balancer["balancers"]
+    # Xray selects the configuration parser from the final extension.  A name
+    # such as config.json.tmp is rejected before JSON parsing, so keep .json
+    # as the temporary file's last suffix.
+    tmp=os.path.splitext(XRAY_CONFIG)[0]+".tmp.json"
+    with open(tmp,"w",encoding="utf-8") as f:
+        json.dump(config,f,ensure_ascii=True,indent=2)
+    os.chown(tmp,0,grp.getgrnam("xray").gr_gid)
+    os.chmod(tmp,0o640)
+    check=run(XRAY_BIN,"run","-test","-config",tmp,timeout=60)
+    if check.returncode:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+        raise RuntimeError("Xray config check failed: "+(check.stderr or check.stdout)[-3000:])
+    os.replace(tmp,XRAY_CONFIG)
+    if inbounds:
+        run("systemctl","enable",XRAY_SERVICE,check=True)
+        run("systemctl","restart",XRAY_SERVICE,check=True)
+        if run("systemctl","is-active","--quiet",XRAY_SERVICE).returncode:
+            st=run("systemctl","status",XRAY_SERVICE,"--no-pager","--full")
+            log=run("journalctl","-u",XRAY_SERVICE,"-n","50","--no-pager")
+            raise RuntimeError("Xray failed: "+((st.stdout or st.stderr)+"\n"+(log.stdout or log.stderr))[-4000:])
+    else:
+        run("systemctl","disable","--now",XRAY_SERVICE,check=False)
+
+def _load_traffic():
+    try:
+        with open(TRAFFIC_FILE,encoding="utf-8") as f:
+            value=json.load(f)
+            return value if isinstance(value,dict) else {}
+    except Exception:
+        return {}
+
+def _save_traffic(value):
+    os.makedirs(os.path.dirname(TRAFFIC_FILE),mode=0o700,exist_ok=True)
+    tmp=TRAFFIC_FILE+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f:
+        json.dump(value,f,ensure_ascii=True,indent=2)
+    os.chmod(tmp,0o600)
+    os.replace(tmp,TRAFFIC_FILE)
+
+def _nft_traffic():
+    result={}
+    p=run("nft","-j","list","table","inet","onyx_panel",timeout=10)
+    if p.returncode: return result
+    try: doc=json.loads(p.stdout)
+    except Exception: return result
+    for item in doc.get("nftables",[]):
+        rule=item.get("rule",{})
+        comment=str(rule.get("comment", ""))
+        m=re.fullmatch(r"onyx:([A-Za-z0-9_-]+):(up|down)",comment)
+        if not m: continue
+        count=0
+        for expr in rule.get("expr",[]):
+            if "counter" in expr:
+                count=int(expr["counter"].get("bytes",0)); break
+        result.setdefault(m.group(1),{"up":0,"down":0})[m.group(2)]=count
+    return result
+
+def _xray_traffic():
+    result={}
+    if run("systemctl","is-active","--quiet",XRAY_SERVICE).returncode:
+        return result
+    p=run(XRAY_BIN,"api","statsquery","--server="+XRAY_API,timeout=8)
+    if p.returncode: return result
+    try:
+        start=p.stdout.find("{")
+        doc=json.loads(p.stdout[start:])
+    except Exception:
+        return result
+    for stat in doc.get("stat",[]):
+        m=re.fullmatch(r"user>>>panel:([a-f0-9]+)>>>traffic>>>(uplink|downlink)",str(stat.get("name","")))
+        if not m: continue
+        key="up" if m.group(2)=="uplink" else "down"
+        result.setdefault(m.group(1),{"up":0,"down":0})[key]=int(stat.get("value",0))
+    return result
+
+def _collect_traffic_unlocked(d=None):
+    d=d or load()
+    now=int(time.time())
+    current=_nft_traffic()
+    current.update(_xray_traffic())
+    current.update(onyx_awg.traffic(d.get("users",[])))
+    state=_load_traffic()
+    targets={"primary":{"protocol":"web","enabled":True}}
+    targets.update({u["id"]:u for u in d.get("users",[])})
+    service_states={}
+    for uid,u in targets.items():
+        raw=current.get(uid)
+        entry=state.setdefault(uid,{"up":0,"down":0,"raw_up":0,"raw_down":0,"last_change":0})
+        changed=False
+        for direction in ("up","down"):
+            # A missing API/counter sample is not a reset to zero. Keeping the
+            # baseline prevents counting all historical bytes again next time.
+            if raw is None: continue
+            value=max(0,int(raw.get(direction,0)))
+            previous=max(0,int(entry.get("raw_"+direction,0)))
+            delta=value-previous if value>=previous else value
+            if delta>0:
+                entry[direction]=max(0,int(entry.get(direction,0)))+delta
+                changed=True
+            entry["raw_"+direction]=value
+        if changed: entry["last_change"]=now
+        protocol=u.get("protocol","web")
+        if uid=="primary":
+            unit="mtproxy.service"
+        elif protocol=="web":
+            unit="onyx-user-"+uid+".service"
+        elif protocol in ("vless","hysteria","tuic"):
+            unit=XRAY_SERVICE
+        elif protocol=="mtproto":
+            unit="onyx-user-"+uid+".service"
+        elif protocol in onyx_awg.PROTOCOLS:
+            unit=onyx_awg.service_for(u)
+        else:
+            unit=""
+        if unit not in service_states:
+            service_states[unit]=(run("systemctl","is-active","--quiet",unit).returncode==0)
+        entry["service_active"]=service_states[unit] and u.get("enabled",True)
+        if raw is not None: entry["updated_at"]=now
+        entry["protocol"]=protocol
+    _save_traffic(state)
+    return state
+
+def collect_traffic(d=None):
+    os.makedirs(os.path.dirname(TRAFFIC_LOCK),mode=0o700,exist_ok=True)
+    with open(TRAFFIC_LOCK,"a+",encoding="ascii") as lock:
+        os.chmod(TRAFFIC_LOCK,0o600)
+        fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+        return _collect_traffic_unlocked(d)
+
+def remove_old_units(d):
+    keep={"onyx-user-"+u["id"]+".service" for u in d["users"] if u.get("enabled",True) and u.get("protocol","web") in ("web","mtproto")}
+    for name in os.listdir(UNIT_DIR):
+        if name.startswith("onyx-user-") and name.endswith(".service") and name not in keep:
+            run("systemctl","disable","--now",name,check=False)
+            try: os.remove(os.path.join(UNIT_DIR,name))
+            except FileNotFoundError: pass
+
+def apply(d,restart=True,previous=None):
+    with open(PROFILES,encoding="utf-8") as f:
+        old_profiles=f.read()
+    if os.path.exists(XRAY_CONFIG):
+        with open(XRAY_CONFIG,encoding="utf-8") as f:
+            old_xray=f.read()
+    else:
+        old_xray=None
+    with open(CADDYFILE,encoding="utf-8") as f:
+        old_caddy=f.read()
+    old_users=copy.deepcopy(previous) if previous is not None else load()
+    force=previous is None
+    old_by_id={u.get("id"):u for u in old_users.get("users",[])}
+    new_by_id={u.get("id"):u for u in d.get("users",[])}
+    changed_ids={uid for uid in set(old_by_id)|set(new_by_id) if old_by_id.get(uid)!=new_by_id.get(uid)}
+    def protocol_changed(*protocols):
+        return force or any((old_by_id.get(uid) or new_by_id.get(uid) or {}).get("protocol","web") in protocols for uid in changed_ids)
+    direct_changed=protocol_changed("web","mtproto")
+    web_changed=protocol_changed("web")
+    xray_changed=protocol_changed("vless","hysteria","tuic")
+    awg_changed=protocol_changed(*onyx_awg.PROTOCOLS)
+    try:
+        for u in d["users"]:
+            if u.get("enabled",True): write_unit(u)
+        remove_old_units(d)
+        if web_changed: sync_profiles(d)
+        sync_firewall(d)
+        if direct_changed: run("systemctl","daemon-reload",check=True)
+        if xray_changed: sync_xray(d)
+        if awg_changed: onyx_awg.sync(d["users"])
+        if restart:
+            for u in d["users"]:
+                if (u.get("id") in changed_ids or force) and u.get("enabled",True) and u.get("protocol","web") in ("web","mtproto"):
+                    unit="onyx-user-"+u["id"]+".service"
+                    run("systemctl","enable",unit,check=True)
+                    run("systemctl","restart",unit,check=True)
+                    if run("systemctl","is-active","--quiet",unit).returncode:
+                        st=run("systemctl","status",unit,"--no-pager","--full")
+                        log=run("journalctl","-u",unit,"-n","30","--no-pager")
+                        detail=((st.stdout or st.stderr)+"\n"+(log.stdout or log.stderr))[-3500:]
+                        raise RuntimeError("User MTProxy failed: "+detail)
+                    # Verify the actual WEB backend listener on its loopback port.
+                    chk=run("bash","-lc",f"ss -lnt | grep -Eq ':{int(u['backend_port'])}\\b'")
+                    if chk.returncode:
+                        st=run("systemctl","status",unit,"--no-pager","--full")
+                        raise RuntimeError("User MTProxy is active but backend port is not listening: "+(st.stdout or st.stderr)[-2000:])
+            if web_changed: run("systemctl","restart","tproxy-server.service",check=True)
+    except Exception:
+        with open(PROFILES,"w",encoding="utf-8") as f: f.write(old_profiles)
+        os.chmod(PROFILES,0o400)
+        save(old_users)
+        if old_xray is None:
+            try: os.unlink(XRAY_CONFIG)
+            except FileNotFoundError: pass
+        else:
+            with open(XRAY_CONFIG,"w",encoding="utf-8") as f: f.write(old_xray)
+            os.chmod(XRAY_CONFIG,0o640)
+        if old_xray is None:
+            run("systemctl","disable","--now",XRAY_SERVICE,check=False)
+        else:
+            run("systemctl","restart",XRAY_SERVICE,check=False)
+        with open(CADDYFILE,"w",encoding="utf-8") as f: f.write(old_caddy)
+        try: shutil.chown(CADDYFILE,user="root",group="caddy")
+        except Exception: pass
+        os.chmod(CADDYFILE,0o640)
+        run("systemctl","reload","caddy.service",check=False)
+        try:
+            sync_firewall(old_users)
+            if awg_changed: onyx_awg.sync(old_users.get("users",[]))
+        except Exception:
+            pass
+        raise
+
+def add(protocol,name,requested_port=None,device_count=1):
+    d=load()
+    before=copy.deepcopy(d)
+    # A failed request from an older manager can leave a systemd unit in an
+    # auto-restart loop even though it is absent from users.json. Remove such
+    # orphan units before choosing ports for the next user.
+    remove_old_units(d)
+    run("systemctl","daemon-reload",check=True)
+    if protocol not in ("web","mtproto","vless","hysteria","tuic","awg20","awg31"):
+        raise RuntimeError("Unknown proxy protocol")
+    if sum(not u.get("subscription_id") for u in d["users"])>=MAX_USERS:
+        raise RuntimeError("Maximum panel users reached")
+    u={"id":secrets.token_hex(8),"name":name.strip(),"protocol":protocol,"enabled":True,"created_at":int(time.time())}
+    if protocol in ("web","mtproto"):
+        if protocol=="mtproto":
+            try: device_count=int(device_count)
+            except (TypeError,ValueError): raise ValueError("Количество устройств MTProto должно быть числом.")
+            if device_count<1 or device_count>20:
+                raise ValueError("Для MTProto можно создать от 1 до 20 отдельных ключей устройств.")
+        else:
+            device_count=1
+        port,stats=alloc_ports(d,requested_port if protocol=="mtproto" else None)
+        device_secrets=[secrets.token_hex(16) for _ in range(device_count)]
+        u.update({"secret":device_secrets[0],"backend_port":port,"stats_port":stats})
+        if protocol=="mtproto":
+            u.update({"max_devices":device_count,"device_secrets":device_secrets})
+    elif protocol=="vless":
+        u.update({"secret":str(uuid.uuid4()),"backend_port":443})
+    elif protocol=="hysteria":
+        u.update({"secret":str(uuid.uuid4()),"backend_port":HYSTERIA_PORT})
+        tls=run(XRAY_TLS_SYNC)
+        if tls.returncode:
+            raise RuntimeError("Hysteria 2 TLS certificate is not ready: "+(tls.stderr or tls.stdout)[-1500:])
+    elif protocol=="tuic":
+        u.update({"secret":str(uuid.uuid4()),"backend_port":TUIC_PORT})
+        tls=run(XRAY_TLS_SYNC)
+        if tls.returncode:
+            raise RuntimeError("TUIC TLS certificate is not ready: "+(tls.stderr or tls.stdout)[-1500:])
+    elif protocol in onyx_awg.PROTOCOLS:
+        u.update(onyx_awg.new_user(protocol,d["users"],u["id"]))
+    d["users"].append(u)
+    save(d)
+    try:
+        apply(d,True,before)
+    except Exception:
+        # Re-apply the saved state so that a failed new unit is stopped and
+        # deleted. Without this rollback a restart loop holds the same port
+        # and every following attempt to create a user fails as well.
+        save(before)
+        try: apply(before,True,d)
+        except Exception: pass
+        raise
+    print(json.dumps(u,ensure_ascii=True))
+
+def add_json(request):
+    if not isinstance(request,dict): raise ValueError("Некорректный запрос.")
+    protocol=str(request.get("protocol",""))
+    name=str(request.get("name","")).strip()
+    if not name or len(name)>80 or any(ord(c)<32 for c in name):
+        raise ValueError("Укажите имя длиной от 1 до 80 символов.")
+    add(protocol,name,request.get("port"),request.get("devices",1))
+
+def federation_sync(request):
+    external_id=str(request.get("external_id", ""))
+    name=str(request.get("name", "")).strip()
+    protocols=request.get("protocols", [])
+    if not re.fullmatch(r"[a-f0-9]{32,64}",external_id):
+        raise ValueError("Invalid federation id")
+    if not name or len(name)>80 or any(ord(c)<32 for c in name):
+        raise ValueError("Invalid federation profile name")
+    if not isinstance(protocols,list) or not protocols or any(p not in ("vless","hysteria") for p in protocols):
+        raise ValueError("Federation supports VLESS and Hysteria2")
+    protocols=list(dict.fromkeys(protocols))
+    before=load(); d=copy.deepcopy(before)
+    d["users"]=[u for u in d["users"] if u.get("federation_id")!=external_id or u.get("protocol") in protocols]
+    for user in d["users"]:
+        if user.get("federation_id")==external_id:
+            user["name"]=name+" · "+("VLESS" if user["protocol"]=="vless" else "Hysteria2")
+            user["enabled"]=True
+    for protocol in protocols:
+        if any(u.get("federation_id")==external_id and u.get("protocol")==protocol for u in d["users"]):
+            continue
+        if protocol=="hysteria":
+            tls=run(XRAY_TLS_SYNC)
+            if tls.returncode: raise RuntimeError("Hysteria2 TLS certificate is not ready")
+        d["users"].append({"id":secrets.token_hex(8),"name":name+" · "+("VLESS" if protocol=="vless" else "Hysteria2"),
+            "protocol":protocol,"enabled":True,"secret":str(uuid.uuid4()),
+            "backend_port":443 if protocol=="vless" else HYSTERIA_PORT,
+            "federation_id":external_id,"created_at":int(time.time())})
+    save(d)
+    try: apply(d,True,before)
+    except Exception:
+        save(before)
+        try: apply(before,True,d)
+        except Exception: pass
+        raise
+    print(json.dumps({"ok":True,"profiles":[u for u in d["users"] if u.get("federation_id")==external_id]},ensure_ascii=True))
+
+def federation_delete(external_id):
+    if not re.fullmatch(r"[a-f0-9]{32,64}",external_id): raise ValueError("Invalid federation id")
+    before=load(); d=copy.deepcopy(before)
+    d["users"]=[u for u in d["users"] if u.get("federation_id")!=external_id]
+    if d==before:
+        print(json.dumps({"ok":True,"deleted":False})); return
+    save(d)
+    try: apply(d,True,before)
+    except Exception:
+        save(before)
+        try: apply(before,True,d)
+        except Exception: pass
+        raise
+    print(json.dumps({"ok":True,"deleted":True}))
+
+def federation_purge():
+    before=load(); d=copy.deepcopy(before)
+    removed=sum(1 for u in d["users"] if u.get("federation_id"))
+    d["users"]=[u for u in d["users"] if not u.get("federation_id")]
+    if not removed:
+        print(json.dumps({"ok":True,"deleted":0})); return
+    save(d)
+    try: apply(d,True,before)
+    except Exception:
+        save(before)
+        try: apply(before,True,d)
+        except Exception: pass
+        raise
+    print(json.dumps({"ok":True,"deleted":removed}))
+
+def delete(uid):
+    before=load()
+    if any(u.get("id")==uid and u.get("subscription_id") for u in before["users"]):
+        raise RuntimeError("Управляйте этим профилем через вкладку Подписки.")
+    try: collect_traffic(before)
+    except Exception: pass
+    d=copy.deepcopy(before)
+    if not any(u.get("id")==uid for u in d["users"]):
+        # Deletion may be repeated after a browser refresh or after a prior
+        # successful request.  Treat that situation as an already-completed
+        # deletion instead of returning a traceback to the panel.
+        return False
+    d["users"]=[u for u in d["users"] if u.get("id")!=uid]
+    save(d)
+    try:
+        apply(d,True,before)
+    except Exception:
+        save(before)
+        try: apply(before,True,d)
+        except Exception: pass
+        raise
+    return True
+
+def edit_user(uid,enabled=None,name=None):
+    before=load()
+    target=next((u for u in before['users'] if u['id']==uid),None)
+    if uid=='primary' or target is None or target.get('subscription_id'):
+        raise ValueError('Отдельный пользователь не найден или недоступен для изменения.')
+    if enabled is not None and not isinstance(enabled,bool): raise ValueError('Некорректное состояние доступа.')
+    if name is not None and (not name.strip() or len(name.strip())>80 or any(ord(c)<32 for c in name)):
+        raise ValueError('Имя должно содержать от 1 до 80 символов.')
+    after=copy.deepcopy(before)
+    user=next(u for u in after['users'] if u['id']==uid)
+    if enabled is not None: user['enabled']=enabled
+    if name is not None: user['name']=name.strip()
+    if after==before: return
+    runtime_changed=user.get('enabled',True)!=target.get('enabled',True)
+    if runtime_changed: collect_traffic(before)
+    save(after)
+    if runtime_changed:
+        try: apply(after,True,before)
+        except Exception:
+            save(before)
+            try: apply(before,True,after)
+            except Exception: raise RuntimeError('Не удалось восстановить службы. Проверьте VPS через SSH.')
+            raise
+
+def edit_primary_secret(secret):
+    secret=normalize_proxy_secret(secret)
+    with open(PRIMARY_SECRET,encoding="ascii") as f: old_secret=f.read().strip()
+    if secret==old_secret: return
+    d=load()
+    if any(secret in (mtproto_secrets(u) if u.get("protocol")=="mtproto" else [normalize_proxy_secret(u.get("secret",""))])
+           for u in d["users"] if u.get("protocol","web") in ("web","mtproto")):
+        raise ValueError("Этот секрет уже используется другим подключением.")
+    with open(PROFILES,encoding="utf-8") as f: old_profiles=f.read()
+    with open(MT_ENV,encoding="utf-8") as f: old_env=f.read()
+    profiles=json.loads(old_profiles)
+    candidates=[p for p in profiles.get("profiles",[]) if not str(p.get("name","")).startswith("panel:")]
+    target=next((p for p in candidates if p.get("name")=="default"),None)
+    if target is None:
+        target=next((p for p in candidates if str(p.get("backend",""))=="127.0.0.1:2398"),None)
+    if target is None:
+        raise RuntimeError("Основной профиль WEB Proxy не найден.")
+    target["secret"]=secret
+    new_profiles=json.dumps(profiles,ensure_ascii=True,indent=2)+"\n"
+    if re.search(r"(?m)^MTPROXY_SECRET=.*$",old_env):
+        new_env=re.sub(r"(?m)^MTPROXY_SECRET=.*$","MTPROXY_SECRET="+secret,old_env)
+    else:
+        new_env="MTPROXY_SECRET="+secret+"\n"+old_env
+    check_path=PROFILES+".check"
+    try:
+        atomic_text(check_path,new_profiles,0o400,"tproxy")
+        checked=run("/usr/local/bin/tproxy-server","-config","/etc/tproxy-server/config.json",
+                    "-profiles-file",check_path,"-check")
+        if checked.returncode:
+            raise RuntimeError("Новый секрет отклонён relay: "+(checked.stderr or checked.stdout)[-1200:])
+        os.unlink(check_path)
+        atomic_text(PRIMARY_SECRET,secret+"\n",0o600)
+        atomic_text(PROFILES,new_profiles,0o400,"tproxy")
+        atomic_text(MT_ENV,new_env,0o640,"mtproxy")
+        run("systemctl","restart","mtproxy.service",check=True)
+        run("systemctl","restart","tproxy-server.service",check=True)
+        for service in ("mtproxy.service","tproxy-server.service"):
+            if run("systemctl","is-active","--quiet",service).returncode:
+                raise RuntimeError(service+" не запустилась после смены секрета.")
+    except Exception:
+        try: os.unlink(check_path)
+        except FileNotFoundError: pass
+        atomic_text(PRIMARY_SECRET,old_secret+"\n",0o600)
+        atomic_text(PROFILES,old_profiles,0o400,"tproxy")
+        atomic_text(MT_ENV,old_env,0o640,"mtproxy")
+        run("systemctl","restart","mtproxy.service",check=False)
+        run("systemctl","restart","tproxy-server.service",check=False)
+        raise
+
+def edit_direct_secret(uid,secret):
+    before=load()
+    target=next((u for u in before["users"] if u.get("id")==uid),None)
+    if target is None or target.get("subscription_id") or target.get("protocol","web") not in ("web","mtproto"):
+        raise ValueError("Секрет можно изменить только у отдельного WEB Proxy или MTProto.")
+    secret=normalize_proxy_secret(secret)
+    with open(PRIMARY_SECRET,encoding="ascii") as f: primary=normalize_proxy_secret(f.read())
+    occupied=set()
+    for other in before["users"]:
+        if other.get("id")==uid or other.get("protocol","web") not in ("web","mtproto"): continue
+        occupied.update(mtproto_secrets(other) if other.get("protocol")=="mtproto" else [normalize_proxy_secret(other.get("secret",""))])
+    if secret==primary or secret in occupied:
+        raise ValueError("Этот секрет уже используется другим подключением.")
+    if secret==normalize_proxy_secret(target.get("secret","")): return
+    after=copy.deepcopy(before)
+    edited=next(u for u in after["users"] if u.get("id")==uid)
+    edited["secret"]=secret
+    if edited.get("protocol")=="mtproto":
+        current=mtproto_secrets(edited)
+        current[0]=secret
+        edited["device_secrets"]=current
+        edited["max_devices"]=len(current)
+    collect_traffic(before)
+    save(after)
+    try:
+        apply(after,True,before)
+    except Exception:
+        save(before)
+        try: apply(before,True,after)
+        except Exception: raise RuntimeError("Не удалось восстановить службы. Проверьте VPS через SSH.")
+        raise
+
+def set_secret(request):
+    if not isinstance(request,dict): raise ValueError("Некорректный запрос.")
+    uid=str(request.get("id",""))
+    if uid=="primary": edit_primary_secret(request.get("secret",""))
+    elif re.fullmatch(r"[a-f0-9]{16}",uid): edit_direct_secret(uid,request.get("secret",""))
+    else: raise ValueError("Подключение не найдено.")
+    print(json.dumps({"ok":True}))
+
+def init():
+    d=load()
+    onyx_awg.upgrade_users(d["users"])
+    # Persist stable normalization when upgrading. Profiles from the withdrawn
+    # shared-interface preview receive independent keys, ports and fingerprints.
+    save(d)
+    for u in d["users"]:
+        if u.get("enabled",True): write_unit(u)
+    remove_old_units(d)
+    sync_profiles(d)
+    sync_firewall(d)
+    run("systemctl","daemon-reload",check=True)
+    sync_xray(d)
+    onyx_awg.sync(d["users"])
+    collect_traffic(d)
+
+def subscription_command():
+    try:
+        raw=sys.stdin.read(8193)
+        if len(raw)>8192: raise SubscriptionError("Request too large")
+        request=json.loads(raw)
+        if not isinstance(request,dict): raise SubscriptionError("Invalid request")
+        before=load()
+        after,result=(issue_subscription if request.get("operation")=="fetch" else mutate_subscription)(before,request)
+        changed=before["users"]!=after["users"]
+        if changed:
+            if any(u.get("enabled",True) and u.get("protocol")=="hysteria" for u in after["users"]):
+                run(XRAY_TLS_SYNC,check=True)
+            collect_traffic(before)
+            try:
+                sync_firewall(after)
+                sync_xray(after)
+                save(after)
+            except Exception:
+                # Database remains unchanged until both runtime components pass.
+                # Restore only managed Xray/firewall; never restart WEB backends.
+                try:
+                    sync_firewall(before)
+                    sync_xray(before)
+                except Exception:
+                    raise RuntimeError("Не удалось восстановить службы после ошибки; требуется диагностика VPS.")
+                raise
+        elif after!=before:
+            save(after)
+        print(json.dumps(result,ensure_ascii=True))
+    except SubscriptionError as exc:
+        print(json.dumps({"ok":False,"status":exc.status,"code":exc.code,"message":str(exc)},ensure_ascii=True))
+    except Exception:
+        print(json.dumps({"ok":False,"status":503,"code":"backend","message":"Не удалось применить подписку. Проверьте Xray и TLS на сервере."}))
+
+cmd=sys.argv[1] if len(sys.argv)>1 else "init"
+# Serialize state changes, including slot allocation, with CLI and the panel.
+# Traffic has its own lock and only reads users.json via atomic replacement.
+if cmd not in ("users","traffic"):
+    manager_lock=open("/etc/onyx-panel/manager.lock","a+")
+    os.chmod(manager_lock.name,0o600)
+    deadline=time.monotonic()+15
+    while True:
+        try:
+            fcntl.flock(manager_lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic()>deadline: raise SystemExit("Менеджер занят. Повторите запрос позже.")
+            time.sleep(0.1)
+if cmd=="init": init()
+elif cmd=="subscription": subscription_command()
+elif cmd=="add": add(sys.argv[2]," ".join(sys.argv[3:]))
+elif cmd=="add-json": add_json(json.load(sys.stdin))
+elif cmd=="federation-sync": federation_sync(json.load(sys.stdin))
+elif cmd=="federation-delete": federation_delete(json.load(sys.stdin).get("external_id",""))
+elif cmd=="federation-purge": federation_purge()
+elif cmd=="delete": print(json.dumps({"deleted":delete(sys.argv[2])}))
+elif cmd=="set-user":
+    if sys.argv[3] not in ('0','1'): raise SystemExit('Invalid enabled state')
+    edit_user(sys.argv[2],enabled=sys.argv[3]=='1')
+    print(json.dumps({'ok':True}))
+elif cmd=="rename-user":
+    edit_user(sys.argv[2],name=sys.argv[3])
+    print(json.dumps({'ok':True}))
+elif cmd=="set-secret": set_secret(json.load(sys.stdin))
+elif cmd=="cascade-apply":
+    # Cascades must never leave the panel without a working Xray, even when a
+    # pasted upstream key turns out to be broken: restore the previous
+    # generated config and restart if the new one fails.
+    old_xray=None
+    if os.path.exists(XRAY_CONFIG):
+        with open(XRAY_CONFIG,encoding="utf-8") as f: old_xray=f.read()
+    try:
+        sync_xray(load())
+        print(json.dumps({"ok":True}))
+    except Exception:
+        if old_xray is not None:
+            with open(XRAY_CONFIG,"w",encoding="utf-8") as f: f.write(old_xray)
+            os.chmod(XRAY_CONFIG,0o640)
+            run("systemctl","restart",XRAY_SERVICE,check=False)
+        raise
+elif cmd=="sync": apply(load(),True)
+elif cmd=="firewall": sync_firewall(load())
+elif cmd=="traffic":
+    traffic_state=collect_traffic()
+    print(json.dumps(traffic_state,ensure_ascii=True))
+elif cmd=="users": print(json.dumps(load(),ensure_ascii=True))
+else: raise SystemExit("usage: init|add|delete|set-user|rename-user|set-secret|sync|firewall|traffic|users|cascade-apply")
+

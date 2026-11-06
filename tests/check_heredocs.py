@@ -44,16 +44,15 @@ for path in ("install-panel.sh", "install-core.sh", "install-final.sh", "update.
             first = code.strip().splitlines()[0][:60]
             print("OK   %s:%s (%d строк) — %s" % (path, start, len(code.splitlines()), first))
 
-# извлечённое приложение
-lines = open("install-panel.sh", encoding="utf-8").read().split("\n")
-start = lines.index('cat > "$APP_FILE" <<\'PY\'')
-end = lines.index("PY", start + 1)
-try:
-    ast.parse("\n".join(lines[start + 1:end]), feature_version=(3, 10))
-    print("OK   app heredoc (%d строк)" % (end - start - 1))
-except SyntaxError as exc:
-    failures += 1
-    print("SYNTAX FAIL app —", exc)
+# приложения, поставляемые отдельными файлами (бывшие heredoc'и)
+for path in ("panel.py", "onyx-panelctl"):
+    code = open(path, encoding="utf-8").read()
+    try:
+        ast.parse(code, feature_version=(3, 10))
+        print("OK   %s (%d строк)" % (path, len(code.splitlines())))
+    except SyntaxError as exc:
+        failures += 1
+        print("SYNTAX FAIL %s — %s" % (path, exc))
 
 if failures:
     print("FAILURES:", failures)

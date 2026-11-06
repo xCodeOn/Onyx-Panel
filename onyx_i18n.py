@@ -1557,7 +1557,7 @@ PAIRS.update({
     'Монитор блокировок': 'Block monitor',
     'Безопасность и обход блокировок': 'Security and bypass',
     'Локальный DoT-резолвер': 'Local DoT resolver',
-    'Промокоды и рефералы': 'Promo codes and referrals',
+    'Промокоды': 'Promo codes',
     'Создать промокод': 'Create promo code',
     'Бонусные дни': 'Bonus days',
     'Применить пресет': 'Apply preset',
@@ -1650,9 +1650,8 @@ PAIRS.update({
     # --- promo codes --------------------------------------------------------
     'Промокод': 'Promo code',
     'Промокодов пока нет.': 'No promo codes yet.',
-    'Промокод даёт бонусные дни при активации. Реферальный':
-        'A promo code grants bonus days on activation. The referral',
-    'выдаётся каждому клиенту в': 'code is issued to every client on',
+    'Промокод даёт бонусные дни при активации.':
+        'A promo code grants bonus days on activation.',
     'Код': 'Code',
     'ЛЕТО': 'SUMMER',
     'сайт': 'site',

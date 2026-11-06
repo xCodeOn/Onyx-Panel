@@ -18,6 +18,7 @@ DEFAULT_PORT = 8081
 HITS_PER_WINDOW = 5
 WINDOW_SECONDS = 300
 BAN_TIMEOUT = "24h"
+BAN_SECONDS = 24 * 3600
 BAN_THRESHOLD = 3
 JOURNAL_LIMIT = 200
 READ_BYTES = 512
@@ -71,35 +72,6 @@ def note_hit(journal, source_ip, port, kind, now_ts=None):
     return journal[-JOURNAL_LIMIT:], entry
 
 
-def hit_count(journal, source_ip, window=WINDOW_SECONDS, now_ts=None):
-    """How many hits this IP made inside the sliding window."""
-    now_ts = int(now_ts or time.time())
-    source_ip = _key(source_ip)
-    return sum(1 for item in (journal or [])
-               if isinstance(item, dict) and _key(item.get("ip")) == source_ip
-               and now_ts - int(item.get("ts", 0)) <= window)
-
-
-def should_ban(journal, source_ip, threshold=BAN_THRESHOLD, window=WINDOW_SECONDS,
-               now_ts=None):
-    return hit_count(journal, source_ip, window, now_ts) >= threshold
-
-
-def recent(journal, limit=40):
-    """Newest-first slice for the Security tab."""
-    entries = [entry for entry in (journal or []) if isinstance(entry, dict)]
-    entries.sort(key=lambda item: int(item.get("ts", 0)), reverse=True)
-    return entries[:max(1, min(JOURNAL_LIMIT, int(limit)))]
-
-
-def summarize(journal, banned=0, now_ts=None):
-    """One-line header: total hits in the last day plus the live ban count."""
-    now_ts = int(now_ts or time.time())
-    day = sum(1 for item in (journal or [])
-              if isinstance(item, dict) and now_ts - int(item.get("ts", 0)) <= 86400)
-    return "Атак за сутки: %d · в бане: %d" % (day, int(banned or 0))
-
-
 def normalize_state(state):
     """data.json "defense" section."""
     state = state if isinstance(state, dict) else {}
@@ -122,9 +94,9 @@ _lock = threading.Lock()
 def start(port=DEFAULT_PORT, on_hit=None, on_ban=None, threshold=BAN_THRESHOLD):
     """Launch the honeypot thread; safe to call once per process.
 
-    on_hit(ip, port, kind) reports every connection; on_ban(ip, command) is
-    called when the sliding window trips the threshold — panel.py wires it
-    to subprocess nft. Both callbacks must not raise.
+    on_hit(ip, port, kind) reports every connection; on_ban(ip) is called once
+    when the hit counter crosses the threshold — panel.py builds the nft
+    command itself via ban_command(ip). Both callbacks must not raise.
     """
     global _listener
     with _lock:
@@ -137,6 +109,12 @@ def start(port=DEFAULT_PORT, on_hit=None, on_ban=None, threshold=BAN_THRESHOLD):
     return True
 
 
+def running():
+    """True while the honeypot listener thread is alive."""
+    with _lock:
+        return _listener is not None and _listener.is_alive()
+
+
 def stop():
     """Ask the listener to exit (it closes its accept socket on next loop)."""
     global _listener
@@ -147,6 +125,8 @@ def stop():
 
 def _run(port, on_hit, on_ban, threshold):
     counts = {}
+    banned = {}  # ip -> ban timestamp; the nft element expires after 24 h,
+    # so a returning host must become bannable again after the timeout
     try:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -177,15 +157,24 @@ def _run(port, on_hit, on_ban, threshold):
             except OSError:
                 pass
         counts[source_ip] = counts.get(source_ip, 0) + 1
-        for callback, args in ((on_hit, (source_ip, port, kind)),
-                               (on_ban, (source_ip, counts[source_ip], threshold))
-                               if counts.get(source_ip, 0) >= threshold else ()):
-            if callback is None:
-                continue
+        if on_hit is not None:
             try:
-                callback(*args)
+                on_hit(source_ip, port, kind)
             except Exception as exc:  # a dead callback must not kill the listener
-                print("honeypot callback failed:", type(exc).__name__, flush=True)
+                print("honeypot on_hit failed:", type(exc).__name__, flush=True)
+        # Ban once per IP per listener lifetime: the nft element carries a 24h
+        # timeout, and a failed ban is retried on the next hit.
+        if len(counts) > 50000:
+            counts.clear()  # long-running listener bound: worst case a host
+            # needs threshold fresh hits before it can be banned again
+        if (on_ban is not None and counts[source_ip] >= threshold
+                and time.time() - banned.get(source_ip, 0) >= BAN_SECONDS):
+            try:
+                on_ban(source_ip)
+            except Exception as exc:
+                print("honeypot on_ban failed:", type(exc).__name__, flush=True)
+            else:
+                banned[source_ip] = time.time()
     try:
         server.close()
     except OSError:
