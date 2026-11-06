@@ -20,6 +20,9 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.out.outputs.released }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,6 +95,15 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Set released output
+        id: out
+        run: |
+          if [[ "${{ steps.check.outputs.skip }}" == "false" ]]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build release notes
         if: steps.check.outputs.skip == 'false'
         run: |
@@ -119,3 +131,80 @@ jobs:
           git push origin "refs/tags/v$VERSION"
           gh release create "v$VERSION" --title "Onyx Panel $VERSION" --notes-file NOTES.md
           echo "Release published: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v$VERSION"
+
+  # Build the binaries that would otherwise be compiled on the user's server
+  # (tproxy-server relay, MTProto proxy) and re-package the official Xray /
+  # Caddy archives, then upload them all to the release as assets. install.sh
+  # fetches these in remote mode so a fresh server install never has to build
+  # or download them itself. Pinned refs mirror the installer's constants.
+  binaries:
+    needs: [release]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: v${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libssl-dev zlib1g-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+
+      - name: Prepare output directory
+        run: mkdir -p /tmp/build
+
+      - name: Build tproxy-server relay
+        run: |
+          git clone --quiet https://github.com/telegramdesktop/tproxy-server.git /tmp/tproxy
+          git -C /tmp/tproxy checkout --quiet 52a5feb7fac38f68da5afef9cedd9b3bfc8473ca
+          (cd /tmp/tproxy && go build -trimpath -ldflags='-s -w' \
+            -o /tmp/build/tproxy-server-linux-amd64 ./cmd/tproxy-server)
+
+      - name: Build MTProto proxy
+        run: |
+          git clone --quiet https://github.com/TelegramMessenger/MTProxy.git /tmp/MTProxy
+          git -C /tmp/MTProxy checkout --quiet \
+            f36d8af769ffaeac36978d38c2c0f6d1104c2137
+          make -C /tmp/MTProxy -j"$(nproc)"
+          cp /tmp/MTProxy/objs/bin/mtproto-proxy \
+            /tmp/build/mtproto-proxy-linux-amd64
+
+      - name: Fetch official Xray and Caddy archives
+        run: |
+          mkdir -p /tmp/build
+          curl -fsSL -o /tmp/build/Xray-linux-64.zip \
+            https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip
+          curl -fsSL -o /tmp/build/caddy_2.11.4_linux_amd64.tar.gz \
+            https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_amd64.tar.gz
+
+      - name: Package prebuilt bundle
+        run: |
+          cd /tmp/build
+          sha256sum * > SHA256SUMS
+          tar -czf "/tmp/onyx-binaries-${{ needs.release.outputs.version }}.tar.gz" *
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" \
+            /tmp/build/tproxy-server-linux-amd64 \
+            /tmp/build/mtproto-proxy-linux-amd64 \
+            /tmp/build/Xray-linux-64.zip \
+            /tmp/build/caddy_2.11.4_linux_amd64.tar.gz \
+            "/tmp/onyx-binaries-${{ needs.release.outputs.version }}.tar.gz" \
+            --clobber

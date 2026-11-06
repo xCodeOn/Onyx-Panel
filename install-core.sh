@@ -50,7 +50,7 @@ else
         return 1
     }
     onyx_apt_update_once() {
-        local stamp="${ONYX_APT_STAMP:-/tmp/onyx-apt-updated}"
+        local stamp="${ONYX_APT_STAMP:-/run/lock/onyx-apt-updated}"
         if [[ -f "$stamp" ]] && [[ -z "$(find "$stamp" -mmin +1440 2>/dev/null)" ]]; then
             return 0
         fi
@@ -578,6 +578,18 @@ install -d -o caddy -g caddy -m 0750 /var/lib/caddy
 
 echo "      Installing official MTProxy..."
 if [[ "$REUSE_MT" != "1" ]]; then
+    # When the release ships a prebuilt MTProto proxy binary, place it at the
+    # exact path with the pinned-commit marker the upstream installer checks,
+    # so it skips the long compile and only does the dependency + secret setup.
+    if [[ -s "${BASE}/assets/mtproto-proxy-linux-amd64" ]]; then
+        echo "      Installing prebuilt MTProto proxy shipped with this release (build skipped)."
+        install -d -o root -g root -m 0755 /opt/MTProxy/objs/bin
+        install -o root -g root -m 0755 \
+            "${BASE}/assets/mtproto-proxy-linux-amd64" \
+            /opt/MTProxy/objs/bin/mtproto-proxy
+        printf '%s\n' "f36d8af769ffaeac36978d38c2c0f6d1104c2137" > /opt/MTProxy/.tproxy-commit
+        chmod 0644 /opt/MTProxy/.tproxy-commit
+    fi
     # The pinned upstream installer invokes apt-get without a lock timeout.
     # Ubuntu may start unattended-upgrades between our dependency step and
     # this call, so add the same bounded wait used by the main installer.
@@ -643,6 +655,11 @@ fix_mtproxy_permissions() {
 echo "      Installing Go relay..."
 if [[ "$REUSE_RELAY" == "1" ]]; then
     echo "      Healthy tproxy-server already exists; binary build skipped."
+elif [[ -s "${BASE}/assets/tproxy-server-linux-amd64" ]]; then
+    echo "      Installing prebuilt tproxy-server shipped with this release (build skipped)."
+    install -o root -g root -m 0755 \
+        "${BASE}/assets/tproxy-server-linux-amd64" \
+        /usr/local/bin/tproxy-server
 else
 go_version="1.26.8"
 go_sha256="d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b"
@@ -687,9 +704,11 @@ chmod 0755 /usr/local/bin/tproxy-server
 fi
 
 echo "      Preparing site..."
+# Guard: never let an empty/foreign SITE_TARGET turn the cleanup into a disaster.
+[[ "$SITE_TARGET" == "/srv/tproxy-site" ]] || die "Refusing to clean unexpected SITE_TARGET: $SITE_TARGET"
 install -d -o root -g tproxy -m 0750 "$SITE_TARGET"
 if [[ "$PRESERVE_SITE" != "1" ]]; then
-    rm -rf "$SITE_TARGET"/*
+    find "$SITE_TARGET" -mindepth 1 -delete
     cp -a "$SITE_INPUT/." "$SITE_TARGET/"
 fi
 chown -R root:tproxy "$SITE_TARGET"

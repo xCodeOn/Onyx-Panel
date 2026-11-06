@@ -45,7 +45,11 @@ command -v tar >/dev/null 2>&1 || die "tar is required."
 LATEST="$(curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 20 \
     "https://api.github.com/repos/${REPO_SLUG}/releases/latest" 2>/dev/null |
     sed -n 's/.*"tag_name":[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' | head -n1 || true)"
-[[ "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || LATEST="main"
+if [[ ! "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "WARNING: could not determine the latest release (GitHub API unreachable or rate-limited)." >&2
+    echo "WARNING: falling back to the main branch — this is NOT a tested release." >&2
+    LATEST="main"
+fi
 echo "Onyx Panel: release ${LATEST}..."
 
 WORK="$(mktemp -d /tmp/onyx-panel-install.XXXXXX)"
@@ -77,6 +81,37 @@ tar -xzf "$WORK/onyx-panel.tar.gz" -C "$WORK/package" --strip-components=1 --no-
     die "The downloaded release package is incomplete. Try again later."
 [[ -s "$WORK/package/assets/OpenFlux-linux-amd64" ]] ||
     die "The downloaded release package is incomplete: assets are missing."
+
+# Prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are attached
+# to each release as one bundle. Fetch it so the server never has to build or
+# download those itself. Skipped in the "main" fallback mode (no release yet) —
+# the installer then falls back to building on the server.
+BIN_BUNDLE="onyx-binaries-${LATEST#v}.tar.gz"
+if [[ "$LATEST" != "main" ]]; then
+    echo "Onyx Panel: fetching prebuilt components ${BIN_BUNDLE}..."
+    ONYX_BIN_OK=0
+    for dl in \
+        "https://github.com/${REPO_SLUG}/releases/download/${LATEST}/${BIN_BUNDLE}" \
+        "https://gh-proxy.com/https://github.com/${REPO_SLUG}/releases/download/${LATEST}/${BIN_BUNDLE}" \
+        "https://ghproxy.net/https://github.com/${REPO_SLUG}/releases/download/${LATEST}/${BIN_BUNDLE}" \
+        "https://ghfast.top/https://github.com/${REPO_SLUG}/releases/download/${LATEST}/${BIN_BUNDLE}"; do
+        curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
+            -o "$WORK/onyx-binaries.tar.gz" "$dl" && { ONYX_BIN_OK=1; break; }
+    done
+    if [[ "$ONYX_BIN_OK" == 1 && -s "$WORK/onyx-binaries.tar.gz" ]]; then
+        mkdir -p "$WORK/package/assets"
+        tar -xzf "$WORK/onyx-binaries.tar.gz" \
+            -C "$WORK/package/assets" --no-same-owner
+        if [[ -s "$WORK/package/assets/SHA256SUMS" ]]; then
+            ( cd "$WORK/package/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
+                echo "WARNING: prebuilt component checksums did not match; components may be rebuilt on the server." >&2
+        fi
+        echo "Onyx Panel: prebuilt components unpacked."
+    else
+        echo "WARNING: could not fetch prebuilt components; the installer will build them on the server (slow)." >&2
+    fi
+fi
 
 echo "Onyx Panel ${LATEST}: starting installation..."
 export ONYX_PANEL_VERSION="${LATEST#v}"
