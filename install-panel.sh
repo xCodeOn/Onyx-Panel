@@ -954,7 +954,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.12.5
+Description=Onyx Panel 2.12.6
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1061,7 +1061,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.5')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.6')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
@@ -1492,7 +1492,18 @@ if ! systemctl is-active --quiet onyx-panel.service; then
     exit 1
 fi
 
-if ! curl -fsS --max-time 5 "http://127.0.0.1:8090${PANEL_PATH}/__health" >/dev/null; then
+# The panel binds 8090 only after its startup reconciliation (Caddy route
+# healing can take 10+ seconds on a slow box) — poll instead of a single probe.
+panel_ready=0
+for _ in $(seq 1 40); do
+    if curl -fsS --max-time 3 "http://127.0.0.1:8090${PANEL_PATH}/__health" >/dev/null 2>&1; then
+        panel_ready=1
+        break
+    fi
+    systemctl is-active --quiet onyx-panel.service || break
+    sleep 1
+done
+if [[ "$panel_ready" != 1 ]]; then
     echo "ERROR: panel is not answering on 127.0.0.1:8090."
     ss -lntp 2>/dev/null | grep -E ':8090\b' || true
     journalctl -u onyx-panel.service --since "10 minutes ago" -n 80 --no-pager || true

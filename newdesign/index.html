@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Дашборд · Onyx Panel</title>
+<link rel="stylesheet" href="assets/design.css">
+<style>
+  .bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+  .span8 { grid-column: span 8; } .span4 { grid-column: span 4; }
+  .span6 { grid-column: span 6; }
+  .stack { display: grid; gap: 18px; align-content: start; }
+
+  .traffic-hero { position: relative; overflow: hidden; }
+  .traffic-hero .graph { margin: 6px -6px -8px; }
+  .traffic-hero .graph svg { display: block; width: 100%; height: 190px; }
+  .traffic-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .range-pills { display: flex; gap: 4px; background: var(--surface-soft); border: 1px solid var(--line-soft); border-radius: 999px; padding: 3px; }
+  .range-pills button {
+    border: none; background: transparent; font: inherit; font-size: 12px; font-weight: 600;
+    color: var(--muted); padding: 5px 13px; border-radius: 999px; cursor: pointer;
+    transition: background .25s var(--ease-spring), color .25s var(--ease-spring);
+  }
+  .range-pills button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
+  .range-pills button { white-space: nowrap; }
+
+  .gauge { display: flex; align-items: center; gap: 16px; }
+  .gauge svg { flex: 0 0 auto; }
+  .gauge .meta { min-width: 0; }
+
+  .svc-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+  .svc-row:last-child { border-bottom: none; }
+  .svc-ico { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-soft); border: 1px solid var(--line-soft); color: var(--muted); flex: 0 0 auto; }
+
+  .node-flag { width: 22px; height: 16px; border-radius: 5px; overflow: hidden; flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(16,24,40,.08); }
+  .node-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+  .node-row:last-child { border-bottom: none; }
+
+  .quick-client { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .quick-client:last-child { border-bottom: none; }
+  .mini-avatar {
+    width: 34px; height: 34px; border-radius: 12px; flex: 0 0 auto;
+    display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff;
+  }
+
+  @media (max-width: 1100px) { .span8, .span6, .span4 { grid-column: span 12; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#" aria-label="Onyx Panel">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2.5c5.2 0 9.5 4.3 9.5 9.5s-4.3 9.5-9.5 9.5S2.5 17.2 2.5 12 6.8 2.5 12 2.5Z" stroke="currentColor" stroke-width="1.6"/><path d="M12 7.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z" fill="#f05a1a"/></svg>
+    </a>
+    <nav class="nav" aria-label="Разделы панели">
+      <button class="nav-btn active" aria-label="Дашборд"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg></button>
+      <button class="nav-btn" aria-label="Клиенты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M4 19.5c.6-3.2 2.6-5 5-5s4.4 1.8 5 5"/><circle cx="16.5" cy="9" r="2.4"/><path d="M15.5 14.6c2.3.2 3.9 1.7 4.4 4.4"/></svg></button>
+      <button class="nav-btn" aria-label="Ноды"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="5.5" r="2"/><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="18" r="2"/><path d="M12 7.5v3.5m0 0-5 5m5-5 5 5"/></svg></button>
+      <button class="nav-btn" aria-label="Каскад"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6.5-6.5M13.5 17H20m0 0-3-3m3 3-3 3"/><rect x="3" y="4" width="9" height="6" rx="2"/></svg></button>
+      <button class="nav-btn" aria-label="Маршрутизация"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 20v-6a3 3 0 0 1 3-3h9"/><path d="m15 8 3 3-3 3"/></svg></button>
+      <button class="nav-btn" aria-label="Обновления"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></button>
+      <button class="nav-btn" aria-label="Настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4m0 13.6v2.4M21.6 12h-2.4M4.8 12H2.4m16.5-6.5-1.7 1.7M7.1 16.9l-1.7 1.7m13.4 0-1.7-1.7M7.1 7.1 5.4 5.4"/></svg></button>
+    </nav>
+    <div class="nav-bottom">
+      <button class="nav-btn" aria-label="Выйти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 7V5.5A1.5 1.5 0 0 0 12.5 4h-6A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20h6a1.5 1.5 0 0 0 1.5-1.5V17"/><path d="m17 8 4 4-4 4m4-4H9"/></svg></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="page-head">
+      <div>
+        <div class="eyebrow"><span class="dot"></span>Все службы работают · v2.12.4</div>
+        <h1 class="page-title">Добрый день, Админ</h1>
+        <p class="page-sub">Сервер в Франкфурте отвечает за 12 мс, трафик за сутки — 41,7 ГБ. Ничего не требует внимания.</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg>Обновить</button>
+        <button class="btn btn-primary">Клиент<span class="tail"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></button>
+        <span class="avatar" title="Админ"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.4 6.5 5.5"/></svg></span>
+      </div>
+    </header>
+
+    <div class="bento">
+      <section class="card span8 traffic-hero">
+        <div class="card-title" style="padding-bottom:0">
+          <div class="traffic-head" style="width:100%">
+            <div>
+              <h2>Трафик</h2>
+              <p style="margin-top:4px">все протоколы · последние 24 часа</p>
+            </div>
+            <div class="range-pills" role="group" aria-label="Диапазон">
+              <button class="on">24 ч</button><button>7 дн</button><button>30 дн</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-pad" style="padding-top:14px">
+          <div style="display:flex;align-items:baseline;gap:14px">
+            <span class="stat-value">41,7<span style="font-size:15px;color:var(--muted);font-family:var(--font-body);font-weight:600"> ГБ</span></span>
+            <span class="stat-delta up">▲ 18% ко вчерашнему</span>
+          </div>
+          <div class="graph">
+            <svg viewBox="0 0 720 190" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#f05a1a" stop-opacity=".22"/>
+                  <stop offset="1" stop-color="#f05a1a" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <g stroke="#efece8" stroke-width="1"><path d="M0 40h720M0 90h720M0 140h720"/></g>
+              <path d="M0 150 C40 148 60 130 90 128 S150 140 180 132 240 96 270 100 330 128 360 120 420 74 450 82 510 112 540 96 600 60 630 66 690 40 720 44 L720 190 0 190 Z" fill="url(#tg)"/>
+              <path d="M0 150 C40 148 60 130 90 128 S150 140 180 132 240 96 270 100 330 128 360 120 420 74 450 74 510 112 540 96 600 60 630 66 690 40 720 44" fill="none" stroke="#f05a1a" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="630" cy="66" r="4.5" fill="#f05a1a" stroke="#fff" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <div class="stack span4">
+        <section class="card card-pad">
+          <div class="gauge">
+            <svg width="86" height="86" viewBox="0 0 86 86">
+              <circle cx="43" cy="43" r="36" fill="none" stroke="#efece8" stroke-width="8"/>
+              <circle cx="43" cy="43" r="36.5" fill="none" stroke="#1e9e6a" stroke-width="8" stroke-linecap="round" stroke-dasharray="229" stroke-dashoffset="167" transform="rotate(-90 43 43)"/>
+              <text x="43" y="47" text-anchor="middle" font-size="16" font-weight="600" font-family="JetBrains Mono" fill="#101418">27%</text>
+            </svg>
+            <div class="meta">
+              <div class="stat-label">CPU · 2 ядра</div>
+              <div class="small muted" style="margin-top:3px">пик 61% в 14:20</div>
+            </div>
+          </div>
+        </section>
+        <section class="card card-pad">
+          <div class="gauge">
+            <svg width="86" height="86" viewBox="0 0 86 86">
+              <circle cx="43" cy="43" r="36" fill="none" stroke="#efece8" stroke-width="8"/>
+              <circle cx="43" cy="43" r="36.5" fill="none" stroke="#f05a1a" stroke-width="8" stroke-linecap="round" stroke-dasharray="229" stroke-dashoffset="126" transform="rotate(-90 43 43)"/>
+              <text x="43" y="47" text-anchor="middle" font-size="16" font-weight="600" font-family="JetBrains Mono" fill="#101418">45%</text>
+            </svg>
+            <div class="meta">
+              <div class="stat-label">RAM · 1,8 ГБ из 4</div>
+              <div class="small muted" style="margin-top:3px">диск 22% · всё в норме</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="card span6">
+        <div class="card-title">
+          <div><h2>Клиенты</h2><p>24 активных · 3 с истекающим доступом</p></div>
+          <a class="chip accent" href="#">Все клиенты <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+        </div>
+        <div class="card-pad" style="padding-top:10px">
+          <div class="quick-client"><span class="mini-avatar" style="background:#2f6f5e">МК</span><div style="flex:1;min-width:0"><b>Мария К.</b><div class="small muted">VLESS · 2 устройства</div></div><span class="num small">8,2 ГБ</span></div>
+          <div class="quick-client"><span class="mini-avatar" style="background:#39496b">ДС</span><div style="flex:1;min-width:0"><b>Дмитрий С.</b><div class="small muted">Hysteria2 · 1 устройство</div></div><span class="num small">5,7 ГБ</span></div>
+          <div class="quick-client"><span class="mini-avatar" style="background:#8a5a2b">АВ</span><div style="flex:1;min-width:0"><b>Анна В.</b><div class="small muted">AWG 3.1 · 3 устройства</div></div><span class="chip ok"><span class="dot"></span>онлайн</span></div>
+          <div class="quick-client"><span class="mini-avatar" style="background:#6b4a8c">ИП</span><div style="flex:1;min-width:0"><b>Игорь П.</b><div class="small muted">TUIC 5 · истекает через 2 дня</div></div><span class="chip warn">скоро</span></div>
+        </div>
+      </section>
+
+      <section class="card span6">
+        <div class="card-title">
+          <div><h2>Службы</h2><p>9 из 9 активны</p></div>
+          <span class="chip ok"><span class="dot"></span>стабильно</span>
+        </div>
+        <div class="card-pad" style="padding-top:10px">
+          <div class="svc-row"><span class="svc-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 2.5 20 7v10l-8 4.5L4 17V7l8-4.5Z"/></svg></span><div style="flex:1"><b>Xray</b><div class="small muted">VLESS · Reality · XHTTP</div></div><span class="chip ok"><span class="dot"></span>active</span></div>
+          <div class="svc-row"><span class="svc-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 15l3-3-3-3m5 6h5"/></svg></span><div style="flex:1"><b>AmneziaWG</b><div class="small muted">2 профиля · UDP</div></div><span class="chip ok"><span class="dot"></span>active</span></div>
+          <div class="svc-row"><span class="svc-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 12h4l2 5 4-10 2 5h4"/></svg></span><div style="flex:1"><b>MTProto</b><div class="small muted">порт 2398 · Telegram</div></div><span class="chip ok"><span class="dot"></span>active</span></div>
+          <div class="svc-row"><span class="svc-ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9M12 8v4l3 3"/></svg></span><div style="flex:1"><b>Антиреклама</b><div class="small muted">60 753 домена · обновлено сегодня</div></div><span class="chip accent">включена</span></div>
+        </div>
+      </section>
+
+      <section class="card span6">
+        <div class="card-title">
+          <div><h2>Ноды</h2><p>3 локации · каскад Франкфурт → Амстердам</p></div>
+          <a class="chip" href="#">Управлять</a>
+        </div>
+        <div class="card-pad" style="padding-top:10px">
+          <div class="node-row"><span class="node-flag" style="background:linear-gradient(180deg,#000 33%,#d00 33%,#d00 66%,#fc0 66%)"></span><div style="flex:1"><b>Франкфурт</b><div class="small muted">основной сервер</div></div><span class="num small">12 мс</span><span class="chip ok"><span class="dot"></span>онлайн</span></div>
+          <div class="node-row"><span class="node-flag" style="background:linear-gradient(90deg,#ae1c28 33%,#fff 33%,#fff 66%,#21468b 66%)"></span><div style="flex:1"><b>Амстердам</b><div class="small muted">каскад · 14 клиентов</div></div><span class="num small">19 мс</span><span class="chip ok"><span class="dot"></span>онлайн</span></div>
+          <div class="node-row"><span class="node-flag" style="background:linear-gradient(180deg,#0057b8 50%,#ffd700 50%)"></span><div style="flex:1"><b>Warsaw</b><div class="small muted">резерв · выключена</div></div><span class="num small">—</span><span class="chip">off</span></div>
+        </div>
+      </section>
+
+      <section class="card span6 card-pad" style="display:flex;flex-direction:column;justify-content:space-between;gap:16px">
+        <div class="eyebrow" style="margin:0">Журнал</div>
+        <div>
+          <div class="small" style="padding:7px 0;border-bottom:1px solid var(--line-soft)"><b>19:41</b> · Антиреклама обновила список (60 753 домена)</div>
+          <div class="small" style="padding:7px 0;border-bottom:1px solid var(--line-soft)"><b>18:02</b> · Мария К. подключила новое устройство</div>
+          <div class="small" style="padding:7px 0"><b>17:40</b> · Резервная копия ушла в Telegram (4,1 МБ)</div>
+        </div>
+        <a class="btn btn-ghost" href="#" style="align-self:flex-start">Весь журнал<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Клиенты · Onyx Panel</title>
+<link rel="stylesheet" href="assets/design.css">
+<style>
+  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .search {
+    flex: 1; min-width: 220px; display: flex; align-items: center; gap: 9px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px;
+  }
+  .search input { border: none; outline: none; background: none; font: inherit; flex: 1; min-width: 0; }
+  .filters { display: flex; gap: 6px; }
+  .f-pill {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; padding: 7px 14px; cursor: pointer; color: var(--muted);
+    transition: all .25s var(--ease-spring);
+  }
+  .f-pill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .f-pill:hover:not(.on) { border-color: var(--faint); color: var(--ink); }
+
+  .proto { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 3px 9px; border-radius: 7px; background: var(--surface-soft); border: 1px solid var(--line-soft); color: var(--ink-soft); }
+  .proto.vless { color: #7a4dbb; background: #f2ebfb; border-color: transparent; }
+  .proto.hys { color: #1e6e9e; background: #e5f2fa; border-color: transparent; }
+  .proto.awg { color: #1e7f4f; background: #e4f5ec; border-color: transparent; }
+  .proto.tuic { color: #a35a12; background: #faf0e0; border-color: transparent; }
+
+  .quota { width: 120px; }
+  .quota .bar { height: 5px; border-radius: 3px; background: var(--line-soft); overflow: hidden; margin-top: 6px; }
+  .quota .bar i { display: block; height: 100%; border-radius: 3px; background: var(--ink); }
+  .quota.hot .bar i { background: var(--err); }
+
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .icon-btn {
+    width: 33px; height: 33px; border-radius: 11px; display: grid; place-items: center;
+    border: 1px solid var(--line-soft); background: var(--surface); color: var(--muted); cursor: pointer;
+    transition: all .22s var(--ease-spring);
+  }
+  .icon-btn:hover { color: var(--ink); border-color: var(--line); transform: translateY(-1px); box-shadow: var(--shadow-1); }
+
+  .bulk-bar[hidden]{display:none}
+  .bulk-bar {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px; padding: 10px 12px 10px 18px;
+    background: var(--ink); color: #fff; border-radius: 999px; box-shadow: var(--shadow-2);
+    font-size: 13px; z-index: 5;
+  }
+  .bulk-bar .btn { padding: 7px 14px; font-size: 12.5px; }
+  .bulk-bar .btn-ghost { color: rgba(255,255,255,.7); }
+  .bulk-bar .btn-ghost:hover { color: #fff; background: rgba(255,255,255,.12); }
+
+  @media (max-width: 900px) { .quota { width: 84px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="index.html" aria-label="Onyx Panel"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2.5c5.2 0 9.5 4.3 9.5 9.5s-4.3 9.5-9.5 9.5S2.5 17.2 2.5 12 6.8 2.5 12 2.5Z" stroke="#fff" stroke-width="1.6"/><path d="M12 7.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z" fill="#f05a1a"/></svg></a>
+    <nav class="nav" aria-label="Разделы панели">
+      <a class="nav-btn" href="index.html" aria-label="Дашборд"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg></a>
+      <a class="nav-btn active" href="clients.html" aria-label="Клиенты"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M4 19.5c.6-3.2 2.6-5 5-5s4.4 1.8 5 5"/><circle cx="16.5" cy="9" r="2.4"/><path d="M15.5 14.6c2.3.2 3.9 1.7 4.4 4.4"/></svg></a>
+      <a class="nav-btn" href="#" aria-label="Ноды"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="5.5" r="2"/><circle cx="5.5" cy="18" r="2"/><circle cx="18.5" cy="18" r="2"/><path d="M12 7.5v3.5m0 0-5 5m5-5 5 5"/></svg></a>
+      <a class="nav-btn" href="#" aria-label="Каскад"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6.5-6.5M13.5 17H20m0 0-3-3m3 3-3 3"/><rect x="3" y="4" width="9" height="6" rx="2"/></svg></a>
+      <a class="nav-btn" href="#" aria-label="Маршрутизация"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 20v-6a3 3 0 0 1 3-3h9"/><path d="m15 8 3 3-3 3"/></svg></a>
+      <a class="nav-btn" href="#" aria-label="Обновления"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg></a>
+      <a class="nav-btn" href="settings.html" aria-label="Настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4m0 13.6v2.4M21.6 12h-2.4M4.8 12H2.4m16.5-6.5-1.7 1.7M7.1 16.9l-1.7 1.7m13.4 0-1.7-1.7M7.1 7.1 5.4 5.4"/></svg></a>
+    </nav>
+    <div class="nav-bottom">
+      <button class="nav-btn" aria-label="Выйти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 7V5.5A1.5 1.5 0 0 0 12.5 4h-6A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20h6a1.5 1.5 0 0 0 1.5-1.5V17"/><path d="m17 8 4 4-4 4m4-4H9"/></svg></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="page-head">
+      <div>
+        <div class="eyebrow"><span class="dot"></span>24 активных · 4 протокола</div>
+        <h1 class="page-title">Клиенты</h1>
+        <p class="page-sub">Подписки, устройства, квоты и сроки — всё в одной таблице.</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn">Импорт</button>
+        <button class="btn btn-accent">Новый клиент<span class="tail"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="color:var(--faint)"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        <input placeholder="Поиск: имя, протокол, заметка…" aria-label="Поиск клиентов">
+        <span class="chip">⌘K</span>
+      </div>
+      <div class="filters" role="group" aria-label="Фильтр по протоколу">
+        <button class="f-pill on">Все</button><button class="f-pill">VLESS</button><button class="f-pill">Hysteria2</button><button class="f-pill">AWG</button><button class="f-pill">TUIC</button>
+      </div>
+    </div>
+
+    <section class="card">
+      <table class="table">
+        <thead><tr><th style="width:34px"><input type="checkbox" aria-label="Выбрать всех"></th><th>Клиент</th><th>Протокол</th><th>Трафик / квота</th><th>Устройства</th><th>Истекает</th><th>Статус</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox" aria-label="Выбрать"></td>
+            <td><div style="display:flex;align-items:center;gap:11px"><span class="mini-avatar" style="width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:#2f6f5e">МК</span><div><b>Мария Ковалёва</b><div class="small muted">работа + дом</div></div></div></td>
+            <td><span class="proto vless">VLESS</span></td>
+            <td class="quota"><span class="num">8,2</span> <span class="muted small">/ 50 ГБ</span><div class="bar"><i style="width:16%"></i></div></td>
+            <td class="num small">2 / 2</td>
+            <td class="small">12 мар 2027</td>
+            <td><span class="chip ok"><span class="dot"></span>онлайн</span></td>
+            <td><div class="row-actions"><button class="icon-btn" title="QR и ссылка"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v6h-6"/></svg></button><button class="icon-btn" title="Редактировать"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m14.5 6 3 3L8.5 17.5 5 18.5l1-3.5L15.5 6Z"/></svg></button><button class="icon-btn" title="Ещё"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" aria-label="Выбрать"></td>
+            <td><div style="display:flex;align-items:center;gap:11px"><span class="mini-avatar" style="width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:#39496b">ДС</span><div><b>Дмитрий Савельев</b><div class="small muted">телефон</div></div></div></td>
+            <td><span class="proto hys">HYS2</span></td>
+            <td class="quota"><span class="num">5,7</span> <span class="muted small">/ 30 ГБ</span><div class="bar"><i style="width:19%"></i></div></td>
+            <td class="num small">1 / 1</td>
+            <td class="small">28 ноя 2026</td>
+            <td><span class="chip ok"><span class="dot"></span>онлайн</span></td>
+            <td><div class="row-actions"><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v6h-6"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m14.5 6 3 3L8.5 17.5 5 18.5l1-3.5L15.5 6Z"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" aria-label="Выбрать"></td>
+            <td><div style="display:flex;align-items:center;gap:11px"><span class="mini-avatar" style="width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:#8a5a2b">АВ</span><div><b>Анна Ветрова</b><div class="small muted">семья</div></div></div></td>
+            <td><span class="proto awg">AWG 3.1</span></td>
+            <td class="quota"><span class="num">21,4</span> <span class="muted small">/ 100 ГБ</span><div class="bar"><i style="width:21%"></i></div></td>
+            <td class="num small">3 / 4</td>
+            <td class="small">01 янв 2027</td>
+            <td><span class="chip ok"><span class="dot"></span>онлайн</span></td>
+            <td><div class="row-actions"><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v6h-6"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m14.5 6 3 3L8.5 17.5 5 18.5l1-3.5L15.5 6Z"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" aria-label="Выбрать"></td>
+            <td><div style="display:flex;align-items:center;gap:11px"><span class="mini-avatar" style="width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:#6b4a8c">ИП</span><div><b>Игорь Полянский</b><div class="small muted">ноутбук</div></div></div></td>
+            <td><span class="proto tuic">TUIC 5</span></td>
+            <td class="quota hot"><span class="num">28,9</span> <span class="muted small">/ 30 ГБ</span><div class="bar"><i style="width:96%"></i></div></td>
+            <td class="num small">1 / 1</td>
+            <td class="small" style="color:var(--warn);font-weight:600">через 2 дня</td>
+            <td><span class="chip warn"><span class="dot"></span>истекает</span></td>
+            <td><div class="row-actions"><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v6h-6"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m14.5 6 3 3L8.5 17.5 5 18.5l1-3.5L15.5 6Z"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" aria-label="Выбрать"></td>
+            <td><div style="display:flex;align-items:center;gap:11px"><span class="mini-avatar" style="width:32px;height:32px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:#585d63">ОН</span><div><b>Ольга Нестерова</b><div class="small muted">гость</div></div></div></td>
+            <td><span class="proto vless">VLESS</span></td>
+            <td class="quota"><span class="num">0,4</span> <span class="muted small">/ 10 ГБ</span><div class="bar"><i style="width:4%"></i></div></td>
+            <td class="num small">1 / 1</td>
+            <td class="small">05 дек 2026</td>
+            <td><span class="chip">офлайн 3 дн</span></td>
+            <td><div class="row-actions"><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM20 14v6h-6"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m14.5 6 3 3L8.5 17.5 5 18.5l1-3.5L15.5 6Z"/></svg></button><button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</div>
+
+<div class="bulk-bar" hidden>
+  <span>Выбрано: <b class="num">3</b></span>
+  <button class="btn btn-ghost">Продлить</button>
+  <button class="btn btn-ghost">Выключить</button>
+  <button class="btn btn-accent">Удалить</button>
+</div>
+</body>
+</html>

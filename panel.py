@@ -5275,7 +5275,9 @@ def unbound_worker():
         time.sleep(300)
 
 def main():
-    heal_caddy_route()
+    # Caddy route healing runs reloads that take seconds on a slow box — keep
+    # it off the critical path so the panel starts answering immediately.
+    threading.Thread(target=heal_caddy_route,daemon=True).start()
     threading.Thread(target=expiry_sweep,daemon=True).start()
     threading.Thread(target=notifications_worker,daemon=True).start()
     threading.Thread(target=backup_worker,daemon=True).start()
