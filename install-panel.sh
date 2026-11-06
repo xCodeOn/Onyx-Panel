@@ -954,7 +954,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.12.6
+Description=Onyx Panel 2.12.7
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1061,7 +1061,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.6')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.7')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"

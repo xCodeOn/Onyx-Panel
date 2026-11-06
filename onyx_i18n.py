@@ -75,7 +75,7 @@ EXTRA_RULES = [
     (re.compile(re.escape("Блоклист подозрительно короткий — отказ.")), "The blocklist is suspiciously short — refusing it."),
     (re.compile(re.escape("unbound-checkconf отклонил конфиг:")), "unbound-checkconf rejected the config:"),
     (re.compile(re.escape("unbound не поднялся после применения конфига.")), "unbound did not come up after applying the config."),
-    (re.compile(re.escape("unbound не запущен после перезапуска.")), "unbound is not running after the restart."),
+    (re.compile(re.escape("unbound не запущен после перезапуска")), "unbound is not running after the restart"),
     (re.compile(re.escape("Слишком большой блоклист.")), "The blocklist is too large."),
     (re.compile(re.escape("Блоклист ещё не скачан — выполните обновление.")), "The blocklist has not been downloaded yet — run an update."),
     # Сообщения задачи удаления клиентов: числа внутри, словарные ключи не достают.

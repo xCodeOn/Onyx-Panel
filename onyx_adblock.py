@@ -144,11 +144,29 @@ def _reload_unbound():
             raise RuntimeError("unbound не поднялся после применения конфига.")
 
 
+def _unbound_why():
+    """The last meaningful unbound journal lines — a dead resolver must say why."""
+    try:
+        out = subprocess.run(["journalctl", "-u", "unbound", "-n", "10", "--no-pager"],
+                             capture_output=True, text=True, timeout=10).stdout
+        lines = [ln.split(": ", 1)[-1].strip() for ln in out.splitlines()
+                 if ln.strip() and not ln.startswith("--")]
+        return (" — ".join(lines[-2:]))[:160]
+    except Exception:
+        return ""
+
+
 def probe_unbound():
-    """Fail-closed liveness check used by the panel routes after touching unbound."""
-    if subprocess.run(["systemctl", "is-active", "--quiet", "unbound"],
-                      capture_output=True, timeout=10).returncode:
-        raise RuntimeError("unbound не запущен после перезапуска.")
+    """Fail-closed liveness check used by the panel routes after touching unbound.
+    Waits out the short activation window, then fails with the journal reason."""
+    for _ in range(4):
+        if not subprocess.run(["systemctl", "is-active", "--quiet", "unbound"],
+                              capture_output=True, timeout=10).returncode:
+            return
+        time.sleep(1)
+    why = _unbound_why()
+    raise RuntimeError("unbound не запущен после перезапуска"
+                       + (": " + why if why else "."))
 
 
 def apply(state, users=None):
