@@ -13,6 +13,7 @@ settings card says so out loud.
 import ipaddress
 import os
 import re
+import shutil
 import subprocess
 import time
 
@@ -156,15 +157,51 @@ def _unbound_why():
         return ""
 
 
+def _is_active():
+    return subprocess.run(["systemctl", "is-active", "--quiet", "unbound"],
+                          capture_output=True, timeout=10).returncode == 0
+
+
+def _heal_trust_anchor():
+    """Debian's stock config references /var/lib/unbound/root.key, but some
+    images never generate it — the validator module then fails and unbound dies
+    with "failed to setup modules". Generate the anchor once when missing."""
+    if os.path.exists("/var/lib/unbound/root.key"):
+        return False
+    anchor = shutil.which("unbound-anchor")
+    if not anchor:
+        return False
+    try:
+        os.makedirs("/var/lib/unbound", exist_ok=True)
+        result = subprocess.run([anchor, "-a", "/var/lib/unbound/root.key"],
+                                capture_output=True, timeout=90)
+        if result.returncode or not os.path.exists("/var/lib/unbound/root.key"):
+            return False
+        subprocess.run(["chown", "unbound:unbound", "/var/lib/unbound/root.key"],
+                       capture_output=True, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
 def probe_unbound():
     """Fail-closed liveness check used by the panel routes after touching unbound.
-    Waits out the short activation window, then fails with the journal reason."""
+    Waits out the short activation window, self-heals the known trust-anchor
+    gap, then fails with the journal reason."""
     for _ in range(4):
-        if not subprocess.run(["systemctl", "is-active", "--quiet", "unbound"],
-                              capture_output=True, timeout=10).returncode:
+        if _is_active():
             return
         time.sleep(1)
     why = _unbound_why()
+    if "trust-anchor" in why or "root.key" in why or "failed to setup modules" in why:
+        if _heal_trust_anchor():
+            subprocess.run(["systemctl", "restart", "unbound"],
+                           capture_output=True, timeout=60)
+            for _ in range(4):
+                if _is_active():
+                    return
+                time.sleep(1)
+            why = _unbound_why()
     raise RuntimeError("unbound не запущен после перезапуска"
                        + (": " + why if why else "."))
 

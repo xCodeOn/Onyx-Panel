@@ -391,6 +391,18 @@ fi
 systemctl enable unbound >/dev/null 2>&1 || true
 systemctl restart unbound >/dev/null 2>&1 || true
 
+# Debian images sometimes ship the stock auto-trust-anchor-file directive
+# without ever generating root.key — unbound then dies with "failed to setup
+# modules". Generate the anchor once when it is referenced but missing.
+if [[ ! -s /var/lib/unbound/root.key ]] && command -v unbound-anchor >/dev/null 2>&1; then
+    if grep -rqs 'auto-trust-anchor-file' /etc/unbound/ 2>/dev/null; then
+        install -d -m 0755 /var/lib/unbound
+        unbound-anchor -a /var/lib/unbound/root.key >/dev/null 2>&1 || true
+        [[ -s /var/lib/unbound/root.key ]] && chown unbound:unbound /var/lib/unbound/root.key 2>/dev/null || true
+        systemctl restart unbound >/dev/null 2>&1 || true
+    fi
+fi
+
 # The adblock drop-in lives in unbound.conf.d; make sure the main config
 # actually includes that directory. The guard must ignore the commented-out
 # stock line (# include-toplevel: …) some images ship.
@@ -954,7 +966,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.12.7
+Description=Onyx Panel 2.12.8
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1061,7 +1073,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.7')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.8')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
