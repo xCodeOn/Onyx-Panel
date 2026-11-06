@@ -23,6 +23,13 @@ assert onyx_totp.verify(secret, _ref(1), timestamp=30)
 assert onyx_totp.verify(secret, _ref(2), timestamp=45)      # +-1 window
 assert not onyx_totp.verify(secret, _ref(5), timestamp=30)  # wrong code
 assert not onyx_totp.verify(secret, 'abc', timestamp=30)    # non digits
+# verify_counter: номер совпавшего шага (newest-first) или None — для replay-контроля
+assert onyx_totp.verify_counter(secret, _ref(1), timestamp=30) == 1
+assert onyx_totp.verify_counter(secret, _ref(2), timestamp=45) == 2   # newest step wins
+assert onyx_totp.verify_counter(secret, _ref(2), timestamp=30) == 2   # future step inside window
+assert onyx_totp.verify_counter(secret, _ref(5), timestamp=30) is None  # wrong code
+assert onyx_totp.verify_counter(secret, 'abc', timestamp=30) is None  # non digits
+assert onyx_totp.verify_counter(secret, '', timestamp=30) is None     # empty
 assert 'otpauth://totp/Onyx%20Panel:admin?secret=' in onyx_totp.provisioning_uri(secret, 'admin')
 print('TOTP OK')
 
@@ -364,17 +371,26 @@ _ns['onyx_reality'].load = lambda p: {'enabled': False}
 _ns['sync_xray'](_d)
 assert 'vless-reality' not in [i['tag'] for i in json.load(open(_ns['XRAY_CONFIG']))['inbounds']]
 
-# sync_firewall: порт Reality попадает в UFW tcp-набор только при включённом
+# sync_firewall: порт Reality попадает в UFW tcp-набор только когда инбаунд
+# реально живой: Reality включён и есть хотя бы один vless-клиент (иначе Xray
+# порт не слушает и открывать его в фаерволе нельзя).
 _recon = {}
 _ns['onyx_firewall'] = _types.SimpleNamespace(reconcile=lambda **kw: _recon.update(kw))
-_ns['onyx_reality'].load = lambda p: {'enabled': True, 'port': 2053}
+_ns['onyx_reality'].load = lambda p: {'enabled': True, 'port': 2053, 'dest': 'www.wildberries.ru:443',
+                                      'server_names': ['www.wildberries.ru'],
+                                      'private_key': 'P' * 42 + 'A=', 'short_ids': ['abcd1234']}
 _ns['onyx_routing'].load = lambda p: {}
 exec(compile(_extract_fn('sync_firewall'), 'sync_firewall', 'exec'), _ns)
 _ns['collect_traffic'] = lambda d: None
-_ns['sync_firewall']({'users': [{'id': 'x', 'protocol': 'hysteria', 'enabled': True, 'backend_port': 8443}]})
+_ns['sync_firewall']({'users': [{'id': 'x', 'protocol': 'hysteria', 'enabled': True, 'backend_port': 8443},
+                                {'id': 'v', 'protocol': 'vless', 'enabled': True, 'secret': 'S1' * 8}]})
 assert 2053 in _recon['tcp']
-_ns['onyx_reality'].load = lambda p: {'enabled': False}
+# Тот же включённый Reality, но без vless-клиентов: инбаунда нет, порт закрыт.
 _ns['sync_firewall']({'users': [{'id': 'x', 'protocol': 'hysteria', 'enabled': True, 'backend_port': 8443}]})
+assert 2053 not in _recon['tcp']
+_ns['onyx_reality'].load = lambda p: {'enabled': False}
+_ns['sync_firewall']({'users': [{'id': 'x', 'protocol': 'hysteria', 'enabled': True, 'backend_port': 8443},
+                                {'id': 'v', 'protocol': 'vless', 'enabled': True, 'secret': 'S1' * 8}]})
 assert 2053 not in _recon['tcp']
 print('EMBEDDED SYNC OK')
 
@@ -766,6 +782,20 @@ assert not (_swapdir / 'openflux.new').exists()
 _oc._replace_file(_swapdir / 'previous', _target)
 assert _target.read_bytes() == b'OLD-BINARY'
 print('COMPONENTS ETXTBSY FIX OK')
+
+# _safe_extract_sources + пересборка MTProto: префиксный тарбол ложится под
+# RELAY_PREFIX, и путь до install-mtproxy.sh совпадает с тем, что ищет
+# режим «пересобрать из исходников» (srcdir / RELAY_PREFIX / deploy / ...).
+_relay_src = _tmp / 'relay-src'
+_oc._safe_extract_sources(os.path.join(ROOT, 'assets', 'tproxy-server-52a5feb.tar.gz'), _relay_src, _oc.RELAY_PREFIX)
+assert (_relay_src / _oc.RELAY_PREFIX / 'deploy' / 'install-mtproxy.sh').is_file()
+# архив с чужим префиксом отклоняется
+try:
+    _oc._safe_extract_sources(os.path.join(ROOT, 'assets', 'tproxy-server-52a5feb.tar.gz'), _tmp / 'relay-src2', 'wrong-prefix')
+    raise SystemExit('archive with wrong prefix accepted')
+except RuntimeError:
+    pass
+print('COMPONENTS RELAY SOURCE OK')
 
 # ---- Python 3.10 grammar check (Ubuntu 22.04 target): no 3.12+ f-string syntax
 import ast

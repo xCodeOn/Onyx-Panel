@@ -95,6 +95,40 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify committed component assets
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          # assets/ carries the prebuilt components inside the repo itself, so
+          # the installer does not depend on the release attachments. They must
+          # match the checksums the installers pin, or the strict checks die on
+          # the user's server. The pins are read from the installer scripts so
+          # this gate can never drift from what the server-side checks enforce.
+          set -euo pipefail
+          cd assets
+          sha256sum -c SHA256SUMS
+          TAR_SHA_PIN="$(grep -oE '^TPROXY_SOURCE_SHA256="[0-9a-f]{64}"' ../install-core.sh | cut -d'"' -f2)"
+          [[ "$(gzip -dc tproxy-server-52a5feb.tar.gz | sha256sum | awk '{print $1}')" == "$TAR_SHA_PIN" ]] || {
+            echo "::error::assets/tproxy-server-52a5feb.tar.gz tar-stream hash != TPROXY_SOURCE_SHA256 in install-core.sh"
+            exit 1
+          }
+          XRAY_PIN="$(grep -oE '^XRAY_SHA256="[0-9a-f]{64}"' ../install-panel.sh | cut -d'"' -f2)"
+          echo "$XRAY_PIN  Xray-linux-64.zip" | sha256sum -c -
+          CADDY_PIN="$(grep -oE 'caddy_sha512="[0-9a-f]{128}"' ../install-core.sh | cut -d'"' -f2)"
+          echo "$CADDY_PIN  caddy_2.11.4_linux_amd64.tar.gz" | sha512sum -c -
+          MTPROTO_PIN="$(grep -oE '^MTPROTO_PROXY_SHA256="[0-9a-f]{64}"' ../install-core.sh | cut -d'"' -f2)"
+          echo "$MTPROTO_PIN  mtproto-proxy-linux-amd64" | sha256sum -c -
+          RELAY_PIN="$(grep -oE '^TPROXY_SERVER_SHA256="[0-9a-f]{64}"' ../install-core.sh | cut -d'"' -f2)"
+          echo "$RELAY_PIN  tproxy-server-linux-amd64" | sha256sum -c -
+          # The installer extracts the source tarball with --strip-components=1,
+          # so the archive must carry the top-level prefix directory — a bare
+          # `git archive` without --prefix dies on the completeness check.
+          # grep -c reads the whole listing: no early-exit SIGPIPE under pipefail.
+          [[ "$(tar -tzf tproxy-server-52a5feb.tar.gz | grep -c '^tproxy-server-52a5feb7fac38f68da5afef9cedd9b3bfc8473ca/deploy/install-mtproxy\.sh$')" -ge 1 ]] || {
+            echo "::error::tproxy source tarball lacks the top-level prefix directory"
+            exit 1
+          }
+          echo "Committed component assets verified."
+
       - name: Set released output
         id: out
         run: |
@@ -134,9 +168,10 @@ jobs:
 
   # Build the binaries that would otherwise be compiled on the user's server
   # (tproxy-server relay, MTProto proxy) and re-package the official Xray /
-  # Caddy archives, then upload them all to the release as assets. install.sh
-  # fetches these in remote mode so a fresh server install never has to build
-  # or download them itself. Pinned refs mirror the installer's constants.
+  # Caddy archives, then upload them all to the release as assets. The same
+  # files are committed under assets/, so the bundle is a fallback for older
+  # install.sh/update.sh versions and for releases predating the in-repo
+  # assets. Pinned refs mirror the installer's constants.
   binaries:
     needs: [release]
     if: needs.release.outputs.released == 'true'
@@ -175,8 +210,13 @@ jobs:
             -o /tmp/build/tproxy-server-linux-amd64 ./cmd/tproxy-server)
           # The pinned source is bundled too so the installer never has to
           # fetch it from GitHub on the server (used by the MTProxy installer).
-          git -C /tmp/tproxy archive 52a5feb7fac38f68da5afef9cedd9b3bfc8473ca | \
-            gzip -9 > /tmp/build/tproxy-server-52a5feb.tar.gz
+          # --prefix recreates the top-level directory the installer expects
+          # (it extracts with --strip-components=1); gzip -n keeps the header
+          # free of timestamps so the archive stays byte-identical across runs.
+          git -C /tmp/tproxy archive \
+            --prefix=tproxy-server-52a5feb7fac38f68da5afef9cedd9b3bfc8473ca/ \
+            52a5feb7fac38f68da5afef9cedd9b3bfc8473ca | \
+            gzip -9 -n > /tmp/build/tproxy-server-52a5feb.tar.gz
 
       - name: Build MTProto proxy
         run: |
@@ -194,6 +234,27 @@ jobs:
             https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip
           curl -fsSL -o /tmp/build/caddy_2.11.4_linux_amd64.tar.gz \
             https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_linux_amd64.tar.gz
+
+      - name: Compare fresh builds against committed assets
+        run: |
+          # The bundle must be byte-identical to the committed assets/: the
+          # installer pins those hashes and dies on a mismatch. A failed
+          # comparison means the toolchain drifted — re-commit the CI artifact
+          # from this run and update the pins in the same commit.
+          set -euo pipefail
+          for f in tproxy-server-linux-amd64 mtproto-proxy-linux-amd64 Xray-linux-64.zip caddy_2.11.4_linux_amd64.tar.gz; do
+            cmp "assets/$f" "/tmp/build/$f" || {
+              echo "::error::$f built in CI differs from committed assets/$f"
+              exit 1
+            }
+          done
+          # The source tarball is compared by uncompressed tar stream: git
+          # archive of a fixed commit is deterministic.
+          TAR_SHA_PIN="$(grep -oE '^TPROXY_SOURCE_SHA256="[0-9a-f]{64}"' install-core.sh | cut -d'"' -f2)"
+          [[ "$(gzip -dc /tmp/build/tproxy-server-52a5feb.tar.gz | sha256sum | awk '{print $1}')" == "$TAR_SHA_PIN" ]] || {
+            echo "::error::freshly archived tproxy source tar stream != TPROXY_SOURCE_SHA256"
+            exit 1
+          }
 
       - name: Package prebuilt bundle
         run: |

@@ -32,6 +32,12 @@ if [[ -n "$SCRIPT_SOURCE" && -f "$SCRIPT_SOURCE" ]]; then
           -s "$LOCAL_BASE/assets/amneziawg-go-linux-amd64" &&
           -s "$LOCAL_BASE/assets/awg-linux-amd64" &&
           -s "$LOCAL_BASE/assets/awg-quick-linux-amd64" ]]; then
+        # Newer packages carry SHA256SUMS for the prebuilt components; when
+        # present, verify before trusting the local directory.
+        if [[ -s "$LOCAL_BASE/assets/SHA256SUMS" ]]; then
+            ( cd "$LOCAL_BASE/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
+                die "Local package assets failed checksum verification (assets/SHA256SUMS)."
+        fi
         echo "Onyx Panel: installing from the local package in $LOCAL_BASE..."
         exec bash "$LOCAL_BASE/install-final.sh"
     fi
@@ -47,8 +53,7 @@ LATEST="$(curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time
     sed -n 's/.*"tag_name":[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' | head -n1 || true)"
 if [[ ! "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "WARNING: could not determine the latest release (GitHub API unreachable or rate-limited)." >&2
-    echo "WARNING: falling back to the main branch — this is NOT a tested release and ships NO prebuilt components." >&2
-    echo "WARNING: the strict installer will fail on the component checks unless you provide the release bundle manually." >&2
+    echo "WARNING: falling back to the main branch — NOT a tested release (prebuilt components still ship in the repo)." >&2
     LATEST="main"
 fi
 echo "Onyx Panel: release ${LATEST}..."
@@ -83,13 +88,20 @@ tar -xzf "$WORK/onyx-panel.tar.gz" -C "$WORK/package" --strip-components=1 --no-
 [[ -s "$WORK/package/assets/OpenFlux-linux-amd64" ]] ||
     die "The downloaded release package is incomplete: assets are missing."
 
-# Prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are attached
-# to each release as one bundle. Fetch it so the server never has to build or
-# download those itself. Skipped in the "main" fallback mode (no release yet);
-# without the bundle the strict component checks below will fail, so a real
-# release tag must be used.
+# Prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are committed
+# to the repository under assets/ together with their SHA256SUMS. When the
+# release tarball already carries a complete, intact set there is nothing left
+# to download; the release-attached bundle below is only a fallback for older
+# releases whose tarballs shipped without these files.
+ONYX_ASSETS_READY=0
+if [[ -s "$WORK/package/assets/SHA256SUMS" ]] &&
+   ( cd "$WORK/package/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1; then
+    ONYX_ASSETS_READY=1
+    echo "Onyx Panel: prebuilt components ship with the repository; bundle download skipped."
+fi
+
 BIN_BUNDLE="onyx-binaries-${LATEST#v}.tar.gz"
-if [[ "$LATEST" != "main" ]]; then
+if [[ "$LATEST" != "main" && "$ONYX_ASSETS_READY" != "1" ]]; then
     echo "Onyx Panel: fetching prebuilt components ${BIN_BUNDLE}..."
     ONYX_BIN_OK=0
     for dl in \
@@ -105,13 +117,13 @@ if [[ "$LATEST" != "main" ]]; then
         mkdir -p "$WORK/package/assets"
         tar -xzf "$WORK/onyx-binaries.tar.gz" \
             -C "$WORK/package/assets" --no-same-owner
-        if [[ -s "$WORK/package/assets/SHA256SUMS" ]]; then
-            ( cd "$WORK/package/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
-                die "Prebuilt component bundle failed checksum verification. Retry or use a trusted mirror."
-        fi
+        [[ -s "$WORK/package/assets/SHA256SUMS" ]] ||
+            die "Prebuilt component bundle lacks SHA256SUMS. Retry or use a trusted mirror."
+        ( cd "$WORK/package/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
+            die "Prebuilt component bundle failed checksum verification. Retry or use a trusted mirror."
         echo "Onyx Panel: prebuilt components unpacked and verified."
     else
-        echo "WARNING: could not fetch prebuilt components; the installer will build them on the server (slow)." >&2
+        echo "WARNING: could not fetch prebuilt components; the strict installer will fail on the component checks." >&2
     fi
 fi
 

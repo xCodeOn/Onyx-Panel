@@ -50,6 +50,26 @@ def verify(secret, code, window=1, timestamp=None):
     return False
 
 
+def verify_counter(secret, code, window=1, timestamp=None):
+    """Like verify(), but returns the matched time-step counter (or None).
+
+    The login flow stores the counter of the last successful sign-in and
+    rejects codes whose counter is not greater, so a code cannot be replayed
+    inside its validity window. Newer steps are tried first so an ambiguous
+    match resolves to the freshest counter.
+    """
+    code = str(code or "").strip()
+    if len(code) != DIGITS or not code.isdigit():
+        return None
+    if timestamp is None:
+        timestamp = time.time()
+    for shift in range(window, -window - 1, -1):
+        step = timestamp + shift * PERIOD
+        if hmac.compare_digest(totp_at(secret, step), code):
+            return int(step // PERIOD)
+    return None
+
+
 def provisioning_uri(secret, account, issuer="Onyx Panel"):
     query = urllib.parse.urlencode({"secret": secret, "issuer": issuer,
                                     "algorithm": "SHA1", "digits": str(DIGITS),

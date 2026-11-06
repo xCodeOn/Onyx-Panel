@@ -345,7 +345,11 @@ def _find_go():
     which = shutil.which("go")
     if which:
         return Path(which)
-    raise RuntimeError("Go не найден. Переустановите панель — toolchain входит в пакет.")
+    # The panel ships prebuilt binaries only; nothing installs a Go toolchain
+    # on the server. Source mode is an expert fallback — bring your own.
+    raise RuntimeError(
+        "Go не найден. Панель поставляет только готовые бинарники; для сборки из исходников "
+        "установите Go и make вручную (например: apt-get install -y golang-go make).")
 
 
 def _active_awg_units():
@@ -434,13 +438,16 @@ def _install(component, tag, directory, progress=None, asset_url=None):
             raise RuntimeError("Не удалось скачать исходники AmneziaWG.")
         srcdir = directory / "src"
         _safe_extract_sources(archive, srcdir, "amneziawg-go-" + tag[1:])
+        # _safe_extract_sources keeps the archive's top-level directory, so the
+        # sources (and the built binary) live under the prefix subdirectory.
+        builddir = srcdir / ("amneziawg-go-" + tag[1:])
         env = {**os.environ, "PATH": str(go.parent) + ":" + os.environ.get("PATH", "")}
         report("Собираем из исходников — это занимает несколько минут…")
-        build = _run(["make", "-C", str(srcdir)], timeout=900, env=env)
-        if build.returncode or not (srcdir / "amneziawg-go").is_file():
+        build = _run(["make", "-C", str(builddir)], timeout=900, env=env)
+        if build.returncode or not (builddir / "amneziawg-go").is_file():
             tail = (build.stderr or build.stdout or "")[-400:]
             raise RuntimeError("Сборка AmneziaWG не удалась. " + tail)
-        shutil.copy2(srcdir / "amneziawg-go", candidate)
+        shutil.copy2(builddir / "amneziawg-go", candidate)
         os.chmod(candidate, 0o755)
         report("Проверяем собранный бинарник…")
         if _run(["readelf", "-h", str(candidate)], timeout=10).returncode:
@@ -455,7 +462,8 @@ def _install(component, tag, directory, progress=None, asset_url=None):
             raise RuntimeError("Локальный пакет панели не найден (/opt/onyx-panel-package).")
         srcdir = directory / "relay"
         _safe_extract_sources(bundle, srcdir, RELAY_PREFIX)
-        installer = srcdir / "deploy" / "install-mtproxy.sh"
+        # _safe_extract_sources keeps the archive's top-level prefix directory.
+        installer = srcdir / RELAY_PREFIX / "deploy" / "install-mtproxy.sh"
         if not installer.is_file():
             raise RuntimeError("В пакете нет установщика MTProxy.")
         os.chmod(installer, 0o700)

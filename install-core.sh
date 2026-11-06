@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.10.0')}"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.11.0')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -96,7 +96,15 @@ CADDY_SERVICE_EXISTS=0
 MT_PORT=2398
 TPROXY_REF="52a5feb7fac38f68da5afef9cedd9b3bfc8473ca"
 TPROXY_SOURCE_BUNDLED="${BASE}/assets/tproxy-server-52a5feb.tar.gz"
-TPROXY_SOURCE_SHA256="766e0cc14b16f035ddf10d56391b96885996b0cc36e01aaa8246fd08b8aeefcc"
+# sha256 of the UNCOMPRESSED tar stream, not the .tar.gz file: gzip headers
+# embed a timestamp, so the byte hash of the archive changes on every rebuild
+# while the content stays identical to the pinned commit.
+TPROXY_SOURCE_SHA256="af065b07c532236d6576edb7ed7f14f2fabc46b8029a75627f1a1e00cc132c9a"
+# sha256 pins of the two binaries built in CI from the pinned refs. The
+# committed assets/ copies and the release bundle must both match these, so a
+# tampered mirror bundle can never swap in a different ELF.
+MTPROTO_PROXY_SHA256="0163375923b6bf742ad5620c75a3b5c829afc4da460a817ea2d99576aa5bda91"
+TPROXY_SERVER_SHA256="5265aad5c26f88e1029ae5065017e628e1b6d62e15f95d559d1e2f2e79aaebe8"
 
 trim() {
     local s="$1"
@@ -332,8 +340,7 @@ ui_stage "Установка зависимостей"
 export DEBIAN_FRONTEND=noninteractive
 onyx_apt_update_once
 ui_run_with_progress "Установка системных зависимостей" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
-    ca-certificates curl git openssl dnsutils nftables \
-    build-essential libssl-dev util-linux zlib1g-dev
+    ca-certificates curl git openssl dnsutils nftables util-linux
 echo "      OK"
 
 # Direct MTProto must bypass any HTTPS/CDN proxy in front of the site domain.
@@ -498,7 +505,7 @@ if [[ "$(cat "$TPROXY_CACHE_SHA" 2>/dev/null || true)" == "$TPROXY_SOURCE_SHA256
     mkdir -p "$REPO_DIR"
     cp -a "$TPROXY_CACHE_DIR/." "$REPO_DIR/"
 elif [[ -s "$TPROXY_SOURCE_BUNDLED" ]] &&
-   echo "$TPROXY_SOURCE_SHA256  $TPROXY_SOURCE_BUNDLED" | sha256sum -c - >/dev/null 2>&1; then
+   [[ "$(gzip -dc "$TPROXY_SOURCE_BUNDLED" 2>/dev/null | sha256sum | awk '{print $1}')" == "$TPROXY_SOURCE_SHA256" ]]; then
     echo "      Extracting pinned tproxy-server release source included with this release..."
     rm -rf "$REPO_DIR"
     mkdir -p "$REPO_DIR"
@@ -566,6 +573,8 @@ if [[ "$REUSE_MT" != "1" ]]; then
     if [[ ! -s "${BASE}/assets/mtproto-proxy-linux-amd64" ]]; then
         die "Prebuilt MTProto proxy binary is missing from assets/ (release bundle was not fetched). The installer no longer builds MTProto on the server."
     fi
+    echo "$MTPROTO_PROXY_SHA256  ${BASE}/assets/mtproto-proxy-linux-amd64" | sha256sum -c - >/dev/null ||
+        die "MTProto proxy binary checksum verification failed."
     echo "      Installing prebuilt MTProto proxy shipped with this release (build skipped)."
     install -d -o root -g root -m 0755 /opt/MTProxy/objs/bin
     install -o root -g root -m 0755 \
@@ -573,17 +582,19 @@ if [[ "$REUSE_MT" != "1" ]]; then
         /opt/MTProxy/objs/bin/mtproto-proxy
     printf '%s\n' "f36d8af769ffaeac36978d38c2c0f6d1104c2137" > /opt/MTProxy/.tproxy-commit
     chmod 0644 /opt/MTProxy/.tproxy-commit
-    # The pinned upstream installer invokes apt-get without a lock timeout.
-    # Ubuntu may start unattended-upgrades between our dependency step and
-    # this call, so add the same bounded wait used by the main installer.
+    # The pinned upstream installer runs its own apt-get update and installs
+    # the build toolchain. The package lists are already fresh from
+    # onyx_apt_update_once above, and the prebuilt binary below makes the
+    # compiler toolchain unnecessary, so strip both: the update becomes a
+    # no-op and the install keeps only the download/runtime packages.
     MT_INSTALLER="$REPO_DIR/deploy/install-mtproxy.sh"
     grep -Fxq 'apt-get update' "$MT_INSTALLER" ||
         die "Unexpected pinned MTProxy installer: apt update command not found."
     grep -Fxq 'apt-get install -y --no-install-recommends ca-certificates curl build-essential libssl-dev util-linux zlib1g-dev' "$MT_INSTALLER" ||
         die "Unexpected pinned MTProxy installer: apt install command not found."
     sed -i \
-        -e 's/^apt-get update$/apt-get -o DPkg::Lock::Timeout=600 update/' \
-        -e 's/^apt-get install /apt-get -o DPkg::Lock::Timeout=600 install /' \
+        -e 's/^apt-get update$/:/' \
+        -e 's/^apt-get install -y --no-install-recommends ca-certificates curl build-essential libssl-dev util-linux zlib1g-dev$/apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends ca-certificates curl util-linux/' \
         "$MT_INSTALLER"
     # Resilient downloads inside the pinned installer: run it under a curl
     # shim that retries GitHub through mirrors and falls back to the bundled
@@ -640,6 +651,8 @@ echo "      Installing relay..."
 if [[ "$REUSE_RELAY" == "1" ]]; then
     echo "      Healthy tproxy-server already exists; binary install skipped."
 elif [[ -s "${BASE}/assets/tproxy-server-linux-amd64" ]]; then
+    echo "$TPROXY_SERVER_SHA256  ${BASE}/assets/tproxy-server-linux-amd64" | sha256sum -c - >/dev/null ||
+        die "tproxy-server binary checksum verification failed."
     echo "      Installing prebuilt tproxy-server shipped with this release (build skipped)."
     install -o root -g root -m 0755 \
         "${BASE}/assets/tproxy-server-linux-amd64" \
