@@ -8,7 +8,7 @@ export GIT_TERMINAL_PROMPT=0
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
-VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.0')}"
+VERSION="${ONYX_PANEL_VERSION:-$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.1')}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 
 # Visual kit: banner, colored stages, explained red errors (see install-final.sh).
@@ -103,7 +103,7 @@ TPROXY_SOURCE_SHA256="af065b07c532236d6576edb7ed7f14f2fabc46b8029a75627f1a1e00cc
 # sha256 pins of the two binaries built in CI from the pinned refs. The
 # committed assets/ copies and the release bundle must both match these, so a
 # tampered mirror bundle can never swap in a different ELF.
-MTPROTO_PROXY_SHA256="0163375923b6bf742ad5620c75a3b5c829afc4da460a817ea2d99576aa5bda91"
+MTPROTO_PROXY_SHA256="fe65da66fefc2501f7d7958044b222b313da25e7a025aa0df6a5236d14fa893a"
 TPROXY_SERVER_SHA256="5265aad5c26f88e1029ae5065017e628e1b6d62e15f95d559d1e2f2e79aaebe8"
 
 trim() {

@@ -223,11 +223,18 @@ jobs:
           # C builds are not byte-reproducible across runner toolchain updates
           # (gcc drift), so the fresh binary is a compile check only: the
           # bundle ships the committed, hash-pinned assets/ copy instead.
-          git clone --quiet https://github.com/TelegramMessenger/MTProxy.git /tmp/MTProxy
-          git -C /tmp/MTProxy checkout --quiet \
-            f36d8af769ffaeac36978d38c2c0f6d1104c2137
-          make -C /tmp/MTProxy -j"$(nproc)"
-          test -x /tmp/MTProxy/objs/bin/mtproto-proxy
+          # The build runs on the Ubuntu 22.04 userland so the shipped binary
+          # never requires a glibc newer than our oldest supported server OS.
+          docker run --rm ubuntu:22.04 bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends build-essential libssl-dev zlib1g-dev git ca-certificates >/dev/null
+            git clone --quiet https://github.com/TelegramMessenger/MTProxy.git /tmp/MTProxy
+            git -C /tmp/MTProxy checkout --quiet f36d8af769ffaeac36978d38c2c0f6d1104c2137
+            make -C /tmp/MTProxy -j"$(nproc)"
+            test -x /tmp/MTProxy/objs/bin/mtproto-proxy
+          '
 
       - name: Fetch official Xray and Caddy archives
         run: |
