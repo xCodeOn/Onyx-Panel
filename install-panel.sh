@@ -43,7 +43,7 @@ else
         return 1
     }
     onyx_apt_update_once() {
-        local stamp="${ONYX_APT_STAMP:-/tmp/onyx-apt-updated}"
+        local stamp="${ONYX_APT_STAMP:-/run/lock/onyx-apt-updated}"
         if [[ -f "$stamp" ]] && [[ -z "$(find "$stamp" -mmin +1440 2>/dev/null)" ]]; then
             return 0
         fi
@@ -94,7 +94,11 @@ PORT=8090
 DOMAIN="${ONYX_PANEL_DOMAIN:-$(sed -n 's/^Environment=TPROXY_HOSTNAME=//p' /etc/systemd/system/caddy.service.d/tproxy.conf 2>/dev/null | head -n1 || true)}"
 ACME_EMAIL="${ONYX_PANEL_ACME_EMAIL:-$(sed -n 's/^Environment=ACME_EMAIL=//p' /etc/systemd/system/caddy.service.d/tproxy.conf 2>/dev/null | head -n1 || true)}"
 MTPROTO_HOST="$(cat /etc/onyx-panel/mtproto-host 2>/dev/null || true)"
-MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
+# The file is reused in an unquoted systemd-unit heredoc: accept only a plain
+# IPv4 address, otherwise fall back to the panel domain.
+if [[ ! "$MTPROTO_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    MTPROTO_HOST="$DOMAIN"
+fi
 PANEL_PATH="/panel-$(openssl rand -hex 16)"
 UPDATING="${ONYX_PANEL_UPDATE:-0}"
 # Set by update.sh when component pins are unchanged: keep the proxies
@@ -121,7 +125,7 @@ OPENFLUX_SHA256="c90cb197e4ba7c288a55e864f707f53dc82695c6f66ebc42418aba5e05ad7d5
 OPENFLUX_BUNDLED="${BASE}/assets/OpenFlux-linux-amd64"
 # v2.3.6 was published with the bundled binary at the repository root while
 # the installer expected assets/. Accept both layouts so an in-place update
-# never falls back to a large external download solely because of packaging.
+# never fails solely because of packaging.
 if [[ ! -s "$OPENFLUX_BUNDLED" && -s "${BASE}/OpenFlux-linux-amd64" ]]; then
     OPENFLUX_BUNDLED="${BASE}/OpenFlux-linux-amd64"
 fi
@@ -220,67 +224,18 @@ if ! command -v ip >/dev/null 2>&1; then
     ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends iproute2
 fi
 if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --version 2>&1 | grep -Fq "$AWG_GO_VERSION"; then
-    if [[ -s "$AWG_GO_BUNDLED" ]] && echo "${AWG_GO_SHA256}  ${AWG_GO_BUNDLED}" | sha256sum -c - >/dev/null; then
-        install -o root -g root -m 0755 "$AWG_GO_BUNDLED" /usr/local/bin/amneziawg-go
-    else
-        if ! command -v git >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
-            onyx_apt_update_once
-            ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git build-essential
-        fi
-        GO_BIN="$(find /opt -maxdepth 3 -type f -path '/opt/go*/bin/go' -print -quit 2>/dev/null || true)"
-        [[ -x "$GO_BIN" ]] || GO_BIN="$(command -v go || true)"
-        [[ -x "$GO_BIN" ]] || die "Bundled AmneziaWG binary is missing or damaged and the Go compiler is unavailable."
-        AWG_GO_SOURCE="$(mktemp -d /tmp/onyx-awg-go.XXXXXX)"
-        if [[ -s "$AWG_GO_SOURCE_BUNDLED" ]] &&
-           echo "$AWG_GO_SOURCE_SHA256  $AWG_GO_SOURCE_BUNDLED" | sha256sum -c - >/dev/null 2>&1; then
-            echo "      Using the AmneziaWG Go source included with this release."
-            tar -xzf "$AWG_GO_SOURCE_BUNDLED" -C "$AWG_GO_SOURCE" --strip-components=1 --no-same-owner
-        else
-            if ! command -v git >/dev/null 2>&1; then
-                onyx_apt_update_once
-                ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends git
-            fi
-            onyx_git_fetch_pinned "$AWG_GO_SOURCE" "https://github.com/amnezia-vpn/amneziawg-go.git" \
-                "$AWG_GO_VERSION" tag "$AWG_GO_COMMIT" "$AWG_GO_SOURCE_SHA256" ||
-                die "Could not download the AmneziaWG Go source: GitHub и зеркала недоступны."
-        fi
-        (cd "$AWG_GO_SOURCE" && PATH="$(dirname "$GO_BIN"):$PATH" make amneziawg-go)
-        install -o root -g root -m 0755 "$AWG_GO_SOURCE/amneziawg-go" /usr/local/bin/amneziawg-go
-        rm -rf "$AWG_GO_SOURCE"
-    fi
+    [[ -s "$AWG_GO_BUNDLED" ]] && echo "${AWG_GO_SHA256}  ${AWG_GO_BUNDLED}" | sha256sum -c - >/dev/null ||
+        die "Prebuilt AmneziaWG core binary is missing or damaged in assets/ (release bundle was not fetched). The installer no longer builds amneziawg-go on the server."
+    install -o root -g root -m 0755 "$AWG_GO_BUNDLED" /usr/local/bin/amneziawg-go
     AWG_INSTALLED_NOW=1
 fi
 if [[ ! -x /usr/local/bin/awg ]] || ! /usr/local/bin/awg --version 2>&1 | grep -Fq "${AWG_TOOLS_VERSION#v}"; then
-    if [[ -s "$AWG_BIN_BUNDLED" && -s "$AWG_QUICK_BUNDLED" ]] && \
-       echo "${AWG_BIN_SHA256}  ${AWG_BIN_BUNDLED}" | sha256sum -c - >/dev/null && \
-       echo "${AWG_QUICK_SHA256}  ${AWG_QUICK_BUNDLED}" | sha256sum -c - >/dev/null; then
-        install -o root -g root -m 0755 "$AWG_BIN_BUNDLED" /usr/local/bin/awg
-        install -o root -g root -m 0755 "$AWG_QUICK_BUNDLED" /usr/local/bin/awg-quick
-    else
-        if ! command -v unzip >/dev/null 2>&1; then
-            onyx_apt_update_once
-            ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends unzip
-        fi
-        AWG_TOOLS_ARCHIVE="$(mktemp /tmp/onyx-awg-tools.XXXXXX.zip)"
-        AWG_TOOLS_DIR="$(mktemp -d /tmp/onyx-awg-tools.XXXXXX)"
-        if [[ -s "$AWG_TOOLS_BUNDLED" ]]; then
-            echo "      Using the AmneziaWG tools included with this release."
-            cp "$AWG_TOOLS_BUNDLED" "$AWG_TOOLS_ARCHIVE"
-        else
-            echo "      AmneziaWG tools archive not found in assets/; downloading it..."
-            onyx_fetch "$AWG_TOOLS_ARCHIVE" \
-                "https://github.com/amnezia-vpn/amneziawg-tools/releases/download/${AWG_TOOLS_VERSION}/ubuntu-22.04-amneziawg-tools.zip" ||
-                die "Could not download the AmneziaWG tools archive: GitHub и зеркала недоступны."
-        fi
-        echo "${AWG_TOOLS_SHA256}  ${AWG_TOOLS_ARCHIVE}" | sha256sum -c - >/dev/null || die "AmneziaWG tools checksum verification failed."
-        unzip -q "$AWG_TOOLS_ARCHIVE" -d "$AWG_TOOLS_DIR"
-        AWG_TOOLS_UNPACKED="$AWG_TOOLS_DIR/ubuntu-22.04-amneziawg-tools"
-        (cd "$AWG_TOOLS_UNPACKED" && sha256sum -c awg.sha256 >/dev/null && sha256sum -c awg-quick.sha256 >/dev/null) || die "AmneziaWG tools files verification failed."
-        install -o root -g root -m 0755 "$AWG_TOOLS_UNPACKED/awg" /usr/local/bin/awg
-        install -o root -g root -m 0755 "$AWG_TOOLS_UNPACKED/awg-quick" /usr/local/bin/awg-quick
-        rm -f "$AWG_TOOLS_ARCHIVE"
-        rm -rf "$AWG_TOOLS_DIR"
-    fi
+    [[ -s "$AWG_BIN_BUNDLED" && -s "$AWG_QUICK_BUNDLED" ]] &&
+        echo "${AWG_BIN_SHA256}  ${AWG_BIN_BUNDLED}" | sha256sum -c - >/dev/null &&
+        echo "${AWG_QUICK_SHA256}  ${AWG_QUICK_BUNDLED}" | sha256sum -c - >/dev/null ||
+        die "Prebuilt AmneziaWG tools binaries are missing or damaged in assets/ (release bundle was not fetched). The installer no longer downloads/builds tools on the server."
+    install -o root -g root -m 0755 "$AWG_BIN_BUNDLED" /usr/local/bin/awg
+    install -o root -g root -m 0755 "$AWG_QUICK_BUNDLED" /usr/local/bin/awg-quick
     AWG_INSTALLED_NOW=1
 fi
 /usr/local/bin/awg --version >/dev/null || die "AmneziaWG tools verification failed."
@@ -476,15 +431,10 @@ elif [[ ! -x "$XRAY_BIN" ]] || ! "$XRAY_BIN" version 2>/dev/null | grep -q "${XR
     XRAY_ARCHIVE="$(mktemp /tmp/onyx-panel-xray.XXXXXX.zip)"
     XRAY_UNPACK="$(mktemp -d /tmp/onyx-panel-xray.XXXXXX)"
     XRAY_BUNDLED="${BASE}/assets/Xray-linux-64.zip"
-    if [[ -s "$XRAY_BUNDLED" ]]; then
-        echo "      Using Xray included with this release."
-        cp "$XRAY_BUNDLED" "$XRAY_ARCHIVE"
-    else
-        echo "      Xray archive not found in assets/; downloading it..."
-        onyx_fetch "$XRAY_ARCHIVE" \
-            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" ||
-            die "Could not download Xray: GitHub и зеркала недоступны."
-    fi
+    [[ -s "$XRAY_BUNDLED" ]] ||
+        die "Prebuilt Xray archive is missing from assets/ (release bundle was not fetched). The installer no longer downloads Xray on the server."
+    echo "      Using Xray included with this release."
+    cp "$XRAY_BUNDLED" "$XRAY_ARCHIVE"
     echo "${XRAY_SHA256}  ${XRAY_ARCHIVE}" | sha256sum -c - >/dev/null || die "Xray checksum verification failed."
     unzip -q "$XRAY_ARCHIVE" xray -d "$XRAY_UNPACK"
     install -o root -g root -m 0755 "$XRAY_UNPACK/xray" "$XRAY_BIN"
@@ -507,14 +457,11 @@ else
         echo "      Using geo databases included with this release."
         unzip -q -o "${BASE}/assets/Xray-linux-64.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
     elif [[ -n "${XRAY_ARCHIVE_KEPT:-}" && -s "$XRAY_ARCHIVE_KEPT" ]]; then
-        echo "      Using geo databases from the downloaded Xray archive."
+        echo "      Using geo databases from the bundled Xray archive."
         unzip -q -o "$XRAY_ARCHIVE_KEPT" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
         rm -f "$XRAY_ARCHIVE_KEPT"
     else
-        onyx_fetch "$XRAY_GEO_TMP/geo.zip" \
-            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
-        && unzip -q -o "$XRAY_GEO_TMP/geo.zip" geoip.dat geosite.dat -d "$XRAY_GEO_TMP" && GEO_ZIPPED=1
-        rm -f "$XRAY_GEO_TMP/geo.zip"
+        die "Xray geo databases are missing — the bundled Xray archive was not fetched."
     fi
     if [[ "$GEO_ZIPPED" == 1 ]]; then
         install -o root -g root -m 0644 "$XRAY_GEO_TMP/geoip.dat" "$XRAY_GEO_TMP/geosite.dat" "$XRAY_ROOT/"
@@ -536,18 +483,11 @@ install -d -o root -g root -m 0755 "$OPENFLUX_ROOT"
 if [[ -x "$OPENFLUX_BIN" && -s "$OPENFLUX_ROOT/version" ]]; then
     echo "      OpenFlux $(cat "$OPENFLUX_ROOT/version") установлен менеджером компонентов — сохраняем версию."
 elif [[ ! -x "$OPENFLUX_BIN" ]] || ! sha256sum "$OPENFLUX_BIN" | grep -q "^${OPENFLUX_SHA256}  "; then
-    if [[ -s "$OPENFLUX_BUNDLED" ]]; then
-        OPENFLUX_DOWNLOAD="$OPENFLUX_BUNDLED"
-        echo "      Using OpenFlux included with this release."
-    else
-        OPENFLUX_DOWNLOAD="$(mktemp /tmp/onyx-panel-openflux.XXXXXX)"
-        onyx_fetch "$OPENFLUX_DOWNLOAD" \
-            "https://github.com/damnurmum/OpenFlux-Android/releases/download/v${OPENFLUX_VERSION}/openflux-linux-amd64" ||
-            die "Could not download OpenFlux: GitHub и зеркала недоступны."
-    fi
-    echo "${OPENFLUX_SHA256}  ${OPENFLUX_DOWNLOAD}" | sha256sum -c - >/dev/null || die "OpenFlux checksum verification failed."
-    install -o root -g root -m 0755 "$OPENFLUX_DOWNLOAD" "$OPENFLUX_BIN"
-    [[ "$OPENFLUX_DOWNLOAD" == "$OPENFLUX_BUNDLED" ]] || rm -f "$OPENFLUX_DOWNLOAD"
+    [[ -s "$OPENFLUX_BUNDLED" ]] ||
+        die "Prebuilt OpenFlux binary is missing from assets/ (release bundle was not fetched). The installer no longer downloads OpenFlux on the server."
+    echo "      Using OpenFlux included with this release."
+    echo "${OPENFLUX_SHA256}  ${OPENFLUX_BUNDLED}" | sha256sum -c - >/dev/null || die "OpenFlux checksum verification failed."
+    install -o root -g root -m 0755 "$OPENFLUX_BUNDLED" "$OPENFLUX_BIN"
     printf '%s\n' "$OPENFLUX_VERSION" > "$OPENFLUX_ROOT/version"
     chmod 0644 "$OPENFLUX_ROOT/version"
 else
@@ -920,8 +860,11 @@ def sync_firewall(d):
         lines.append("nft 'add rule inet onyx_panel input udp dport %d counter accept'" % TUIC_PORT)
     # Hopping ports are extra public TCP listeners that clone the Reality
     # inbound; without an accept rule the panel would open them in Xray only.
+    # Открываем порты только когда Xray реально их слушает: reality-inbound
+    # существует лишь при включённом Reality и наличии vless-клиентов.
     reality_state=onyx_reality.load(REALITY_FILE)
-    hop_ports=[int(p) for p in bypass["hopping_ports"] if reality_state.get("enabled") or not reality_state]
+    reality_live=onyx_reality.inbound(reality_state,d.get("users",[])) is not None
+    hop_ports=[int(p) for p in bypass["hopping_ports"] if reality_live]
     for hop in hop_ports:
         lines.append("nft 'add rule inet onyx_panel input tcp dport %d counter accept'" % hop)
     for u in awg_users:
@@ -950,7 +893,7 @@ def sync_firewall(d):
     route=run("ip","-4","route","show","default").stdout or ""
     match=re.search(r"\bdev\s+([A-Za-z0-9_.:-]+)",route)
     external_if=match.group(1) if match else ""
-    reality_tcp={int(reality_state["port"])} if reality_state.get("enabled") else set()
+    reality_tcp={int(reality_state["port"])} if reality_live else set()
     onyx_firewall.reconcile(
         tcp={80,443,*mtproto_ports,*reality_tcp,*hop_ports},
         udp=({HYSTERIA_PORT} if hysteria_enabled else set()) | ({TUIC_PORT} if tuic_enabled else set()) | {int(u["backend_port"]) for u in awg_users},
@@ -1110,9 +1053,11 @@ def sync_xray(d):
         config["routing"]={"rules":extra_rules}
     # leastPing: observatory + balancer поверх каскадов; без активных каскадов
     # или при выключенной опции возвращается None и конфиг не меняется.
+    # Балансеры валидны только в routing.balancers, observatory — верхний уровень.
     balancer=onyx_cascade.xray_balancer(onyx_cascade.load_cascades(CASCADES_FILE),bypass["least_ping"])
     if balancer:
-        config.update(balancer)
+        config["observatory"]=balancer["observatory"]
+        config.setdefault("routing",{})["balancers"]=balancer["balancers"]
     # Xray selects the configuration parser from the final extension.  A name
     # such as config.json.tmp is rejected before JSON parsing, so keep .json
     # as the temporary file's last suffix.
@@ -3404,11 +3349,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_data("Статус временно недоступен.",503)
             return
         if path==PANEL_PATH+"/gdrive-callback":
-            code=parse_qs(urlparse(self.path).query).get("code",[""])[0]
-            error=parse_qs(urlparse(self.path).query).get("error",[""])[0]
+            # OAuth callback: только с активной admin-сессией (SameSite=Lax
+            # шлёт cookie на top-level редиректе от Google) и валидным state.
+            if not self.auth():
+                self.send_response(303); self.send_header("Location",PANEL_PATH+"/login"); self.end_headers(); return
+            query=parse_qs(urlparse(self.path).query)
+            code=query.get("code",[""])[0]
+            error=query.get("error",[""])[0]
+            state=query.get("state",[""])[0]
             try:
                 if error: raise RuntimeError("Google вернул отказ: "+error)
-                onyx_cloud.gdrive_exchange(code,public_base_url()+PANEL_PATH+"/gdrive-callback")
+                onyx_cloud.gdrive_exchange(code,public_base_url()+PANEL_PATH+"/gdrive-callback",state)
+                audit("cloud-connect","gdrive","Google Drive подключён по OAuth")
                 self.send_html('<!doctype html><meta charset=utf-8><meta http-equiv="refresh" content="2;'+PANEL_PATH+'/settings"><p style="font:15px system-ui;padding:24px">Google Drive подключён. Открываем настройки…</p>')
             except Exception as exc:
                 self.send_html('<!doctype html><meta charset=utf-8><p style="font:15px system-ui;padding:24px">Не удалось подключить Google Drive: '+esc(str(exc)[:200])+'</p>',400)
@@ -3767,7 +3719,7 @@ class Handler(BaseHTTPRequestHandler):
             plans_cfg=[p for p in (d.get("plans") or []) if isinstance(p,dict)]
             trial_cfg=d.get("trial") if isinstance(d.get("trial"),dict) else {}
             promo_cfg=onyx_promo.normalize(d.get("promo") if isinstance(d.get("promo"),dict) else {})
-            promo_rows=''.join(f'<div class="api-key-row"><b>{esc(c.get("code",""))}</b><span class="muted">+{int(c.get("bonus_days",0))} дн. · {"без лимита" if not c.get("max_uses") else "%d/%d"%(c.get("used",0),c.get("max_uses"))}</span><form method="post" action="{PANEL_PATH}/promo-delete"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="code" value="{esc(c.get("code",""))}"><button class="danger">Удалить</button></form></div>' for c in promo_cfg.get("codes",[])) or '<p class="muted" style="font-size:12px;margin:6px 0">Промокодов пока нет.</p>'
+            promo_rows=''.join(f'<div class="api-key-row"><b>{esc(c.get("code",""))}</b><span class="muted">+{int(c.get("bonus_days",0))} дн. · {"без лимита" if not c.get("max_uses") else "%d/%d"%(c.get("used",0),c.get("max_uses"))}</span><form method="post" action="{PANEL_PATH}/promo-delete"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="code" value="{esc(c.get("code",""))}"><button class="danger">Удалить</button></form></div>' for c in (dict(v,code=k) for k,v in (promo_cfg.get("codes") or {}).items() if isinstance(v,dict))) or '<p class="muted" style="font-size:12px;margin:6px 0">Промокодов пока нет.</p>'
             plan_rows=''.join(f'<div class="api-key-row"><b>{esc(p.get("name",""))}</b><span class="muted">{int(p.get("days",30))} дн. · {int(p.get("max_devices",0))} устр. · {" + ".join({"vless":"VLESS","hysteria":"Hysteria2","tuic":"TUIC 5"}.get(x,x) for x in p.get("protocols",[]))}{" · %d ГБ/мес"%int(p.get("limit_gb",0)) if p.get("limit_gb") else ""}</span><form method="post" action="{PANEL_PATH}/plans-save" data-confirm="Удалить тариф?"><input type="hidden" name="csrf" value="{token}"><input type="hidden" name="operation" value="delete"><input type="hidden" name="id" value="{esc(p.get("id",""))}"><button class="danger">Удалить</button></form></div>' for p in plans_cfg) or '<p class="muted" style="font-size:12px;margin:6px 0">Тарифов пока нет.</p>'
             plans_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Тарифы и триал</h2><p>Готовые наборы для новых клиентов: срок, устройства и лимит в один клик</p></div>{card_expand()}</div>
 <div class="card-body">
@@ -4137,7 +4089,22 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
             if admin_ok or observer_ok:
                 role="admin" if admin_ok else "observer"
                 totp=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
-                if totp.get("enabled") and totp.get("secret") and not onyx_totp.verify(totp["secret"],form.get("code","")):
+                totp_reject=False
+                if totp.get("enabled") and totp.get("secret"):
+                    # RFC 6238 5.2: verify + сверка last_counter + запись —
+                    # атомарно под STATE_LOCK, иначе два параллельных логина
+                    # с одним кодом оба пройдут (TOCTOU).
+                    with STATE_LOCK:
+                        d2=load(); t2=d2.get("totp",{}) if isinstance(d2.get("totp"),dict) else {}
+                        counter=onyx_totp.verify_counter(t2.get("secret") or totp["secret"],form.get("code",""))
+                        try:
+                            last_counter=int(t2.get("last_counter",-1))
+                        except (TypeError,ValueError):
+                            last_counter=-1
+                        totp_reject=counter is None or counter<=last_counter
+                        if not totp_reject:
+                            t2["last_counter"]=counter; d2["totp"]=t2; save(d2)
+                if totp_reject:
                     login_failed(client)
                     if async_action:
                         login_json(False,"Неверный код 2FA","code",401)
@@ -4312,7 +4279,11 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
                             if async_delete:
                                 self.send_json({"ok":False,"message":str(exc),"can_force":True}); return
                             raise
-                    node_api.save_nodes(NODES_FILE,[n for n in nodes if n.get("id")!=uid])
+                    with node_api.registry_lock():
+                        # Перечитываем под замком: purge_profiles ходил по сети,
+                        # за это время реестр мог измениться (гонка с add/sync).
+                        fresh_nodes=node_api.load_nodes(NODES_FILE)
+                        node_api.save_nodes(NODES_FILE,[n for n in fresh_nodes if n.get("id")!=uid])
                     audit('node-delete',uid,(selected.get("name","") or selected.get("url",""))+(" (принудительно)" if force else ""))
                     if async_delete:
                         self.send_json({"ok":True}); return
@@ -5018,6 +4989,20 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
         if path==PANEL_PATH+"/totp-setup":
             with STATE_LOCK:
                 d=load()
+                t=d.get("totp",{}) if isinstance(d.get("totp"),dict) else {}
+                # Пересоздание секрета при включённой 2FA отключает защиту:
+                # требуем действующий код, как при totp-disable.
+                if t.get("enabled") and t.get("secret"):
+                    code=form.get("code","").strip()
+                    counter=onyx_totp.verify_counter(t["secret"],code)
+                    try:
+                        last_counter=int(t.get("last_counter",-1))
+                    except (TypeError,ValueError):
+                        last_counter=-1
+                    # Тот же replay-контроль, что и на логине: код с прошлого
+                    # входа не должен подходить для пересоздания секрета.
+                    if counter is None or counter<=last_counter:
+                        self.send_json({"ok":False,"message":"2FA уже включена. Введите текущий код, чтобы пересоздать секрет."},400); return
                 secret=onyx_totp.generate_secret()
                 d["totp"]={"secret":secret,"enabled":False}; save(d)
                 account=d.get("admin",{}).get("user","admin")
@@ -6659,8 +6644,14 @@ def _diag_dns():
 
 @_diag_check("TLS-сертификат")
 def _diag_cert():
-    run=subprocess.run(["sh","-c","echo | openssl s_client -connect %s:443 -servername %s 2>/dev/null | openssl x509 -noout -enddate"%(DOMAIN,DOMAIN)],
-        capture_output=True,text=True,timeout=25)
+    # Без sh -c: домен — из env установщика, но shell-интерполяции в панели
+    # не место в принципе (сегодня env, завтра — поле в UI).
+    if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}",DOMAIN or ""):
+        return False,"Домен панели содержит недопустимые символы."
+    probe=subprocess.run(["openssl","s_client","-connect",DOMAIN+":443","-servername",DOMAIN],
+        input="",capture_output=True,text=True,timeout=25)
+    run=subprocess.run(["openssl","x509","-noout","-enddate"],
+        input=probe.stdout,capture_output=True,text=True,timeout=25)
     m=re.search(r"notAfter=(.+)",run.stdout or "")
     if not m: return False,"Не удалось прочитать сертификат."
     import calendar
@@ -6913,32 +6904,50 @@ def censor_worker():
 DEFENSE_STATE={"running":False,"banned":0}
 def defense_worker():
     # Ханипот включается/выключается вместе с тумблером в настройках обхода;
-    # бэкенд — onyx_defense.start в отдельном потоке ядра.
+    # слушатель — поток onyx_defense внутри ядра, остановка — onyx_defense.stop().
+    # Если поток умер (например, порт был занят при старте) — поднимаем заново.
     was_on=False
     while True:
         try:
             with STATE_LOCK: d=load()
             on=bool((d.get("bypass") or {}).get("honeypot",False))
-            if on and not was_on:
-                DEFENSE_STATE["running"]=True
-                threading.Thread(target=_defense_run,daemon=True).start()
+            if on:
+                if not onyx_defense.running():
+                    port=onyx_defense.normalize_state(d.get("defense")).get("port",onyx_defense.DEFAULT_PORT)
+                    onyx_defense.start(port=port,on_hit=_defense_on_hit,on_ban=_defense_on_ban)
+                DEFENSE_STATE["running"]=onyx_defense.running()
+            elif was_on:
+                onyx_defense.stop()
+                DEFENSE_STATE["running"]=False
             was_on=on
         except Exception as exc:
             print("defense worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
         time.sleep(30)
 
-def _defense_run():
-    def on_ban(source_ip):
-        try:
-            subprocess.run(onyx_defense.ban_command(source_ip).split(),capture_output=True,timeout=10)
-            DEFENSE_STATE["banned"]+=1
-        except Exception: pass
+def _defense_on_hit(source_ip,port,kind):
+    # Каждый коннект на ханипот — в журнал data.json для вкладки Security,
+    # но не чаще раза в минуту на IP: иначе сканер гоняет полный цикл
+    # load→save data.json тысячами раз и душит STATE_LOCK.
     try:
-        onyx_defense.start(on_ban=on_ban)
-    except Exception as exc:
-        print("defense backend failed:",type(exc).__name__,str(exc)[:120],file=sys.stderr,flush=True)
-    finally:
-        DEFENSE_STATE["running"]=False
+        with STATE_LOCK:
+            d=load()
+            state=onyx_defense.normalize_state(d.get("defense"))
+            journal=state.get("journal") or []
+            now=int(time.time())
+            if any(e.get("ip")==str(source_ip) and now-int(e.get("ts",0))<60 for e in journal[-20:]):
+                return
+            journal,_entry=onyx_defense.note_hit(journal,source_ip,port,kind)
+            state["journal"]=journal
+            d["defense"]=state
+            save(d)
+    except Exception:
+        pass
+
+def _defense_on_ban(source_ip,command):
+    try:
+        subprocess.run(command.split(),capture_output=True,timeout=10)
+        DEFENSE_STATE["banned"]+=1
+    except Exception: pass
 
 def unbound_worker():
     # Watchdog DoT-резолвера: unbound установлен установщиком; если служба
@@ -7570,9 +7579,9 @@ systemctl stop onyx-panel.service 2>/dev/null || true
 pkill -f '[/]opt/onyx-panel/panel\.py' 2>/dev/null || true
 sleep 0.3
 
-if ss -lntp 2>/dev/null | grep -Eq ':8090\\b'; then
+if ss -lntp 2>/dev/null | grep -Eq ':8090\b'; then
     echo "ERROR: 127.0.0.1:8090 is still occupied before starting the panel."
-    ss -lntp 2>/dev/null | grep -E ':8090\\b' || true
+    ss -lntp 2>/dev/null | grep -E ':8090\b' || true
     exit 1
 fi
 
@@ -7664,6 +7673,8 @@ ui_kv "Логин администратора" "${ADMIN}"
 if [[ "$UPDATING" == "1" ]]; then
     ui_kv "Пароль" "сохранён без изменений"
 else
-    ui_kv "Пароль" "${PASS}"
+    # The operator just typed this password: do not echo it into the
+    # terminal scrollback or session logs again.
+    ui_kv "Пароль" "задан при установке (не отображается)"
 fi
 ui_success_end

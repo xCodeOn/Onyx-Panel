@@ -173,6 +173,10 @@ jobs:
           git -C /tmp/tproxy checkout --quiet 52a5feb7fac38f68da5afef9cedd9b3bfc8473ca
           (cd /tmp/tproxy && go build -trimpath -ldflags='-s -w' \
             -o /tmp/build/tproxy-server-linux-amd64 ./cmd/tproxy-server)
+          # The pinned source is bundled too so the installer never has to
+          # fetch it from GitHub on the server (used by the MTProxy installer).
+          git -C /tmp/tproxy archive 52a5feb7fac38f68da5afef9cedd9b3bfc8473ca | \
+            gzip -9 > /tmp/build/tproxy-server-52a5feb.tar.gz
 
       - name: Build MTProto proxy
         run: |
@@ -203,6 +207,7 @@ jobs:
         run: |
           gh release upload "$TAG" \
             /tmp/build/tproxy-server-linux-amd64 \
+            /tmp/build/tproxy-server-52a5feb.tar.gz \
             /tmp/build/mtproto-proxy-linux-amd64 \
             /tmp/build/Xray-linux-64.zip \
             /tmp/build/caddy_2.11.4_linux_amd64.tar.gz \

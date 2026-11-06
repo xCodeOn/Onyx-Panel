@@ -45,50 +45,24 @@ if systemctl is-active --quiet tproxy-server.service &&
     exit 0
 fi
 
-command -v tar >/dev/null 2>&1 || die "tar is required."
-RELAY_SOURCE_BUNDLED="$(cd "$(dirname "$0")" && pwd)/assets/tproxy-server-52a5feb.tar.gz"
-TPROXY_SOURCE_SHA256="2c56987035c7f0b9a3d40907fe9ff8889fd41d1a6dcb7bdd6e0de7784c442bfe"
-
-WORK="$(mktemp -d /tmp/tproxy-relay-update.XXXXXX)"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT
-
-if [[ -s "$RELAY_SOURCE_BUNDLED" ]] &&
-   echo "$TPROXY_SOURCE_SHA256  $RELAY_SOURCE_BUNDLED" | sha256sum -c - >/dev/null 2>&1; then
-    echo "Unpacking the pinned relay source included with Onyx Panel..."
-    mkdir -p "$WORK/source"
-    tar -xzf "$RELAY_SOURCE_BUNDLED" -C "$WORK/source" --strip-components=1 --no-same-owner
-else
-    echo "Bundled relay source not found; fetching the pinned commit from GitHub..."
-    command -v git >/dev/null 2>&1 || die "git is required to fetch the relay source."
-    export GIT_TERMINAL_PROMPT=0
-    mkdir -p "$WORK/source"
-    git -C "$WORK/source" init -q
-    git -C "$WORK/source" remote add origin https://github.com/telegramdesktop/tproxy-server.git
-    git -C "$WORK/source" fetch -q --depth 1 origin "$TPROXY_REF"
-    git -C "$WORK/source" checkout -q --detach FETCH_HEAD
-    [[ "$(git -C "$WORK/source" rev-parse HEAD)" == "$TPROXY_REF" ]] ||
-        die "Pinned relay source verification failed."
+# The relay is never built on the server: the release ships a prebuilt binary
+# (assets/tproxy-server-linux-amd64). Install it and verify it serves; there is
+# no source fetch or compilation fallback any more.
+RELAY_BIN_SOURCE="$(cd "$(dirname "$0")" && pwd)/assets/tproxy-server-linux-amd64"
+if [[ ! -s "$RELAY_BIN_SOURCE" ]]; then
+    die "Prebuilt tproxy-server binary is missing from assets/ (release bundle was not fetched). The updater no longer builds the relay."
 fi
-[[ -f "$WORK/source/deploy/update-relay.sh" ]] ||
-    die "The upstream transactional relay updater is missing."
 
-echo "Testing, building and installing the relay transactionally..."
-# The official updater runs Go tests, validates the candidate against the
-# installed configuration, keeps the previous binary and rolls back when
-# either healthz or readyz regresses.
-# The upstream permission test creates a deliberately readable 0444 fixture
-# with os.WriteFile. Inheriting our 077 mask silently turns it into 0400 and
-# makes the negative permission test fail. Scope the conventional test/build
-# mask to this child only. WORK and upstream mktemp directories stay private;
-# production files are installed with explicit modes by the upstream updater.
-(
-    umask 022
-    bash "$WORK/source/deploy/update-relay.sh"
-)
+echo "Installing the prebuilt relay binary..."
+install -o root -g root -m 0755 "$RELAY_BIN_SOURCE" /usr/local/bin/tproxy-server
+systemctl try-restart tproxy-server.service 2>/dev/null || systemctl restart tproxy-server.service
 
 relay_context
-echo "Testing public CSS through the relay..."
+echo "Testing the relay after installing the prebuilt binary..."
+if ! curl -fsS --max-time 3 http://127.0.0.1:8081/healthz 2>/dev/null | grep -q '^ok$' ||
+   ! curl -fsS --max-time 3 http://127.0.0.1:8081/readyz 2>/dev/null | grep -q '^ready$'; then
+    die "Relay did not become healthy after installing the prebuilt binary."
+fi
 if [[ -n "$CSS_PATH" ]]; then
     curl -kfsSI --max-time 12 "https://${DOMAIN}${CSS_PATH}" | grep -qi '^content-type: text/css' ||
         die "Relay still does not serve the current CSS file."

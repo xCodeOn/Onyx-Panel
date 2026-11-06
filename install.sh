@@ -8,9 +8,9 @@
 #      straight from this repository and installs everything from it:
 #          bash <(curl -fsSL https://raw.githubusercontent.com/xCodeOn/Onyx-Panel/main/install.sh)
 #
-# The panel modules (AmneziaWG binaries, OpenFlux) ship with the release;
-# Xray, Caddy, Go, AmneziaWG tools and the relay source are downloaded from
-# their official repositories during installation.
+# The panel modules and every component binary (AmneziaWG, OpenFlux, Xray,
+# Caddy, tproxy-server relay, MTProto proxy) ship prebuilt with the release;
+# nothing is compiled or downloaded on the server during installation.
 set -Eeuo pipefail
 umask 077
 
@@ -47,7 +47,8 @@ LATEST="$(curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time
     sed -n 's/.*"tag_name":[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' | head -n1 || true)"
 if [[ ! "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "WARNING: could not determine the latest release (GitHub API unreachable or rate-limited)." >&2
-    echo "WARNING: falling back to the main branch — this is NOT a tested release." >&2
+    echo "WARNING: falling back to the main branch — this is NOT a tested release and ships NO prebuilt components." >&2
+    echo "WARNING: the strict installer will fail on the component checks unless you provide the release bundle manually." >&2
     LATEST="main"
 fi
 echo "Onyx Panel: release ${LATEST}..."
@@ -84,8 +85,9 @@ tar -xzf "$WORK/onyx-panel.tar.gz" -C "$WORK/package" --strip-components=1 --no-
 
 # Prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are attached
 # to each release as one bundle. Fetch it so the server never has to build or
-# download those itself. Skipped in the "main" fallback mode (no release yet) —
-# the installer then falls back to building on the server.
+# download those itself. Skipped in the "main" fallback mode (no release yet);
+# without the bundle the strict component checks below will fail, so a real
+# release tag must be used.
 BIN_BUNDLE="onyx-binaries-${LATEST#v}.tar.gz"
 if [[ "$LATEST" != "main" ]]; then
     echo "Onyx Panel: fetching prebuilt components ${BIN_BUNDLE}..."
@@ -105,9 +107,9 @@ if [[ "$LATEST" != "main" ]]; then
             -C "$WORK/package/assets" --no-same-owner
         if [[ -s "$WORK/package/assets/SHA256SUMS" ]]; then
             ( cd "$WORK/package/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
-                echo "WARNING: prebuilt component checksums did not match; components may be rebuilt on the server." >&2
+                die "Prebuilt component bundle failed checksum verification. Retry or use a trusted mirror."
         fi
-        echo "Onyx Panel: prebuilt components unpacked."
+        echo "Onyx Panel: prebuilt components unpacked and verified."
     else
         echo "WARNING: could not fetch prebuilt components; the installer will build them on the server (slow)." >&2
     fi

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Safe in-place updater for Onyx Panel.
-# The panel modules (AmneziaWG binaries, OpenFlux) ship with the package; Xray,
-# Caddy, Go, AmneziaWG tools and the relay source are downloaded from their
-# official repositories during the update. Set ONYX_UPDATE_REPOSITORY to pull
-# the package from your own Git repository instead of using the local copy.
+# The panel modules and every component binary ship prebuilt with the release;
+# nothing is compiled or downloaded on the server during the update. Set
+# ONYX_UPDATE_REPOSITORY to pull the package from your own Git repository
+# instead of using the local copy.
 set -Eeuo pipefail
 umask 077
 
@@ -68,6 +68,14 @@ require_local_archive() {
     for asset in amneziawg-go-linux-amd64 awg-linux-amd64 awg-quick-linux-amd64; do
         [[ -s "$LOCAL_SOURCE/assets/$asset" ]] || gap="$gap assets/$asset"
     done
+    # Prebuilt component bundle required by the strict (no-build) installer.
+    [[ -s "$LOCAL_SOURCE/assets/Xray-linux-64.zip" ]] || gap="$gap assets/Xray-linux-64.zip"
+    [[ -s "$LOCAL_SOURCE/assets/tproxy-server-linux-amd64" ]] || gap="$gap assets/tproxy-server-linux-amd64"
+    [[ -s "$LOCAL_SOURCE/assets/mtproto-proxy-linux-amd64" ]] || gap="$gap assets/mtproto-proxy-linux-amd64"
+    [[ -s "$LOCAL_SOURCE/assets/tproxy-server-52a5feb.tar.gz" ]] || gap="$gap assets/tproxy-server-52a5feb.tar.gz"
+    if ! ls "$LOCAL_SOURCE"/assets/caddy_*linux_amd64.tar.gz >/dev/null 2>&1; then
+        gap="$gap assets/caddy_*.tar.gz"
+    fi
     for font in dashboard-sans-normal.woff2 dashboard-sans-semibold.woff2 manrope-cyrillic-wght-normal.woff2 manrope-latin-wght-normal.woff2 jetbrains-mono-cyrillic-wght-normal.woff2 jetbrains-mono-latin-wght-normal.woff2; do
         [[ -s "$LOCAL_SOURCE/fonts/$font" ]] || gap="$gap fonts/$font"
     done
@@ -357,6 +365,38 @@ fi
 onyx_phase "файлы обновления готовы"
 chmod 0700 "$TEMP_DIR/source/install-panel.sh" "$TEMP_DIR/source/install-final.sh" "$TEMP_DIR/source/install-core.sh"
 
+# The prebuilt components (Xray, Caddy, tproxy-server, MTProto proxy) are
+# attached to each release as one bundle. Fetch it into the extracted source
+# so the install steps below only ever place prebuilt binaries — the updater
+# never builds or downloads those components on the server.
+if [[ "$REMOTE_OK" == 1 && "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+    UPDATE_REPO_PATH="${REPOSITORY#*github.com/}"; UPDATE_REPO_PATH="${UPDATE_REPO_PATH%.git}"
+    BIN_BUNDLE="onyx-binaries-${RELEASE_REF#v}.tar.gz"
+    echo "Fetching prebuilt components ${BIN_BUNDLE}..."
+    ONYX_BIN_OK=0
+    for dl in \
+        "https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://gh-proxy.com/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://ghproxy.net/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}" \
+        "https://ghfast.top/https://github.com/${UPDATE_REPO_PATH}/releases/download/${RELEASE_REF}/${BIN_BUNDLE}"; do
+        curl -fsS --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
+            -o "$TEMP_DIR/onyx-binaries.tar.gz" "$dl" && { ONYX_BIN_OK=1; break; }
+    done
+    if [[ "$ONYX_BIN_OK" == 1 && -s "$TEMP_DIR/onyx-binaries.tar.gz" ]]; then
+        mkdir -p "$TEMP_DIR/source/assets"
+        tar -xzf "$TEMP_DIR/onyx-binaries.tar.gz" \
+            -C "$TEMP_DIR/source/assets" --no-same-owner
+        if [[ -s "$TEMP_DIR/source/assets/SHA256SUMS" ]]; then
+            ( cd "$TEMP_DIR/source/assets" && sha256sum -c SHA256SUMS ) >/dev/null 2>&1 ||
+                die "Prebuilt component bundle failed checksum verification. Aborting the update."
+        fi
+        echo "Prebuilt components unpacked and verified."
+    else
+        ui_warn "Could not fetch prebuilt components; the update will fail unless the local package already carries them."
+    fi
+fi
+
 # ── Fast panel-only path ────────────────────────────────────────────────
 # A release that changes no component pins against the installed package
 # only rewrites panel files. When every pin matches and the installed state
@@ -494,7 +534,12 @@ if [[ "$MIGRATING_LEGACY" == 1 ]]; then
     chmod 0600 "$PRIMARY_SECRET"
     if [[ ! -s /etc/onyx-panel/mtproto-host ]]; then
         MTPROTO_HOST="$(curl -4fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
-        printf '%s\n' "${MTPROTO_HOST:-$DOMAIN}" > /etc/onyx-panel/mtproto-host
+        # The value lands in a systemd unit environment line: accept only a
+        # plain IPv4 address, anything else falls back to the panel domain.
+        if [[ ! "$MTPROTO_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            MTPROTO_HOST="$DOMAIN"
+        fi
+        printf '%s\n' "$MTPROTO_HOST" > /etc/onyx-panel/mtproto-host
         chmod 0600 /etc/onyx-panel/mtproto-host
     fi
     if [[ ! -s /etc/onyx-panel/caddy-owned ]]; then

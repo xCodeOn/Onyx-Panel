@@ -96,7 +96,7 @@ CADDY_SERVICE_EXISTS=0
 MT_PORT=2398
 TPROXY_REF="52a5feb7fac38f68da5afef9cedd9b3bfc8473ca"
 TPROXY_SOURCE_BUNDLED="${BASE}/assets/tproxy-server-52a5feb.tar.gz"
-TPROXY_SOURCE_SHA256="2c56987035c7f0b9a3d40907fe9ff8889fd41d1a6dcb7bdd6e0de7784c442bfe"
+TPROXY_SOURCE_SHA256="766e0cc14b16f035ddf10d56391b96885996b0cc36e01aaa8246fd08b8aeefcc"
 
 trim() {
     local s="$1"
@@ -506,21 +506,7 @@ elif [[ -s "$TPROXY_SOURCE_BUNDLED" ]] &&
     [[ -s "$REPO_DIR/deploy/install-mtproxy.sh" ]] ||
         die "Bundled tproxy-server source is incomplete."
 else
-    echo "      Fetching pinned tproxy-server release source..."
-    onyx_git_fetch_pinned "$REPO_DIR" "https://github.com/telegramdesktop/tproxy-server.git" \
-        "$TPROXY_REF" commit "$TPROXY_REF" "$TPROXY_SOURCE_SHA256" ||
-        die "Could not download the pinned tproxy-server source: GitHub и зеркала недоступны."
-    # The archive fallback leaves no .git and no ref check, so pin the
-    # security-critical lines of the extracted installer instead: MTProxy
-    # must be built from the official TelegramMessenger archive and the
-    # proxy-secret/config must come from core.telegram.org. The installer's
-    # own pinned sha256 then covers the archive contents.
-    if [[ ! -d "$REPO_DIR/.git" ]]; then
-        grep -Fq 'https://github.com/TelegramMessenger/MTProxy/archive/' "$REPO_DIR/deploy/install-mtproxy.sh" &&
-            grep -Fq 'https://core.telegram.org/getProxySecret' "$REPO_DIR/deploy/install-mtproxy.sh" &&
-            grep -Fq 'https://core.telegram.org/getProxyConfig' "$REPO_DIR/deploy/install-mtproxy.sh" ||
-            die "Pinned tproxy-server source verification failed."
-    fi
+    die "Pinned tproxy-server source is missing from assets/ (release bundle was not fetched). The installer no longer fetches the relay source on the server."
 fi
 if [[ "$(cat "$TPROXY_CACHE_SHA" 2>/dev/null || true)" != "$TPROXY_SOURCE_SHA256" || ! -s "$TPROXY_CACHE_DIR/deploy/install-mtproxy.sh" ]]; then
     rm -rf "$TPROXY_CACHE_DIR"
@@ -542,15 +528,10 @@ else
     caddy_archive="$(mktemp /tmp/caddy-linux-amd64.XXXXXX.tar.gz)"
     caddy_directory="$(mktemp -d /tmp/caddy-linux-amd64.XXXXXX)"
 
-    if [[ -s "$caddy_bundled" ]]; then
-        echo "      Using Caddy included with this release."
-        cp "$caddy_bundled" "$caddy_archive"
-    else
-        echo "      Caddy archive not found in assets/; downloading it..."
-        onyx_fetch "$caddy_archive" \
-            "https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_amd64.tar.gz" ||
-            die "Could not download Caddy: GitHub и зеркала недоступны."
-    fi
+    [[ -s "$caddy_bundled" ]] ||
+        die "Prebuilt Caddy archive is missing from assets/ (release bundle was not fetched). The installer no longer downloads Caddy on the server."
+    echo "      Using Caddy included with this release."
+    cp "$caddy_bundled" "$caddy_archive"
 
     test "$(sha512sum "$caddy_archive" | awk '{print $1}')" = "$caddy_sha512" ||
         die "Caddy checksum verification failed."
@@ -578,18 +559,20 @@ install -d -o caddy -g caddy -m 0750 /var/lib/caddy
 
 echo "      Installing official MTProxy..."
 if [[ "$REUSE_MT" != "1" ]]; then
-    # When the release ships a prebuilt MTProto proxy binary, place it at the
-    # exact path with the pinned-commit marker the upstream installer checks,
-    # so it skips the long compile and only does the dependency + secret setup.
-    if [[ -s "${BASE}/assets/mtproto-proxy-linux-amd64" ]]; then
-        echo "      Installing prebuilt MTProto proxy shipped with this release (build skipped)."
-        install -d -o root -g root -m 0755 /opt/MTProxy/objs/bin
-        install -o root -g root -m 0755 \
-            "${BASE}/assets/mtproto-proxy-linux-amd64" \
-            /opt/MTProxy/objs/bin/mtproto-proxy
-        printf '%s\n' "f36d8af769ffaeac36978d38c2c0f6d1104c2137" > /opt/MTProxy/.tproxy-commit
-        chmod 0644 /opt/MTProxy/.tproxy-commit
+    # MTProto is never compiled on the server any more: the release ships a
+    # prebuilt binary. Place it at the exact path with the pinned-commit marker
+    # the upstream installer checks, so its build guard is skipped and only the
+    # dependency + secret setup runs below.
+    if [[ ! -s "${BASE}/assets/mtproto-proxy-linux-amd64" ]]; then
+        die "Prebuilt MTProto proxy binary is missing from assets/ (release bundle was not fetched). The installer no longer builds MTProto on the server."
     fi
+    echo "      Installing prebuilt MTProto proxy shipped with this release (build skipped)."
+    install -d -o root -g root -m 0755 /opt/MTProxy/objs/bin
+    install -o root -g root -m 0755 \
+        "${BASE}/assets/mtproto-proxy-linux-amd64" \
+        /opt/MTProxy/objs/bin/mtproto-proxy
+    printf '%s\n' "f36d8af769ffaeac36978d38c2c0f6d1104c2137" > /opt/MTProxy/.tproxy-commit
+    chmod 0644 /opt/MTProxy/.tproxy-commit
     # The pinned upstream installer invokes apt-get without a lock timeout.
     # Ubuntu may start unattended-upgrades between our dependency step and
     # this call, so add the same bounded wait used by the main installer.
@@ -623,8 +606,9 @@ if ! id tproxy >/dev/null 2>&1; then
     useradd --system --home /nonexistent --shell /usr/sbin/nologin tproxy
 fi
 
-# The official deployment leaves the MTProxy build tree root-only.
-# Make the complete executable path traversable before systemd starts it.
+# The MTProxy binary, built in CI, is placed by the installer above and the
+# path is root-only. Make the complete executable path traversable before
+# systemd starts it.
 fix_mtproxy_permissions() {
     if ! id mtproxy >/dev/null 2>&1; then
         echo "      MTProxy user missing; creating it..."
@@ -652,55 +636,16 @@ fix_mtproxy_permissions() {
     fi
 }
 
-echo "      Installing Go relay..."
+echo "      Installing relay..."
 if [[ "$REUSE_RELAY" == "1" ]]; then
-    echo "      Healthy tproxy-server already exists; binary build skipped."
+    echo "      Healthy tproxy-server already exists; binary install skipped."
 elif [[ -s "${BASE}/assets/tproxy-server-linux-amd64" ]]; then
     echo "      Installing prebuilt tproxy-server shipped with this release (build skipped)."
     install -o root -g root -m 0755 \
         "${BASE}/assets/tproxy-server-linux-amd64" \
         /usr/local/bin/tproxy-server
 else
-go_version="1.26.8"
-go_sha256="d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b"
-go_bundled="${BASE}/assets/go${go_version}.linux-amd64.tar.gz"
-
-if [[ -x "/opt/go${go_version}/bin/go" ]]; then
-    go_binary="/opt/go${go_version}/bin/go"
-else
-    go_archive="$(mktemp /tmp/go-linux-amd64.XXXXXX.tar.gz)"
-    go_directory="$(mktemp -d /tmp/go-linux-amd64.XXXXXX)"
-
-    if [[ -s "$go_bundled" ]]; then
-        echo "      Using the Go toolchain included with this release."
-        cp "$go_bundled" "$go_archive"
-    else
-        echo "      Go toolchain not found in assets/; downloading it..."
-        onyx_fetch "$go_archive" \
-            "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" \
-            "https://mirrors.aliyun.com/golang/go${go_version}.linux-amd64.tar.gz" \
-            "https://dl.google.com/go/go${go_version}.linux-amd64.tar.gz" ||
-            die "Could not download the Go toolchain."
-    fi
-
-    test "$(sha256sum "$go_archive" | awk '{print $1}')" = "$go_sha256" ||
-        die "Go checksum verification failed."
-
-    tar -C "$go_directory" -xzf "$go_archive"
-    mv "$go_directory/go" "/opt/go${go_version}"
-    rm -f "$go_archive"
-    rm -rf "$go_directory"
-    go_binary="/opt/go${go_version}/bin/go"
-fi
-
-echo "      Building current relay..."
-(
-    cd "$REPO_DIR"
-    "$go_binary" build -trimpath -ldflags='-s -w' \
-        -o /usr/local/bin/tproxy-server ./cmd/tproxy-server
-)
-chown root:root /usr/local/bin/tproxy-server
-chmod 0755 /usr/local/bin/tproxy-server
+    die "Prebuilt tproxy-server binary is missing from assets/ (release bundle was not fetched). The installer no longer builds the relay on the server."
 fi
 
 echo "      Preparing site..."
