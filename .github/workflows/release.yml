@@ -218,14 +218,16 @@ jobs:
             52a5feb7fac38f68da5afef9cedd9b3bfc8473ca | \
             gzip -9 -n > /tmp/build/tproxy-server-52a5feb.tar.gz
 
-      - name: Build MTProto proxy
+      - name: Compile-check MTProto proxy
         run: |
+          # C builds are not byte-reproducible across runner toolchain updates
+          # (gcc drift), so the fresh binary is a compile check only: the
+          # bundle ships the committed, hash-pinned assets/ copy instead.
           git clone --quiet https://github.com/TelegramMessenger/MTProxy.git /tmp/MTProxy
           git -C /tmp/MTProxy checkout --quiet \
             f36d8af769ffaeac36978d38c2c0f6d1104c2137
           make -C /tmp/MTProxy -j"$(nproc)"
-          cp /tmp/MTProxy/objs/bin/mtproto-proxy \
-            /tmp/build/mtproto-proxy-linux-amd64
+          test -x /tmp/MTProxy/objs/bin/mtproto-proxy
 
       - name: Fetch official Xray and Caddy archives
         run: |
@@ -238,13 +240,14 @@ jobs:
       - name: Compare fresh builds against committed assets
         run: |
           # The bundle must be byte-identical to the committed assets/: the
-          # installer pins those hashes and dies on a mismatch. A failed
-          # comparison means the toolchain drifted — re-commit the CI artifact
-          # from this run and update the pins in the same commit.
+          # installer pins those hashes and dies on a mismatch. Strictly
+          # compared: the reproducible artifacts (Go build, upstream archives,
+          # deterministic tar stream). mtproto-proxy is a C build — see the
+          # compile-check step for why it is not byte-compared.
           set -euo pipefail
-          for f in tproxy-server-linux-amd64 mtproto-proxy-linux-amd64 Xray-linux-64.zip caddy_2.11.4_linux_amd64.tar.gz; do
+          for f in tproxy-server-linux-amd64 Xray-linux-64.zip caddy_2.11.4_linux_amd64.tar.gz; do
             cmp "assets/$f" "/tmp/build/$f" || {
-              echo "::error::$f built in CI differs from committed assets/$f"
+              echo "::error::$f built in CI differs from committed assets/$f — re-commit the CI artifact and update the pins in the same commit."
               exit 1
             }
           done
@@ -259,6 +262,10 @@ jobs:
       - name: Package prebuilt bundle
         run: |
           cd /tmp/build
+          # Ship the committed, hash-pinned MTProto binary: the installer pins
+          # its sha256, and the C build is not byte-reproducible across runner
+          # toolchains (the compile-check above guards the pinned source).
+          cp "$GITHUB_WORKSPACE/assets/mtproto-proxy-linux-amd64" mtproto-proxy-linux-amd64
           sha256sum * > SHA256SUMS
           tar -czf "/tmp/onyx-binaries-${{ needs.release.outputs.version }}.tar.gz" *
 
