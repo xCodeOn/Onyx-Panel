@@ -201,7 +201,7 @@ MTPROTO_HOST="${MTPROTO_HOST:-$DOMAIN}"
 for PWA_ICON in onyx-logo-192 onyx-logo-512 onyx-logo-maskable; do
     [[ -s "$BASE/assets/${PWA_ICON}.png" ]] || die "PWA icon is missing: assets/${PWA_ICON}.png"
 done
-for module in panel.py onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
+for module in panel.py onyx_adblock.py onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
     [[ -s "$BASE/$module" ]] || die "Missing panel module: $module; extract the complete archive."
 done
 FLAG_ARCHIVE="$BASE/onyx-panel/flags.tar.gz"
@@ -389,6 +389,14 @@ fi
 systemctl enable unbound >/dev/null 2>&1 || true
 systemctl restart unbound >/dev/null 2>&1 || true
 
+# The adblock drop-in lives in unbound.conf.d; make sure the main config
+# actually includes that directory. The guard must ignore the commented-out
+# stock line (# include-toplevel: …) some images ship.
+if ! grep -qE '^[[:space:]]*include-toplevel:.*unbound\.conf\.d' /etc/unbound/unbound.conf 2>/dev/null; then
+    printf '\n# Onyx Panel drop-ins\ninclude-toplevel: "/etc/unbound/unbound.conf.d/*.conf"\n' \
+        >> /etc/unbound/unbound.conf
+fi
+
 install -d -m 0755 "$APP_DIR" /etc/onyx-panel
 install -d -m 0700 "$DATA_DIR"
 install -d -m 0755 "$APP_DIR/icons"
@@ -564,7 +572,7 @@ fi
 
 ui_stage "Менеджер onyx-panelctl"
 
-for module in panel.py onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
+for module in panel.py onyx_adblock.py onyx_subscriptions.py onyx_panel_extras.py onyx_i18n.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py onyx_cascade.py onyx_routing.py onyx_warp.py onyx_reality.py onyx_telegram.py onyx_totp.py onyx_access.py onyx_webapi.py onyx_failover.py onyx_audit.py onyx_limits.py onyx_cloud.py onyx_bypass.py onyx_censor.py onyx_defense.py onyx_promo.py; do
     [[ -s "$BASE/$module" ]] || die "Package is incomplete: $module is missing."
     install -o root -g root -m 0644 "$BASE/$module" "$APP_DIR/$module"
 done

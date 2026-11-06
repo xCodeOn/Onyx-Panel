@@ -53,6 +53,7 @@ import onyx_subscriptions
 import onyx_bypass as bypass_api
 import onyx_censor
 import onyx_defense
+import onyx_adblock
 import onyx_promo
 
 HOST="127.0.0.1"
@@ -1946,6 +1947,32 @@ class Handler(BaseHTTPRequestHandler):
 <section class="panel-setting"><div class="panel-setting-info"><b>Монитор блокировок</b><small>Панель сама проверяет TCP/TLS-доступность своих портов каждые 6 часов и сообщает в Telegram при изменении.</small></div><table class="login-log"><thead><tr><th>Цель</th><th>Порт</th><th>Статус</th></tr></thead><tbody>{censor_rows}</tbody></table></section>
 </div>
 </div>'''
+            adblock_cfg=onyx_adblock.normalize(d.get("adblock") if isinstance(d.get("adblock"),dict) else {})
+            adblock_on=onyx_adblock.enabled()
+            # Статус собирается из коротких i18n-ключей: длинный ран с цифрами
+            # не матчится словарю целиком, а подстроки — да.
+            if adblock_on and adblock_cfg["updated_ts"]:
+                adblock_status=("Антиреклама включена · доменов в списке: "
+                                + f'{adblock_cfg["domains"]:,}'.replace(","," ")
+                                + " · обновлено "+time.strftime("%d.%m.%Y %H:%M",time.localtime(adblock_cfg["updated_ts"])))
+            elif adblock_on:
+                adblock_status="Антиреклама включена · список ещё не обновлялся"
+            else:
+                adblock_status="Антиреклама выключена"
+            if adblock_cfg.get("error"): adblock_status+=" · ошибка обновления: "+adblock_cfg["error"]
+            # Две формы рядом: вложенные form запрещены, поэтому кнопка
+            # «Обновить» связана со своей формой через атрибут form=.
+            adblock_update_form=''
+            adblock_update_btn=''
+            if adblock_on:
+                adblock_update_form=f'<form id="adblockUpdate" action="{PANEL_PATH}/adblock-update" hidden><input type="hidden" name="csrf" value="{token}"></form>'
+                adblock_update_btn='<button type="submit" form="adblockUpdate" class="btn">Обновить список сейчас</button>'
+            adblock_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Антиреклама</h2><p>DNS-фильтр рекламы и трекеров для всех клиентов панели</p></div>{card_expand()}</div>
+<div class="card-body">
+<section class="panel-setting"><div class="panel-setting-info"><b>Блокировщик рекламы</b><small>Блоклист OISD обновляется ежедневно. Работает для VLESS, Hysteria, TUIC и AWG (в новых AWG-конфигах DNS указывает на сервер — уже выданные конфиги перевыпустите). Включает заодно DoT-резолвер.</small></div><p class="panel-setting-status {"ok" if adblock_on else ""}" id="adblockState" role="status">{esc(adblock_status)}</p><form id="adblockForm" action="{PANEL_PATH}/adblock-save"><input type="hidden" name="csrf" value="{token}"><div class="checks choice-grid"><label class="choice-card"><input type="checkbox" name="enabled" value="1" {"checked" if adblock_on else ""}><span><strong>Антиреклама</strong><small>блоклист рекламы и трекеров</small></span></label></div><div class="admin-access-grid"><div><label for="adblockDeny">Свои блокировки</label><textarea id="adblockDeny" name="deny" rows="3" spellcheck="false" placeholder="example-ads.com&#10;tracker.example.org">{esc(chr(10).join(adblock_cfg["deny"]))}</textarea></div><div><label for="adblockAllow">Исключения (никогда не блокировать)</label><textarea id="adblockAllow" name="allow" rows="3" spellcheck="false" placeholder="important.example.com">{esc(chr(10).join(adblock_cfg["allow"]))}</textarea></div></div><div class="actions"><button type="submit" class="btn primary">Сохранить</button>{adblock_update_btn}</div><p class="panel-setting-status" id="adblockStatus" role="status"></p></form>{adblock_update_form}</section>
+<section class="panel-setting"><div class="panel-setting-info"><b>Реклама в YouTube и соцсетях</b><small>YouTube, Instagram и TikTok отдают рекламу с тех же доменов, что и контент, — её невозможно отрезать на стороне сервера, это ограничение любого VPN. Рабочие варианты ставятся на устройство: uBlock Origin или SponsorBlock в браузере, ReVanced на Android. Блокировщик выше режет всю остальную рекламу и трекеры везде.</small></div></section>
+</div>
+</div>'''
             security_card=f'''<div class="card collapsible"><div class="card-title"><div><h2>Безопасность</h2><p>Двухфакторная аутентификация, наблюдатель, ключи API и журнал входов</p></div>{card_expand()}</div>
 <div class="card-body">
 <section class="panel-setting"><div class="panel-setting-info"><b>Двухфакторная аутентификация (TOTP)</b><small>Статус: {totp_status}. При входе панель запросит код из приложения-аутентификатора (Google Authenticator, 1Password и любые совместимые).</small></div><div class="actions"><button type="button" class="btn primary" id="totpSetupBtn">{"Настроить заново" if totp_cfg.get("enabled") else "Включить 2FA"}</button>{f'<button type="button" class="btn danger" id="totpDisableBtn">Выключить 2FA</button>' if totp_cfg.get("enabled") else ''}</div><p class="panel-setting-status" id="totpStatus" role="status"></p></section>
@@ -1959,7 +1986,9 @@ class Handler(BaseHTTPRequestHandler):
 <dialog id="apiKeyDialog" class="create-dialog"><div class="dialog-head"><div><h2>Ключ создан</h2><small>Токен показывается только один раз — сохраните его</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><div style="padding:0 4px"><textarea class="code-editor" id="apiKeyToken" readonly style="min-height:74px"></textarea><div class="actions create-actions"><button type="button" class="btn" id="apiKeyCopy">Скопировать</button><button type="button" class="btn primary" data-close-dialog>Готово</button></div></div></dialog>'''
             panel_js='''<script>
 (()=>{async function submit(form,status,done){
-  const btn=form.querySelector("button[type=submit]");const label=btn.textContent;btn.disabled=true;
+  // Форма может быть пустой заглушкой (кнопка снаружи через form=): тогда
+  // крутилку показывает только статус-строка.
+  const btn=form.querySelector("button[type=submit]");const label=btn?btn.textContent:"";if(btn)btn.disabled=true;
   status.className="panel-setting-status";status.textContent="Применяю…";
   try{
     const r=await fetch(form.getAttribute("action"),{method:"POST",headers:{"X-Onyx-Async":"1"},body:new URLSearchParams(new FormData(form))});
@@ -1968,7 +1997,7 @@ class Handler(BaseHTTPRequestHandler):
     status.className="panel-setting-status ok";status.textContent=res.message||"Готово.";if(window.onyxToast)onyxToast(res.message||"Сохранено.");
     if(done)done(res);
   }catch(err){status.className="panel-setting-status err";status.textContent=err.message;if(window.onyxToast)onyxToast(err.message,"err")}
-  finally{btn.disabled=false;btn.textContent=label}
+  finally{if(btn){btn.disabled=false;btn.textContent=label}}
 }
 const pathForm=document.getElementById("panelPathForm");
 if(pathForm){const status=document.getElementById("panelPathStatus");
@@ -2069,6 +2098,12 @@ next.addEventListener('click',()=>{if(page<pages-1){page++;render()}});
 pager.hidden=false;
 render();
 })();
+const adblockForm=document.getElementById("adblockForm");
+if(adblockForm){const status=document.getElementById("adblockStatus");
+adblockForm.addEventListener("submit",e=>{e.preventDefault();submit(adblockForm,status,()=>setTimeout(()=>location.reload(),1200))})}
+const adblockUpdate=document.getElementById("adblockUpdate");
+if(adblockUpdate){const status=document.getElementById("adblockStatus");
+adblockUpdate.addEventListener("submit",e=>{e.preventDefault();submit(adblockUpdate,status,()=>setTimeout(()=>location.reload(),1200))})}
 </script>'''
             security_js='''<script>
 (()=>{const PATH=@@PATH@@,CSRF=@@CSRF@@;
@@ -2167,6 +2202,7 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
 	</div>
 	<div class="settings-col">
 	{bypass_card}
+	{adblock_card}
 	<div class="card collapsible"><div class="card-title"><div><h2>Резервная копия</h2><p>Настройки, пользователи, заглушки и конфигурации — одним архивом</p></div>{card_expand()}</div>
 	<div class="card-body">
 	<form id="importForm" action="{PANEL_PATH}/import" data-preview="{PANEL_PATH}/import-preview"><input type=hidden name=csrf value="{token}"><input type=hidden name="backup" id="importData"><input type="file" id="importFile" accept=".tar.gz,.tgz,.tar,application/gzip" hidden><div class="actions" style="margin:4px 0 0"><a class="btn primary" href="{PANEL_PATH}/export" download>Экспорт</a><button type="button" class="btn" id="importPick">Импорт</button><button type="submit" hidden></button></div><p class="panel-setting-status" id="importStatus" role="status"></p></form>
@@ -3361,12 +3397,84 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
                 threading.Thread(target=_ctl_apply_job,daemon=True).start()
                 msg="DoT-резолвер включён: Xray резолвит через 127.0.0.1."
             else:
+                # Антиреклама живёт внутри unbound: выключить резолвер можно
+                # только вместе с ней.
+                if onyx_adblock.enabled():
+                    self.send_json({"ok":False,"message":"Сначала выключите антирекламу — она работает через этот резолвер."},400); return
                 try: os.unlink(UNBOUND_MARKER)
                 except FileNotFoundError: pass
                 threading.Thread(target=_ctl_apply_job,daemon=True).start()
                 msg="DoT-резолвер выключен: системный резолвер."
             audit('unbound-toggle',"",str(enable))
             self.send_json({"ok":True,"message":msg}); return
+
+        if path==PANEL_PATH+"/adblock-save":
+            enable=form.get("enabled","")=="1"
+            was_on=onyx_adblock.enabled()
+            with STATE_LOCK:
+                d=load()
+                state=onyx_adblock.normalize(d.get("adblock") if isinstance(d.get("adblock"),dict) else {})
+                state["deny"]=onyx_adblock.normalize({"deny":onyx_adblock.parse_custom(form.get("deny",""))})["deny"]
+                state["allow"]=onyx_adblock.normalize({"allow":onyx_adblock.parse_custom(form.get("allow",""))})["allow"]
+                state["enabled"]=enable
+                d["adblock"]=state; save(d)
+            if enable:
+                try:
+                    if not was_on:
+                        # Антиреклама режет и Xray-трафик: DNS панели переезжает
+                        # в unbound, если ещё не там.
+                        if not os.path.exists(UNBOUND_MARKER):
+                            with open(UNBOUND_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                            threading.Thread(target=_ctl_apply_job,daemon=True).start()
+                        os.makedirs("/etc/onyx-panel",exist_ok=True)
+                        with open(onyx_adblock.ENABLED_MARKER,"w",encoding="ascii") as f: f.write("1\n")
+                        subprocess.run(["systemctl","restart","unbound"],capture_output=True,timeout=30)
+                        onyx_adblock.probe_unbound()
+                        state=onyx_adblock.refresh(state,users())
+                    else:
+                        # Уже включена: изменились только свои списки —
+                        # перерисовываем конфиг из кэша, без скачивания.
+                        state["domains"]=onyx_adblock.apply(state,users())
+                        state["error"]=""
+                except Exception as exc:
+                    if not was_on:
+                        try: os.unlink(onyx_adblock.ENABLED_MARKER)
+                        except FileNotFoundError: pass
+                        onyx_adblock.remove()
+                    with STATE_LOCK:
+                        d=load()
+                        failed=onyx_adblock.normalize(d.get("adblock"))
+                        failed["enabled"]=was_on; failed["error"]=str(exc)[:200]
+                        d["adblock"]=failed; save(d)
+                    prefix="Не удалось применить списки: " if was_on else "Антиреклама не включилась: "
+                    self.send_json({"ok":False,"message":prefix+str(exc)[:180]}); return
+                with STATE_LOCK:
+                    d=load(); d["adblock"]=state; save(d)
+                audit('adblock-save',"","on")
+                self.send_json({"ok":True,"message":"Антиреклама включена.","domains":state["domains"]}); return
+            try: os.unlink(onyx_adblock.ENABLED_MARKER)
+            except FileNotFoundError: pass
+            onyx_adblock.remove()
+            audit('adblock-save',"","off")
+            self.send_json({"ok":True,"message":"Антиреклама выключена."}); return
+
+        if path==PANEL_PATH+"/adblock-update":
+            if not onyx_adblock.enabled():
+                self.send_json({"ok":False,"message":"Антиреклама выключена."},400); return
+            with STATE_LOCK:
+                d=load()
+                state=onyx_adblock.normalize(d.get("adblock") if isinstance(d.get("adblock"),dict) else {})
+            try:
+                state=onyx_adblock.refresh(state,users())
+            except Exception as exc:
+                state["error"]=str(exc)[:200]
+                with STATE_LOCK:
+                    d=load(); d["adblock"]=state; save(d)
+                self.send_json({"ok":False,"message":"Обновление не удалось: "+str(exc)[:180]}); return
+            with STATE_LOCK:
+                d=load(); d["adblock"]=state; save(d)
+            self.send_json({"ok":True,"message":"Блоклист обновлён: %s доменов."%state["domains"]}); return
+
         if path in (PANEL_PATH+"/cascade-add",PANEL_PATH+"/cascade-toggle",PANEL_PATH+"/cascade-delete",PANEL_PATH+"/cascade-users",PANEL_PATH+"/cascade-ping"):
             async_action=self.headers.get("X-Onyx-Async","")=="1"
             def cascade_fail(message,status=400):
@@ -5120,6 +5228,33 @@ def _defense_on_ban(source_ip):
     except Exception as exc:
         print("defense ban failed:",type(exc).__name__,file=sys.stderr,flush=True)
 
+def adblock_worker():
+    # Ежедневное обновление блоклиста; ошибки фиксируются в состоянии и видны
+    # в карточке настроек. Первый прогон — через 5 минут после старта панели.
+    time.sleep(300)
+    while True:
+        try:
+            if onyx_adblock.enabled():
+                with STATE_LOCK: d=load()
+                state=onyx_adblock.normalize(d.get("adblock") if isinstance(d.get("adblock"),dict) else {})
+                if int(time.time())-state["updated_ts"]>=86400:
+                    # Мержим только поля обновления поверх свежего состояния:
+                    # за время fetch админ мог успеть поменять свои списки.
+                    try:
+                        fresh=onyx_adblock.refresh(state,users())
+                        patch={"updated_ts":fresh["updated_ts"],"domains":fresh["domains"],"error":""}
+                    except Exception as exc:
+                        patch={"error":str(exc)[:200]}
+                        print("adblock refresh failed:",type(exc).__name__,file=sys.stderr,flush=True)
+                    with STATE_LOCK:
+                        d=load()
+                        cur=onyx_adblock.normalize(d.get("adblock") if isinstance(d.get("adblock"),dict) else {})
+                        cur.update(patch)
+                        d["adblock"]=cur; save(d)
+        except Exception as exc:
+            print("adblock worker failed:",type(exc).__name__,file=sys.stderr,flush=True)
+        time.sleep(3600)
+
 def unbound_worker():
     # Watchdog DoT-резолвера: unbound установлен установщиком; если служба
     # упала при включённом маркере — пробуем поднять, иначе снимаем маркер,
@@ -5152,6 +5287,7 @@ def main():
     threading.Thread(target=censor_worker,daemon=True).start()
     threading.Thread(target=defense_worker,daemon=True).start()
     threading.Thread(target=unbound_worker,daemon=True).start()
+    threading.Thread(target=adblock_worker,daemon=True).start()
     ThreadingHTTPServer((HOST,PORT),Handler).serve_forever()
 
 if __name__=="__main__":

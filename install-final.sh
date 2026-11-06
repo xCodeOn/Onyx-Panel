@@ -72,7 +72,7 @@ else
 fi
 die() { ui_die "$@"; }
 trap 'ui_trap_error $?' ERR
-for file in install-panel.sh install-core.sh uninstall-onyx-panel.sh update.sh onyx-logo.png onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py panel.py onyx-panelctl; do
+for file in install-panel.sh install-core.sh uninstall-onyx-panel.sh update.sh onyx-logo.png onyx_subscriptions.py onyx_panel_extras.py onyx_ui.py onyx_metrics.py onyx_update.py onyx_webpush.py onyx_nodes.py onyx_openflux.py onyx_awg.py onyx_firewall.py onyx_components.py panel.py onyx-panelctl onyx_adblock.py; do
     [[ -s "$BASE/$file" ]] || die "Package is incomplete: missing $file. Extract the complete archive."
 done
 [[ -s "$BASE/assets/OpenFlux-linux-amd64" || -s "$BASE/OpenFlux-linux-amd64" ]] ||

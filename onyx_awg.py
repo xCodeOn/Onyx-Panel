@@ -320,10 +320,23 @@ def sync(users):
             raise RuntimeError("AWG interface started with an unsafe MTU")
 
 
+def _client_dns(user):
+    """While the panel adblock is on, AWG clients resolve through the tunnel
+    gateway (unbound with the blocklist); otherwise public resolvers as before."""
+    try:
+        import onyx_adblock
+        if onyx_adblock.enabled():
+            gateway = str(user.get("server_address", "")).split("/")[0]
+            return str(ipaddress.ip_address(gateway))
+    except Exception:
+        pass
+    return "1.1.1.1, 1.0.0.1"
+
+
 def client_config(user, endpoint, name="AWG"):
     _validate_user(user)
     lines = ["# " + str(name), "[Interface]", "PrivateKey = " + user["secret"],
-             "Address = " + user["address"], "DNS = 1.1.1.1, 1.0.0.1", "MTU = " + str(_mtu(user))]
+             "Address = " + user["address"], "DNS = " + _client_dns(user), "MTU = " + str(_mtu(user))]
     lines.extend(_parameter_lines(user["awg_parameters"]))
     lines.extend(["", "[Peer]", "PublicKey = " + user["server_public_key"],
                   "PresharedKey = " + user["preshared_key"],

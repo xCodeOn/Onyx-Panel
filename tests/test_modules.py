@@ -35,6 +35,36 @@ print('TOTP OK')
 
 # ---- defense: валидация ban_command, живой honeypot с on_ban ровно один раз
 import onyx_defense, socket as _socket, time as _time
+
+# ---- adblock: парсер списка, нормализация, генерация unbound-конфига
+import onyx_adblock
+_deny, _allow = onyx_adblock.parse_list('''! comment
+||ads.example^
+||good.example^
+@@||white.example^
+||bad.example/path/rule
+||*.wildcard.example^
+# another comment
+1.2.3.4 hostsfile.example
+||UPPER.example^
+''')
+assert _deny == {'ads.example', 'good.example', 'upper.example'}, _deny
+assert _allow == {'white.example'}, _allow
+_st = onyx_adblock.normalize({'enabled': 1, 'allow': ['ok.example', 'bad host', ''], 'deny': ['block.me']})
+assert _st['enabled'] is True and _st['allow'] == ['ok.example'] and _st['deny'] == ['block.me']
+assert onyx_adblock.normalize(None)['enabled'] is False
+_conf = onyx_adblock.render_conf({'ads.example', 'x.example'}, {'ads.example'}, ['10.13.13.1'])
+assert 'interface: 10.13.13.1' in _conf and 'access-control: 10.13.13.1/30 allow' in _conf
+assert 'local-zone: "ads.example" transparent' in _conf
+assert 'local-zone: "ads.example" always_nxdomain' not in _conf   # allow побеждает deny
+assert 'local-zone: "x.example" always_nxdomain' in _conf
+_gw = onyx_adblock.gateway_ips([
+    {'protocol': 'awg20', 'enabled': True, 'server_address': '10.13.13.1/30'},
+    {'protocol': 'awg31', 'enabled': False, 'server_address': '10.13.13.5/30'},
+    {'protocol': 'web', 'server_address': '10.13.13.9/30'},
+    {'protocol': 'awg31', 'enabled': True, 'server_address': 'garbage'}])
+assert _gw == ['10.13.13.1'], _gw
+print('ADBLOCK OK')
 assert onyx_defense.classify("1.2.3.4") == "ban4"
 assert onyx_defense.classify("2001:db8::1") == "ban6"
 _cmd = onyx_defense.ban_command("1.2.3.4")

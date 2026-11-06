@@ -9,6 +9,27 @@ import onyx_routing
 import onyx_warp
 import onyx_reality
 import onyx_bypass
+import onyx_adblock
+
+
+def _panel_adblock():
+    # Adblock state (custom deny/allow lists) lives in the panel's data.json;
+    # the manager's own document is users.json — never read adblock from it.
+    try:
+        with open(PANEL_DATA,encoding="utf-8") as f: raw=json.load(f)
+        return raw.get("adblock") if isinstance(raw,dict) else None
+    except Exception:
+        return None
+
+
+def adblock_reapply(d):
+    """AWG topology changed: the adblock unbound fragment lists the tunnel
+    gateways, so it must be re-rendered. Never break the main sync for it."""
+    try:
+        if onyx_adblock.enabled():
+            onyx_adblock.apply(_panel_adblock(), d.get("users", []))
+    except Exception as exc:
+        print("adblock reapply failed:", type(exc).__name__, file=sys.stderr, flush=True)
 
 USERS="/etc/onyx-panel/users.json"
 PROFILES="/etc/tproxy-server/profiles.json"
@@ -604,7 +625,9 @@ def apply(d,restart=True,previous=None):
         sync_firewall(d)
         if direct_changed: run("systemctl","daemon-reload",check=True)
         if xray_changed: sync_xray(d)
-        if awg_changed: onyx_awg.sync(d["users"])
+        if awg_changed:
+            onyx_awg.sync(d["users"])
+            adblock_reapply(d)
         if restart:
             for u in d["users"]:
                 if (u.get("id") in changed_ids or force) and u.get("enabled",True) and u.get("protocol","web") in ("web","mtproto"):
