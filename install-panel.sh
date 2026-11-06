@@ -159,6 +159,12 @@ case "${ID:-}" in
         ;;
 esac
 echo "Platform: ${PRETTY_NAME:-${ID} ${VERSION_ID}}"
+# Minimal and cloud images of newer releases (Ubuntu 24.04+, Debian 13) may
+# lack python3/openssl — install them before the first python3 call below.
+if ! command -v python3 >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then
+    onyx_apt_update_once
+    ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3 openssl ca-certificates
+fi
 command -v python3 >/dev/null || die "python3 required."
 command -v openssl >/dev/null || die "openssl required."
 [[ "$(uname -m)" == "x86_64" ]] || die "x86_64 is required."
@@ -952,7 +958,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.12.1
+Description=Onyx Panel 2.12.2
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1059,7 +1065,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.1')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.2')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"

@@ -26,3 +26,45 @@ jobs:
         run: python3 tests/test_static.py
       - name: i18n gate (English renders without Cyrillic)
         run: python3 tests/test_i18n.py
+
+  # Every shipped binary must start on every supported OS userland. This is the
+  # gate that catches "GLIBC_2.xx not found" class bugs: a C binary linked on a
+  # newer toolchain must never ship for older servers.
+  compat:
+    name: compat ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "ubuntu:24.04", "debian:12", "debian:13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Binaries start and scripts parse on ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src ${{ matrix.image }} bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq >/dev/null
+            apt-get install -y -qq --no-install-recommends python3 tar unzip >/dev/null
+            fail=0
+            check() {
+              out="$("$@" 2>&1 || true)"
+              case "$out" in
+                *GLIBC*|*"cannot execute"*|*"No such file"*)
+                  echo "FAIL $1: $out"; fail=1 ;;
+              esac
+            }
+            check ./assets/tproxy-server-linux-amd64 --help
+            check ./assets/mtproto-proxy-linux-amd64 --help
+            check ./assets/amneziawg-go-linux-amd64 --version
+            check ./assets/awg-linux-amd64 --version
+            mkdir -p /tmp/x /tmp/c
+            unzip -q -o assets/Xray-linux-64.zip -d /tmp/x
+            check /tmp/x/xray version
+            tar -xzf assets/caddy_2.11.4_linux_amd64.tar.gz -C /tmp/c
+            check /tmp/c/caddy version
+            python3 -m py_compile panel.py onyx-panelctl onyx_*.py
+            for f in install*.sh update.sh uninstall*.sh repair*.sh release.sh; do bash -n "$f"; done
+            exit $fail
+          '
