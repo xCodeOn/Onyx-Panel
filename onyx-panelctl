@@ -1,15 +1,31 @@
 #!/usr/bin/env python3
 import copy, fcntl, grp, json, os, re, secrets, shutil, subprocess, sys, time, uuid
 sys.path.insert(0,"/opt/onyx-panel")
-from onyx_subscriptions import mutate as mutate_subscription, issue as issue_subscription, SubscriptionError
 import onyx_awg
-import onyx_firewall
-import onyx_cascade
-import onyx_routing
-import onyx_warp
-import onyx_reality
-import onyx_bypass
-import onyx_adblock
+
+# Тяжёлые модули грузим лениво (PEP 562): сборщик трафика запускается таймером
+# каждые 15 секунд, и на слабом VPS импорт всех onyx_* — бо́льшая часть цены
+# запуска интерпретатора. Точки вызова не меняются: первый доступ импортирует.
+_LAZY_MODULES = ("onyx_firewall", "onyx_cascade", "onyx_routing", "onyx_warp",
+                 "onyx_reality", "onyx_bypass", "onyx_adblock", "onyx_subscriptions")
+_LAZY_ATTRS = {"mutate_subscription": ("onyx_subscriptions", "mutate"),
+               "issue_subscription": ("onyx_subscriptions", "issue"),
+               "SubscriptionError": ("onyx_subscriptions", "SubscriptionError")}
+
+
+def __getattr__(name):
+    if name in _LAZY_MODULES:
+        import importlib
+        module = importlib.import_module(name)
+        globals()[name] = module
+        return module
+    if name in _LAZY_ATTRS:
+        import importlib
+        module_name, attr = _LAZY_ATTRS[name]
+        value = getattr(importlib.import_module(module_name), attr)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _panel_adblock():

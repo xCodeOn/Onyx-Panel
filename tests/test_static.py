@@ -106,10 +106,33 @@ class BindingScanner(ast.NodeVisitor):
         self._bind(node.arg)
 
 
+def lazy_provided_names(tree):
+    """PEP 562: names a module provides through __getattr__ at first access.
+
+    onyx-panelctl defers heavy onyx_* imports so the 15-second traffic timer
+    does not pay the full import cost per run; the scanner must treat names
+    listed in _LAZY_MODULES / _LAZY_ATTRS as bound."""
+    has_getattr = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "__getattr__"
+                      for n in tree.body)
+    if not has_getattr:
+        return set()
+    names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_LAZY_MODULES" for t in node.targets):
+            if isinstance(node.value, (ast.Tuple, ast.List)):
+                names.update(elt.value for elt in node.value.elts if isinstance(elt, ast.Constant) and isinstance(elt.value, str))
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_LAZY_ATTRS" for t in node.targets):
+            if isinstance(node.value, ast.Dict):
+                names.update(k.value for k in node.value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str))
+    return names
+
+
 problems = []
 for name, code in SOURCES:
     scanner = BindingScanner()
-    scanner.visit(ast.parse(code))
+    tree = ast.parse(code)
+    scanner.visit(tree)
+    scanner.bound |= lazy_provided_names(tree)
     for ident, lineno in scanner.loaded.items():
         if ident not in scanner.bound and ident not in BUILTINS:
             problems.append(f"{name}:{lineno}  '{ident}' is loaded but never defined/imported")
