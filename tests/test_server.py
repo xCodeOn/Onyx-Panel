@@ -213,11 +213,12 @@ for c in cascades:
 assert cascades[0]["enabled"] is False and cascades[1]["enabled"] is True
 print("14) failover decision + swap OK")
 
-# 15) dashboard renders palette + top consumers card
+# 15) dashboard renders palette + top consumers card (bento layout)
 h15=FakeHandler("GET", srv.PANEL_PATH+"/dashboard", dict([cka])); h15.do_GET()
 out=h15.output()
-assert "paletteDialog" in out and "Топ потребителей трафика" in out and 'data-role="admin"' in out
-print("15) dashboard palette + top consumers OK")
+assert "paletteDialog" in out and "Топ по трафику" in out and 'data-role="admin"' in out
+assert 'class="bento"' in out and 'data-live-block="resources"' in out and 'data-live-block="chart"' in out
+print("15) dashboard palette + top consumers + bento OK")
 
 # 16) login page shows 2FA code field only when enabled
 store["totp"]={"secret":onyx_totp.generate_secret(),"enabled":True}

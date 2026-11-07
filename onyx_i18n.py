@@ -48,6 +48,8 @@ _LANG_ATTR = re.compile(r'<html lang="ru"')
 # Phrases with capture groups that plain dictionary keys cannot express.
 # Applied before the plain dictionary.
 EXTRA_RULES = [
+    # Подписка: «активна до 12.03.2027» — целиком, раньше общего правила «до <число>».
+    (re.compile(r"(?<!\w)активна до\s+(?=\d)"), "active until "),
     (re.compile(r"(?<!\w)до\s+(?=\d)"), "up to "),
     # JS ternaries that flip a status chip: the run crosses the quote boundary
     # ("Выкл':'Вкл'"), so dictionary keys can't reach it — bridge here.
@@ -1756,6 +1758,43 @@ PAIRS.update({
     'Вставьте полную HTTPS-ссылку на публичный документ.':
         'Paste the full HTTPS link to the public document.',
     'Пресет добавлен — не забудьте сохранить': 'Preset added — remember to save',
+})
+
+# Bento-дашборд 3.1: hero трафика, гейджи, службы и карточка топа.
+PAIRS.update({
+    'обновляется в реальном времени': 'updates in real time',
+    'за всё время наблюдения': 'for the entire observation period',
+    'Топ по трафику': 'Top by traffic',
+    'Всего передано': 'Total transferred',
+    'все протоколы': 'all protocols',
+    'опрос раз в 15 секунд': 'polled every 15 seconds',
+    'не подключены': 'not connected',
+    'Управлять': 'Manage',
+    'стабильно': 'stable',
+    'проверить': 'check it out',
+    'передают': 'transferring',
+    'активны': 'active',
+    'Диапазон': 'Range',
+    'нагрузка': 'load',
+    'ядер': 'cores',
+    'ядра': 'cores',
+    'ядро': 'core',
+    'передают ·': 'transferring ·',
+    'Подписки, устройства, квоты и сроки — всё в одной таблице.':
+        'Subscriptions, devices, quotas and terms — all in one table.',
+    'в одной таблице': 'in one table',
+    'квоты': 'quotas',
+    'сроки': 'terms',
+    'Уведомления, резервные копии, безопасность и обход — всё в одном месте.':
+        'Notifications, backups, security and bypass — all in one place.',
+    'не настроено': 'not configured',
+    # Публичная страница подписки (концепт 3.1)
+    'Все протоколы в одном месте. Наведите камеру — клиент подхватит ключ сам.':
+        'All protocols in one place. Point the camera — the client picks up the key itself.',
+    'Инструкции по приложениям': 'App instructions',
+    'Скопировать ключ': 'Copy key',
+    'Личный доступ': 'Personal access',
+    'активна до': 'active until',
 })
 
 _SORTED_KEYS = sorted(PAIRS, key=len, reverse=True)

@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 
-VERSION = '3.0.1'
+VERSION = '3.1.0'
 
 
 _VERSION_CACHE = ""
@@ -827,11 +827,8 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
 
 
 def login_ui(path, totp=False):
-    mark = '<path fill="#2dd4bf" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z" transform="translate(24 25) scale(1.1)"/>'
-    letters = '<path d="M420 752C200 752 30 585 30 369C30 155 202 -13 419 -13C634 -13 800 154 800 369C800 582 631 752 420 752ZM418 620C555 620 662 510 662 368C662 225 558 119 418 119C278 119 168 229 168 369C168 512 276 620 418 620Z" transform="translate(163.000 90) scale(0.067 -0.067)"/><path d="M54 0H187V261C187 335 192 367 209 394C230 427 264 445 307 445C342 445 369 433 387 410C405 386 413 345 413 271V0H546V297C546 396 536 444 506 487C470 539 410 567 333 567C269 567 226 549 177 501V554H54Z" transform="translate(217.980 90) scale(0.067 -0.067)"/><path d="M105 -185H248L568 554H414L281 195L158 554H6L209 52Z" transform="translate(256.880 90) scale(0.067 -0.067)"/><path d="M1 0H161L277 190L393 0H553L356 286L525 554H375L277 387L177 554H27L197 286Z" transform="translate(294.440 90) scale(0.067 -0.067)"/>'
-    subtitle = '<path d="M68 0H205V281H249C354 281 402 289 443 314C503 352 540 426 540 511C540 596 504 666 440 705C398 730 348 739 251 739H68ZM205 412V608H251C296 608 317 606 338 601C378 590 402 555 402 509C402 473 386 445 357 429C336 418 299 412 245 412Z" transform="translate(168.000 121) scale(0.016 -0.016)"/><path d="M7 0H158L240 191H503L582 0H733L423 739H315ZM290 322 369 546 448 322Z" transform="translate(182.060 121) scale(0.016 -0.016)"/><path d="M68 0H205V537L514 0H667V739H530V201L224 739H68Z" transform="translate(199.000 121) scale(0.016 -0.016)"/><path d="M68 0H465V131H205V303H454V434H205V608H465V739H68Z" transform="translate(215.940 121) scale(0.016 -0.016)"/><path d="M68 0H431V131H205V739H68Z" transform="translate(229.360 121) scale(0.016 -0.016)"/>'
-    wordmark = ('<svg class="login-brand-mark" viewBox="0 0 440 160" role="img" aria-label="Onyx Panel">'
-                + mark + '<g fill="var(--text)">' + letters + '</g><g fill="var(--muted)">' + subtitle + '</g></svg>')
+    # Концепт: компактная тёмная плитка с логотипом вместо крупного вордмарка.
+    wordmark = ('<div class="login-logo"><span><img src="' + esc(path) + '/__logo" alt="Onyx Panel" width="30" height="30"></span></div>')
     totp_flag = 'true' if totp else 'false'
     # Two-step sign-in only makes sense with 2FA on: the OTP step markup is
     # rendered solely when the gate can actually ask for a code, otherwise
@@ -1161,8 +1158,14 @@ def client_summary(records):
 def client_glances(records,path):
     rows=[]
     for r in records:
-        t=r['totals']; kind='Подписка' if r['kind']=='subscription' else 'Отдельная ссылка'
-        rows.append(f'<div class="client-glance"><div><strong>{esc(r["name"])}</strong><small>{kind}</small></div>{client_protocols(r["protocols"])}<div class="traffic-value">{size(t["up"]+t["down"])}</div><a class="btn quiet" href="{esc(path)}/users#account-{esc(r["id"])}">Управление ↗</a></div>')
+        t=r['totals']
+        protos=[p for p in r.get('protocols',[]) if p]
+        sub=' · '.join(protos[:2]).upper() if protos else ('Подписка' if r['kind']=='subscription' else 'Отдельная ссылка')
+        if t.get('active'):
+            state='<span class="badge on">онлайн</span>'
+        else:
+            state=f'<span class="quick-value">{size(t["up"]+t["down"])}</span>'
+        rows.append(f'<a class="quick-client" href="{esc(path)}/users#account-{esc(r["id"])}">{_mini_avatar(r["name"],r["id"])}<span class="quick-client-main"><b>{esc(r["name"])}</b><small>{esc(sub)}</small></span>{state}</a>')
     return '<div class="dashboard-clients">'+(''.join(rows) or '<p class="empty">Клиентов пока нет</p>')+'</div>'
 
 
@@ -1294,7 +1297,7 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
         device_hint='HWID' if r['limit'] else 'Без привязки' if sub else 'Отдельная ссылка'
         share=t['up']/total*100 if total else 0
         split=f'<div class="traffic-split" title="Доля отправки и получения, не лимит"><i class="up" style="width:{share:.2f}%"></i><i class="down" style="width:{100-share if total else 0:.2f}%"></i></div>'
-        rows.append(f'''<tr data-client data-id="{sid}" data-kind="{kind}" data-protocols="{esc(' '.join(r['protocols']))}" data-name="{name}" data-enabled="{int(bool(enabled))}" data-active="{int(bool(t['active']))}" data-created="{int(r['created'])}" data-traffic="{int(total)}" data-link="{esc(r['link'])}"><td class="select-col"><input type="checkbox" data-select-client aria-label="Выбрать — {name}" {'disabled' if primary else ''}></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial" aria-hidden="true">{esc(r['name'].strip()[:1].upper() or '•')}</span><div><strong>{name}</strong><small>{'Подписка' if sub else 'Основное подключение' if primary else 'Отдельная ссылка'}</small>{badge(t['active'],enabled)}{exp_pill}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(t['active'],enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(r['protocols'])}{node_pills(r)}</td><td class="traffic-cell" data-label="Трафик"><b>{size(total)}</b><small>↑ {size(t['up'])} · ↓ {size(t['down'])}</small>{split}<div class="limit-wrap">{(limit_info or {}).get(uid) or ''}{spark_svg((sparks or {}).get(uid, []))}</div></td><td class="hwid-cell" data-label="Устройства">{used}<small>{device_hint}</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
+        rows.append(f'''<tr data-client data-id="{sid}" data-kind="{kind}" data-protocols="{esc(' '.join(r['protocols']))}" data-name="{name}" data-enabled="{int(bool(enabled))}" data-active="{int(bool(t['active']))}" data-created="{int(r['created'])}" data-traffic="{int(total)}" data-link="{esc(r['link'])}"><td class="select-col"><input type="checkbox" data-select-client aria-label="Выбрать — {name}" {'disabled' if primary else ''}></td><td class="client-name" data-label="Клиент"><div class="client-identity">{_mini_avatar(r['name'], uid).replace('class="mini-avatar"', 'class="client-initial mini-avatar" aria-hidden="true"')}<div><strong>{name}</strong><small>{'Подписка' if sub else 'Основное подключение' if primary else 'Отдельная ссылка'}</small>{badge(t['active'],enabled)}{exp_pill}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(t['active'],enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(r['protocols'])}{node_pills(r)}</td><td class="traffic-cell" data-label="Трафик"><b>{size(total)}</b><small>↑ {size(t['up'])} · ↓ {size(t['down'])}</small>{split}<div class="limit-wrap">{(limit_info or {}).get(uid) or ''}{spark_svg((sparks or {}).get(uid, []))}</div></td><td class="hwid-cell" data-label="Устройства">{used}<small>{device_hint}</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
         detail=subscription_card(r['source'],path,domain,csrf,traffic) if sub else direct_card(r['source'],path,csrf,traffic,proxy_link,reality_link=(reality_link(r['source']['secret'],name+' · Reality') if (reality_link and r['source'].get('protocol')=='vless') else None))
         detail=detail.replace('<details>','<details open>')
         if not sub and not primary:
@@ -1325,7 +1328,7 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
         state=f'''<form method="post" action="{esc(path)}/openflux-profile">{hidden(csrf,operation='disable' if enabled else 'enable',id=pid)}<button class="access-switch" type="submit" role="switch" aria-label="Доступ OpenFlux — {name}" aria-checked="{str(enabled).lower()}" title="{'Остановить' if enabled else 'Запустить'} OpenFlux"></button></form>'''
         qr=esc(path)+'/openflux-qr?'+urlencode({'id':pid})
         action=f'''<button class="icon-btn" {qr_attributes(qr,profile.get('name','OpenFlux'),document_url,['openflux'],'direct')} aria-label="QR ссылки — {name}" title="QR ссылки на документ">{icon('qr')}</button><button class="icon-btn" data-copy="{esc(document_url)}" aria-label="Скопировать ссылку — {name}" title="Копировать ссылку на документ">{icon('copy')}</button><form method="post" action="{esc(path)}/openflux-profile" data-confirm="Удалить профиль OpenFlux «{name}» и остановить его службу?">{hidden(csrf,operation='delete',id=pid)}<button class="icon-btn danger" aria-label="Удалить — {name}" title="Удалить">{icon('trash')}</button></form>'''
-        rows.append(f'''<tr data-client data-id="{sid}" data-kind="openflux" data-protocols="openflux" data-name="{name}" data-enabled="{int(enabled)}" data-active="{int(active)}" data-created="{created}" data-traffic="0" data-link="{esc(document_url)}"><td class="select-col"><input type="checkbox" data-select-client aria-label="OpenFlux управляется отдельно" disabled></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial" aria-hidden="true">OF</span><div><strong>{name}</strong><small>Отдельное подключение · {esc(platform)}</small>{badge(active,enabled)}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(active,enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(['openflux'])}</td><td class="traffic-cell" data-label="Трафик"><b>—</b><small>Счётчики OpenFlux недоступны</small></td><td class="hwid-cell" data-label="Устройства">{esc(platform)}<small>{esc(provider)} Docs</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
+        rows.append(f'''<tr data-client data-id="{sid}" data-kind="openflux" data-protocols="openflux" data-name="{name}" data-enabled="{int(enabled)}" data-active="{int(active)}" data-created="{created}" data-traffic="0" data-link="{esc(document_url)}"><td class="select-col"><input type="checkbox" data-select-client aria-label="OpenFlux управляется отдельно" disabled></td><td class="client-name" data-label="Клиент"><div class="client-identity"><span class="client-initial mini-avatar" aria-hidden="true" style="background:#4a5568">OF</span><div><strong>{name}</strong><small>Отдельное подключение · {esc(platform)}</small>{badge(active,enabled)}</div></div></td><td class="state-col" data-label="Доступ">{state}</td><td class="activity-col" data-label="Активность">{badge(active,enabled)}</td><td class="protocol-col" data-label="Протоколы">{client_protocols(['openflux'])}</td><td class="traffic-cell" data-label="Трафик"><b>—</b><small>Счётчики OpenFlux недоступны</small></td><td class="hwid-cell" data-label="Устройства">{esc(platform)}<small>{esc(provider)} Docs</small></td><td class="actions-col" data-label="Действия"><div class="row-actions">{action}</div></td></tr>''')
     summary_records=records+[{'kind':'direct','totals':{'active':bool(p.get('active',False)),'up':0,'down':0}} for p in flux_profiles]
     controls='''<div class="clients-toolbar"><div class="search-field">'''+icon('search')+'''<input type="search" id="accountSearch" aria-label="Поиск клиентов" placeholder="Поиск клиентов"></div><select id="clientFilter" aria-label="Фильтр клиентов"><option value="all">Все клиенты</option><option value="subscription">Подписки</option><option value="direct">Отдельные подключения</option><option value="openflux">OpenFlux</option><option value="active">Передают данные</option><option value="enabled">Доступ включён</option><option value="disabled">Отключены</option></select><select id="protocolFilter" aria-label="Фильтр протоколов"><option value="all">Все протоколы</option><option value="web">WEB Proxy</option><option value="mtproto">MTProto</option><option value="vless">VLESS XHTTP</option><option value="hysteria">Hysteria2</option><option value="tuic">TUIC 5</option><option value="awg20">AWG 2.0</option><option value="awg31">AWG 3.1</option><option value="openflux">OpenFlux</option></select><select id="clientSort" aria-label="Сортировка клиентов"><option value="default">По порядку</option><option value="name">По имени</option><option value="traffic">По трафику</option><option value="active">По активности</option><option value="newest">Сначала новые</option></select></div>'''
     invite_cards=[]
@@ -1338,7 +1341,7 @@ def users_ui(subs, profiles, traffic, path, domain, csrf, proxy_link, openflux_p
         ion=' on' if invite.get('enabled',True) else ''
         ilink='https://'+domain+'/onyx-invite/'+itoken
         invite_cards.append(f'''<div class="invite-card"><div><b>{iname}</b><small>{iuses} активаций · до {iuntil} · {esc(' + '.join({'vless':'VLESS','hysteria':'Hysteria2','tuic':'TUIC 5'}.get(p,p) for p in invite.get('protocols',[])))}</small><small class="muted">{ilink}</small></div><div class="actions"><button type="button" class="icon-btn" {qr_attributes(path+'/invite-qr?'+urlencode({'id':invite.get('id','')}),invite.get('name','Гость'),'https://'+domain+'/onyx-invite/'+invite.get('token',''),invite.get('protocols') or ['vless'],'subscription')} aria-label="QR приглашения" title="QR">{icon('qr')}</button><button type="button" class="icon-btn" data-copy="{esc(ilink)}" aria-label="Скопировать приглашение" title="Копировать">{icon('copy')}</button><form method="post" action="{esc(path)}/invite-action" data-confirm="Удалить приглашение?">{hidden(csrf,operation='delete',id=iid)}<button class="icon-btn danger" aria-label="Удалить приглашение" title="Удалить">{icon('trash')}</button></form></div><span class="badge{ion}" title="{'Активно' if invite.get('enabled',True) else 'Отключено'}"></span></div>''')
-    content=f'''<div class="page-head"><div><h1>Клиенты</h1><p>Доступ, подписки и OpenFlux</p></div><div class="actions"><button class="primary" id="newAccount">＋ Добавить клиента</button></div></div>{client_summary(summary_records)}<p id="clientNotice" class="note" role="status" hidden></p><section class="clients-panel">{controls}<div id="bulkBar" class="bulk-bar" hidden><strong id="selectedCount"></strong><button data-bulk="1">Включить</button><button data-bulk="0">Отключить</button><button id="copySelected">Копировать ссылки</button><button id="clearSelected">Снять выбор</button><button id="deleteSelected" class="danger">Удалить</button></div><div class="table-scroll"><table class="clients-table"><thead><tr><th class="select-col"><input type="checkbox" id="selectAllClients" aria-label="Выбрать видимых клиентов"></th><th>Клиент</th><th>Доступ</th><th class="activity-col">Активность · 90 с</th><th>Протоколы</th><th>Трафик</th><th class="hwid-cell">Устройства</th><th>Действия</th></tr></thead><tbody id="clientRows">{''.join(rows)}</tbody></table><p id="noAccounts" class="empty" hidden>Ничего не найдено. Измените поиск или фильтр.</p><div id="loadMoreWrap" class="load-more" hidden><button type="button" id="loadMoreClients">{icon('chevron-down')}<span>Загрузить ещё</span></button></div></div><div class="list-footer"><span id="visibleCount"></span><span>↑ Отправка · ↓ Получение · OpenFlux показывает состояние службы</span></div></section><section class="card"><div class="card-title"><div><h2>Приглашения</h2><p>Одноразовые ссылки: гость сам активирует себе доступ</p></div><button class="primary" type="button" id="newInvite">＋ Приглашение</button></div><div class="invite-list">{invite_cards if invites else '<p class="empty">Приглашений пока нет. Создайте ссылку — гость получит подписку сам, без ручного копирования ключей.</p>'}</div></section><details class="note client-help"><summary>Что означают доступ, активность и HWID?</summary><p>Переключатель управляет разрешением доступа, а активность означает передачу данных за последние 90 секунд — не точное присутствие онлайн. Для OpenFlux показывается состояние отдельной службы профиля.</p><p>Лимит HWID ограничивает регистрацию идентификаторов клиента. HWID и ключ можно скопировать: это не аппаратная защита. Месячные квоты гигабайтов и срок действия настраиваются в профиле клиента. Основное подключение установки защищено от отключения и удаления.</p><p>Изменение доступа может кратковременно перезапустить службы. При массовом действии клиенты обрабатываются последовательно; OpenFlux управляется отдельно своим переключателем.</p></details>'''
+    content=f'''<div class="page-head"><div><span class="eyebrow"><span class="dot"></span>{len(records)} клиентов · подписки и доступ</span><h1>Клиенты</h1><p>Подписки, устройства, квоты и сроки — всё в одной таблице.</p></div><div class="actions"><button class="primary" id="newAccount">Новый клиент<span class="tail">{icon('plus')}</span></button></div></div>{client_summary(summary_records)}<p id="clientNotice" class="note" role="status" hidden></p>{controls}<section class="clients-panel"><div id="bulkBar" class="bulk-bar" hidden><strong id="selectedCount"></strong><button data-bulk="1">Включить</button><button data-bulk="0">Отключить</button><button id="copySelected">Копировать ссылки</button><button id="clearSelected">Снять выбор</button><button id="deleteSelected" class="danger">Удалить</button></div><div class="table-scroll"><table class="clients-table"><thead><tr><th class="select-col"><input type="checkbox" id="selectAllClients" aria-label="Выбрать видимых клиентов"></th><th>Клиент</th><th>Доступ</th><th class="activity-col">Активность · 90 с</th><th>Протоколы</th><th>Трафик</th><th class="hwid-cell">Устройства</th><th>Действия</th></tr></thead><tbody id="clientRows">{''.join(rows)}</tbody></table><p id="noAccounts" class="empty" hidden>Ничего не найдено. Измените поиск или фильтр.</p><div id="loadMoreWrap" class="load-more" hidden><button type="button" id="loadMoreClients">{icon('chevron-down')}<span>Загрузить ещё</span></button></div></div><div class="list-footer"><span id="visibleCount"></span><span>↑ Отправка · ↓ Получение · OpenFlux показывает состояние службы</span></div></section><section class="card"><div class="card-title"><div><h2>Приглашения</h2><p>Одноразовые ссылки: гость сам активирует себе доступ</p></div><button class="primary" type="button" id="newInvite">＋ Приглашение</button></div><div class="invite-list">{invite_cards if invites else '<p class="empty">Приглашений пока нет. Создайте ссылку — гость получит подписку сам, без ручного копирования ключей.</p>'}</div></section><details class="note client-help"><summary>Что означают доступ, активность и HWID?</summary><p>Переключатель управляет разрешением доступа, а активность означает передачу данных за последние 90 секунд — не точное присутствие онлайн. Для OpenFlux показывается состояние отдельной службы профиля.</p><p>Лимит HWID ограничивает регистрацию идентификаторов клиента. HWID и ключ можно скопировать: это не аппаратная защита. Месячные квоты гигабайтов и срок действия настраиваются в профиле клиента. Основное подключение установки защищено от отключения и удаления.</p><p>Изменение доступа может кратковременно перезапустить службы. При массовом действии клиенты обрабатываются последовательно; OpenFlux управляется отдельно своим переключателем.</p></details>'''
     creation=f'''<dialog id="createAccount" class="create-dialog"><div class="dialog-head"><div><h2>Новый клиент</h2><small>Настройте доступ за два понятных шага</small></div><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><form id="createClientForm" method="post" action="{esc(path)}/create-account">{hidden(csrf)}<input type="hidden" id="accountKind" name="kind" value="subscription"><label for="accountName">Имя клиента</label><input id="accountName" name="name" placeholder="Например, Александр или Телефон" maxlength="80" required autocomplete="off"><section class="create-step"><div class="create-step-title"><i>1</i><span>Как клиент будет получать доступ?</span></div><div class="create-mode-grid"><label class="choice-card"><input type="radio" name="access_mode" value="subscription" checked><span><strong>Одна подписка</strong><small>Одна ссылка для проверенных VLESS и Hysteria2.</small></span></label><label class="choice-card"><input type="radio" name="access_mode" value="direct"><span><strong>Отдельное подключение</strong><small>WEB Proxy, MTProto или один выбранный VPN-протокол.</small></span></label></div></section><section class="create-step" id="subscriptionFields"><div class="create-step-title"><i>2</i><span>Выберите протоколы подписки</span></div><div class="protocol-picker"><label class="choice-card"><input type="checkbox" name="vless" value="1" checked><span><strong>VLESS XHTTP</strong><small>TLS через домен · TCP 443</small><em>УНИВЕРСАЛЬНЫЙ</em></span></label><label class="choice-card"><input type="checkbox" name="hysteria" value="1" checked><span><strong>Hysteria2</strong><small>Быстрый QUIC · UDP 8443</small><em>ДЛЯ НЕСТАБИЛЬНЫХ СЕТЕЙ</em></span></label></div><div class="device-row"><p class="note">Лимит HWID относится к подписке. Значение 0 создаёт общую подписку без привязки.</p><div><label for="deviceLimit">Устройств</label><input id="deviceLimit" name="max_devices" type="number" min="0" max="20" value="2" inputmode="numeric"></div></div></section><section class="create-step" id="directFields" hidden><div class="create-step-title"><i>2</i><span>Выберите один протокол</span></div><div class="protocol-picker"><label class="choice-card"><input type="radio" name="direct_protocol" value="web" checked><span><strong>WEB Proxy</strong><small>Готовая ссылка для Telegram через HTTPS</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="mtproto"><span><strong>MTProto</strong><small>Прямое подключение Telegram · отдельный TCP-порт</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="vless"><span><strong>VLESS XHTTP</strong><small>TLS через домен · TCP 443</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="hysteria"><span><strong>Hysteria2</strong><small>QUIC · UDP 8443</small></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg20"><span><strong>AWG 2.0</strong><small>Совместимость с роутерами и прежними клиентами · уникальный UDP-порт</small><em>ОТДЕЛЬНЫЙ ОТПЕЧАТОК</em></span></label><label class="choice-card"><input type="radio" name="direct_protocol" value="awg31"><span><strong>AWG 3.1</strong><small>Защита заголовков и дополнительное заполнение · безопасный MTU</small><em>РЕКОМЕНДУЕТСЯ</em></span></label></div><p class="note">Каждый AWG-клиент получает собственные ключи, порт, подсеть и параметры маскировки. Если у провайдера VPS есть облачный firewall, разрешите показанный UDP-порт.</p></section><div class="create-summary"><span>Будет создано</span><b id="createSummary">Подписка · VLESS XHTTP + Hysteria2 · 2 устройства</b></div><div class="actions create-actions"><button type="button" data-close-dialog>Отмена</button><button class="primary" id="createClientSubmit">Создать клиента</button></div></form></dialog>'''
     creation=creation.replace('type="radio" name="hysteria"','type="radio" name="direct_protocol" value="hysteria"')
     creation=creation.replace('<label class="choice-card"><input type="checkbox" name="web" value="1"><span><strong>WEB Proxy</strong><small>Telegram через HTTPS · отдельный секрет устройству</small><em>С ЛИМИТОМ HWID</em></span></label>','')
@@ -1769,15 +1772,22 @@ CSS += FONT_FACES
 CSS += """
 /* ============ ONYX · FLOW DESIGN SYSTEM ============ */
 :root{
-  --font-ui:"Dashboard","Century Gothic",Arial,sans-serif;
+  --font-display:"Dashboard","Century Gothic",Arial,sans-serif;
+  --font-ui:"Manrope","Segoe UI",system-ui,sans-serif;
   --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --bg:#0e1214;--shell:#151b1d;--sidebar:rgba(22,28,31,.62);
-  --surface:rgba(255,255,255,.065);--raised:#1e2527;--input:rgba(12,17,19,.55);
-  --line:rgba(255,255,255,.14);--line-soft:rgba(255,255,255,.08);
-  --text:#edf2f1;--muted:#8b9796;
-  --accent:#2dd4bf;--accent-strong:#5eead4;--on-accent:#0b1514;--tint:rgba(45,212,191,.13);
-  --green:#34d399;--red:#f87171;--amber:#fbbf24;--cream:#cde5e0;--mint:#5eead4;--yellow:#fbbf24;
+  --bg:#0e1214;--shell:#0e1214;--sidebar:rgba(22,28,31,.62);
+  --surface:#161c1f;--raised:#1c2427;--input:#1c2427;
+  --line:#252e2d;--line-soft:#1f2827;
+  --text:#edf2f1;--ink:#edf2f1;--ink-soft:#c8d2d0;--muted:#8b9796;--faint:#5c6866;
+  --accent:#2dd4bf;--accent-strong:#5eead4;--accent-ink:#5eead4;--accent-soft:rgba(45,212,191,.13);--on-accent:#0b1514;--tint:rgba(45,212,191,.13);
+  --green:#34d399;--ok:#34d399;--ok-soft:rgba(52,211,153,.13);--red:#f87171;--err:#f87171;--err-soft:rgba(248,113,113,.13);--amber:#fbbf24;--warn:#fbbf24;--warn-soft:rgba(251,191,36,.13);
+  --cream:#cde5e0;--mint:#5eead4;--yellow:#fbbf24;
+  --r-lg:26px;--r-md:18px;--r-sm:12px;
   --shadow:0 24px 70px -24px rgba(0,0,0,.65);
+  --shadow-1:0 1px 2px rgba(0,0,0,.35),0 10px 30px -12px rgba(0,0,0,.5);
+  --shadow-2:0 2px 6px rgba(0,0,0,.4),0 24px 60px -20px rgba(0,0,0,.65);
+  --shadow-accent:0 8px 28px -8px rgba(45,212,191,.5);
+  --ease-spring:cubic-bezier(.32,.72,0,1);
   --focus:#2dd4bf
 }
 html{scroll-behavior:smooth;scrollbar-width:none}
@@ -1790,55 +1800,66 @@ body{font-family:var(--font-ui);font-weight:400;-webkit-font-smoothing:antialias
 ::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text) 27%,transparent);border:3px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
 :where(a,button,input,select,textarea,summary,[role=button]):focus-visible{outline:2px solid var(--focus);outline-offset:3px}
-/* Typography */
-h1,h2,h3{text-wrap:balance}
+/* Typography — Dashboard Sans для заголовков, Manrope для текста */
+h1,h2,h3{text-wrap:balance;font-family:var(--font-display)}
 p{text-wrap:pretty}
-h1{font-size:33px;font-weight:600;letter-spacing:.25px;line-height:1.2}
-h2{font-weight:600;letter-spacing:.1px}
-h3{font-weight:600}
-.eyebrow{display:block;margin-bottom:9px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:400}
+h1{font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1.05}
+h2{font-size:17px;font-weight:600;letter-spacing:-.015em}
+h3{font-size:15px;font-weight:600}
+.eyebrow{display:inline-flex;align-items:center;gap:7px;margin-bottom:10px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft),0 0 10px rgba(52,211,153,.55);flex:0 0 auto}
+/* Тонкая зернистость поверх фона — глубина без шума */
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(rgba(255,255,255,.028) 1px,transparent 1px);background-size:22px 22px;
+  mask-image:linear-gradient(to bottom,black,transparent 60%);-webkit-mask-image:linear-gradient(to bottom,black,transparent 60%)}
 .overview-stat b,.client-stat b,.graph-speeds b,.resource-head b,.traffic-cell b,.update-release strong,.update-installed strong,.hwid-cell,.sub-url,.client-name small{font-family:var(--font-mono)}
 .overview-stat b,.client-stat b{font-weight:600;letter-spacing:-.02em}
-/* ---------- Shell: floating rounded workspace with a slim icon rail ---------- */
-.shell{position:relative;min-height:calc(100dvh - 30px);max-width:1680px;margin:14px auto 16px;border-radius:27px;isolation:isolate;overflow:clip;
-  background:radial-gradient(ellipse 520px 420px at 42% 28%,rgba(45,212,191,.14),transparent 100%),
-             radial-gradient(ellipse 560px 520px at 78% 68%,rgba(45,212,191,.07),transparent 100%),var(--shell)}
+/* ---------- Shell: чистый фон с зерном и орбитами, плавающая стеклянная пилюля ---------- */
+.shell{position:relative;z-index:1;display:block;min-height:100dvh;padding-left:96px}
 /* Дрейфующие световые орбиты по всему фону — тихое движение, GPU-дружественно. */
 body::after{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:none;
-  background:radial-gradient(38rem 38rem at 16% 20%,rgba(45,212,191,.08),transparent 65%),
-             radial-gradient(34rem 34rem at 86% 76%,rgba(94,234,212,.06),transparent 65%),
-             radial-gradient(26rem 26rem at 60% 10%,rgba(148,163,184,.05),transparent 65%);
-  animation:onyx-drift 48s cubic-bezier(.32,.72,0,1) infinite alternate}
+  background:radial-gradient(38rem 38rem at 18% 22%,rgba(45,212,191,.075),transparent 65%),
+             radial-gradient(34rem 34rem at 84% 78%,rgba(45,212,191,.055),transparent 65%),
+             radial-gradient(26rem 26rem at 62% 12%,rgba(148,130,220,.05),transparent 65%);
+  animation:onyx-drift 46s var(--ease-spring) infinite alternate}
 @keyframes onyx-drift{from{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(2.5%,-1.5%,0) scale(1.04)}to{transform:translate3d(-2%,2%,0) scale(1.02)}}
-.sidebar{overflow:visible;position:fixed;top:50%;bottom:auto;transform:translateY(-50%);left:max(12px,calc((100vw - 1680px)/2 + 12px));width:64px;border-radius:24px;background:var(--sidebar);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid color-mix(in srgb,var(--text) 9%,transparent);z-index:60;display:flex;align-items:center;flex-direction:column;padding:14px 0 12px;box-shadow:0 18px 44px -18px rgba(0,0,0,.55);opacity:.97}
-.brand{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;padding:0;margin:0}
-.brand img{width:30px;height:30px;border-radius:0}
-.nav-primary{display:flex;flex-direction:column;gap:7px;align-items:center;margin-top:34px}
-.nav-bottom{display:flex;flex-direction:column;gap:7px;align-items:center;margin-top:auto;padding-top:10px}
-.nav-button{display:flex;align-items:center;justify-content:center;position:relative;width:36px;height:35px;border:1px solid transparent;border-radius:11px;background:transparent;color:var(--muted);padding:0;flex-shrink:0;transition:background .18s ease,border-color .18s ease,color .18s ease}
-.nav-button .ico{width:20px;height:20px}
-.nav-button:hover{background:var(--raised);border-color:color-mix(in srgb,var(--text) 18%,transparent);color:var(--text)}
-.nav-button.active{background:var(--raised);border-color:color-mix(in srgb,var(--text) 26%,transparent);color:var(--text);box-shadow:inset 0 0 0 3px rgba(255,255,255,.015)}
+.sidebar{overflow:visible;position:fixed;top:50%;bottom:auto;transform:translateY(-50%);left:34px;width:64px;border-radius:24px;background:var(--sidebar);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line-soft);z-index:60;display:flex;align-items:center;flex-direction:column;padding:14px 9px;box-shadow:var(--shadow-2)}
+.brand{width:46px;height:46px;flex-shrink:0;display:grid;place-items:center;padding:0;margin:0 0 12px;border-radius:16px;background:#0c0a09;border:1px solid var(--line);box-shadow:var(--shadow-1)}
+.brand img{width:28px;height:28px;border-radius:0}
+.nav-primary{display:flex;flex-direction:column;gap:6px;align-items:center;flex:1}
+.nav-bottom{display:flex;flex-direction:column;gap:6px;align-items:center;margin-top:auto;padding-top:10px}
+.nav-button{display:grid;place-items:center;position:relative;width:46px;height:46px;border:1px solid transparent;border-radius:15px;background:transparent;color:var(--muted);padding:0;flex-shrink:0;transition:background .25s var(--ease-spring),color .25s var(--ease-spring),transform .25s var(--ease-spring)}
+.nav-button .ico{width:21px;height:21px}
+.nav-button:hover{background:rgba(255,255,255,.06);color:var(--text);transform:translateY(-1px)}
+.nav-button.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-1)}
+.nav-button.active::before{content:"";position:absolute;left:-15px;width:3px;height:18px;border-radius:2px;background:var(--accent);box-shadow:0 0 10px rgba(45,212,191,.75)}
 .nav-button .logout-ico{width:19px;height:19px}
-.nav-button[data-tip]:hover::after,.nav-button[data-tip]:focus-visible::after{content:attr(data-tip);position:absolute;left:46px;top:50%;transform:translateY(-50%);white-space:nowrap;background:var(--sidebar);border:1px solid color-mix(in srgb,var(--text) 22%,transparent);color:var(--text);padding:7px 11px;border-radius:8px;font-size:12px;font-weight:400;box-shadow:0 4px 18px rgba(0,0,0,.3);z-index:80;pointer-events:none}
-main{position:relative;z-index:2;padding:34px 36px 46px 110px;max-width:1568px}
-@media(min-width:1300px){main{padding-top:42px;padding-left:122px;padding-right:45px}}
-.page-head{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:32px;min-height:44px}
-.page-head h1{font-size:38px;letter-spacing:-.03em;font-weight:600}
-.page-head p{font-size:13px;color:var(--muted);margin:8px 0 0}
+.nav-button[data-tip]:hover::after,.nav-button[data-tip]:focus-visible::after{content:attr(data-tip);position:absolute;left:56px;top:50%;transform:translateY(-50%);white-space:nowrap;background:var(--raised);border:1px solid var(--line);color:var(--text);padding:7px 11px;border-radius:10px;font-size:12px;font-weight:500;box-shadow:var(--shadow-1);z-index:80;pointer-events:none}
+main{position:relative;z-index:2;min-width:0;width:100%;padding:34px 48px 64px}
+@media(min-width:1600px){main{padding:40px 72px 72px}.sidebar{left:52px}.page-head h1{font-size:38px}}
+.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:28px}
+.page-head h1{margin:0}
+.page-head p{font-size:14px;color:var(--muted);margin:8px 0 0;max-width:56ch}
 .page-head .actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 /* Bell inside the rail: the panel opens to the right of the sidebar */
 .sidebar .bell-menu{left:calc(100% + 12px);right:auto;top:auto;bottom:-9px}
 .bell-menu{background:#2e2f2c;border-color:color-mix(in srgb,var(--text) 16%,transparent);box-shadow:0 24px 60px -18px rgba(0,0,0,.55)}
 /* ---------- Components ---------- */
-.btn,button{border-radius:12px;font-weight:500;transition:transform .16s ease,background-color .18s ease,border-color .18s ease,box-shadow .2s ease,color .18s ease,filter .18s ease;background:color-mix(in srgb,var(--text) 7%,transparent);border-color:color-mix(in srgb,var(--text) 12%,transparent)}
-@media(hover:hover){.btn:hover,button:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--text) 24%,transparent);background:color-mix(in srgb,var(--text) 11%,transparent)}}
-.btn:active,button:active{transform:translateY(0) scale(.975);transition-duration:.06s}
-.btn.primary,button.primary{background:#f7f5ef;border-color:transparent;color:#26231f;font-weight:600;box-shadow:0 2px 3px rgba(255,255,255,.08)}
-.btn.primary:hover,button.primary:hover{background:#e4e9ba;border-color:transparent;color:#26231f}
+.btn,button{border-radius:999px;font-weight:600;font-size:13.5px;padding:11px 18px;transition:transform .25s var(--ease-spring),background-color .25s var(--ease-spring),border-color .25s var(--ease-spring),box-shadow .25s var(--ease-spring),color .25s var(--ease-spring),filter .18s ease;background:var(--surface);border-color:var(--line)}
+@media(hover:hover){.btn:hover,button:hover{transform:translateY(-1px);border-color:var(--faint);box-shadow:var(--shadow-1)}}
+.btn:active,button:active{transform:translateY(0) scale(.98);transition-duration:.06s}
+.btn.primary,button.primary{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600}
+.btn.primary:hover,button.primary:hover{background:var(--ink-soft);border-color:var(--ink-soft);color:var(--bg)}
+.btn.accent,button.accent{background:var(--accent);border-color:transparent;color:#fff;box-shadow:var(--shadow-accent)}
+.btn.accent:hover,button.accent:hover{background:#3fe0cb;border-color:transparent;color:#fff}
+.btn .tail{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.16);margin-right:-8px;transition:transform .3s var(--ease-spring);flex:0 0 auto}
+.btn .tail .ico,.btn .tail svg{width:12px;height:12px}
+.btn:hover .tail{transform:translate(2px,-1px)}
+.btn.primary .tail{background:rgba(14,18,20,.14)}
 button.danger,.btn.danger{background:transparent;border-color:color-mix(in srgb,var(--red) 40%,transparent);color:var(--red)}
 button.danger:hover,.btn.danger:hover{background:color-mix(in srgb,var(--red) 13%,transparent);border-color:color-mix(in srgb,var(--red) 60%,transparent);color:var(--red)}
-button.quiet,.btn.quiet{background:transparent;border-color:transparent}
+button.quiet,.btn.quiet{background:transparent;border-color:transparent;color:var(--muted)}
+button.quiet:hover,.btn.quiet:hover{color:var(--text);background:rgba(255,255,255,.06)}
 button:disabled,.btn:disabled{transform:none!important;box-shadow:none!important;opacity:.45}
 input,textarea,select{border-radius:12px;font-weight:400;background:var(--input);border-color:var(--line-soft);min-height:43px;transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease}
 input:hover,textarea:hover,select:hover{border-color:color-mix(in srgb,var(--text) 24%,var(--line-soft))}
@@ -1846,41 +1867,75 @@ input:focus,textarea:focus,select:focus{border-color:color-mix(in srgb,var(--acc
 input[type=checkbox],input[type=radio]{accent-color:var(--accent);min-height:0;padding:0}
 label{color:var(--muted);font-weight:400}
 option{background:#484646;color:#fff}
-.card,.account{border-radius:24px;border-color:var(--line-soft);background:var(--surface);box-shadow:0 18px 40px -30px rgba(0,0,0,.5)}
-.clients-panel,.clients-summary{border-radius:24px;border-color:var(--line-soft);background:var(--surface)}
-.note{border:1px solid var(--line-soft);border-left:3px solid var(--accent);border-radius:12px;background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--muted)}
+.card,.account{border-radius:var(--r-lg);border-color:var(--line-soft);background:var(--surface);box-shadow:var(--shadow-1)}
+/* card-flush: край в край для таблиц и bento — заголовок и контент паддингуем сами */
+.card.card-flush{padding:0}
+.card.card-flush .card-title{padding:22px 24px 0;margin-bottom:0}
+.card-pad{padding:24px}
+.card-inset{background:var(--raised);border:1px solid var(--line-soft);border-radius:var(--r-md)}
+.clients-panel,.clients-summary{border-radius:var(--r-lg);border-color:var(--line-soft);background:var(--surface)}
+.note{border:1px solid var(--line-soft);border-left:3px solid var(--accent);border-radius:var(--r-sm);background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--muted)}
 .note.warning{border-left-color:var(--amber);color:var(--amber)}.note.error{border-left-color:var(--red);color:var(--red)}.note.success{border-left-color:var(--green);color:var(--green)}
-.badge{font-weight:500;letter-spacing:.01em}
-.pill{border-radius:8px;font-weight:400;background:color-mix(in srgb,var(--text) 8%,transparent);border-color:transparent;color:var(--muted)}
-.pill.proto-vless{color:var(--accent);background:var(--tint)}
-.pill.proto-hysteria{color:var(--amber)}
-.pill.proto-web{color:var(--green)}
-.pill.proto-awg20,.pill.proto-awg31{color:#b18cff;background:color-mix(in srgb,#b18cff 15%,transparent)}
-.pill.proto-openflux{color:#6aa5ff;background:color-mix(in srgb,#6aa5ff 15%,transparent)}
+/* Чипы-статусы концепта: мягкая подложка, точка-пульс */
+.badge{font-weight:600;letter-spacing:.01em;font-size:11.5px;padding:4px 11px;border-radius:999px;background:var(--raised);border:1px solid var(--line-soft)}
+.badge:before{width:6px;height:6px}
+.badge.on{background:var(--ok-soft);border-color:transparent;color:var(--ok)}
+.badge.on:before{background:var(--ok);box-shadow:0 0 8px rgba(52,211,153,.8)}
+.pill{border-radius:999px;font-weight:600;background:var(--raised);border-color:var(--line-soft);color:var(--muted)}
+.pill.proto-vless{color:#c4a5f0;background:rgba(167,139,250,.14)}
+.pill.proto-hysteria{color:#7dd3fc;background:rgba(56,189,248,.13)}
+.pill.proto-tuic{color:#fbbf24;background:rgba(251,191,36,.13)}
+.pill.proto-web{color:var(--accent-ink);background:var(--accent-soft)}
+.pill.proto-awg20,.pill.proto-awg31{color:#6ee7b7;background:rgba(52,211,153,.13)}
+.pill.proto-openflux{color:#6aa5ff;background:rgba(106,165,255,.15)}
 dialog{border-radius:25px;background:linear-gradient(125deg,#514d52,#363a35);border:1px solid color-mix(in srgb,var(--text) 14%,transparent);color:var(--text);box-shadow:0 28px 100px rgba(0,0,0,.4);backdrop-filter:none;-webkit-backdrop-filter:none}
 dialog::backdrop{background:#15171999;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
 .dialog-head h2{font-size:21px}
-.clients-table th{background:transparent;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:400}
-.clients-table td{border-bottom-color:var(--line-soft)}
-.clients-table tbody tr{transition:background-color .14s ease}
-@media(hover:hover){.clients-table tbody tr:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}}
-.live-indicator{background:color-mix(in srgb,var(--text) 7%,transparent);border-color:var(--line-soft)}
-.range{background:color-mix(in srgb,var(--text) 7%,transparent);border-color:var(--line-soft);border-radius:11px}
-.range button.selected{background:var(--tint);color:var(--accent)}
+.clients-table th{background:transparent;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;padding:10px 16px}
+.clients-table td{border-bottom-color:var(--line-soft);padding:15px 16px}
+.clients-table tbody tr{transition:background-color .2s var(--ease-spring)}
+@media(hover:hover){.clients-table tbody tr:hover{background:var(--raised)}}
+.live-indicator{background:var(--raised);border-color:var(--line-soft)}
+.range{background:var(--raised);border:1px solid var(--line-soft);border-radius:999px;padding:3px}
+.range button{border:none;background:transparent;font-size:12px;font-weight:600;color:var(--muted);padding:5px 13px;border-radius:999px;white-space:nowrap}
+.range button:hover{box-shadow:none;transform:none;color:var(--text)}
+.range button.selected{background:var(--surface);color:var(--text);box-shadow:var(--shadow-1)}
+.nav-button:hover{box-shadow:none}
 .meter{background:color-mix(in srgb,var(--text) 16%,transparent)}
 .access-switch{background:color-mix(in srgb,var(--text) 22%,transparent)}
 .onyx-toast{background:#2e2f2c;color:#fff;border:1px solid rgba(255,255,255,.28);box-shadow:0 7px 24px rgba(0,0,0,.25)}
 .onyx-toast.err{background:#4a2a24;color:#fff;border-color:#ffb4a8}
+/* Переключатель концепта (switch/track) */
+.switch{position:relative;display:inline-block;width:46px;height:27px;flex:0 0 auto;margin:0}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.switch .track{position:absolute;inset:0;background:#3a3633;border-radius:999px;transition:background .3s var(--ease-spring);cursor:pointer}
+.switch .track::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.4);transition:transform .3s var(--ease-spring)}
+.switch input:checked+.track{background:var(--accent)}
+.switch input:checked+.track::after{transform:translateX(19px)}
+.switch input:focus-visible+.track{outline:2px solid var(--focus);outline-offset:3px}
+/* Строка настройки: подпись слева, контроль справа */
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 0;border-bottom:1px solid var(--line-soft)}
+.setting-row:last-child{border-bottom:none}
+.setting-row b{font-size:14px}
+.setting-row small{display:block;color:var(--muted);margin-top:2px;max-width:46ch}
+/* Сворачиваемые карточки в духе концепта (expand-btn + плавное раскрытие) */
+.expand-btn{width:34px;height:34px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--line-soft);background:var(--raised);color:var(--muted);cursor:pointer;padding:0;transition:all .3s var(--ease-spring)}
+.expand-btn:hover{color:var(--text);border-color:var(--line)}
+.expand-btn .ico,.expand-btn svg{width:15px;height:15px;transition:transform .35s var(--ease-spring)}
+.card.collapsible.open .expand-btn .ico,.card.collapsible.open .expand-btn svg{transform:rotate(180deg)}
 /* Release banner: glass strip under the page head */
 .release-banner{border-radius:18px;border-color:color-mix(in srgb,var(--accent) 45%,var(--line-soft));background:linear-gradient(100deg,var(--tint),var(--surface) 58%)}
 /* Login */
-.login-page{display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse 620px 480px at 28% 18%,rgba(45,212,191,.15),transparent 100%),radial-gradient(ellipse 540px 540px at 76% 82%,rgba(148,163,184,.08),transparent 100%),var(--shell)}
-.login-card{width:min(420px,100%);padding:38px 34px;border-radius:28px;background:var(--surface);border:1px solid var(--line-soft);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:var(--shadow)}
-.login-brand-mark{display:block;width:216px;max-width:100%;height:auto;margin:0 auto 26px}
-.login-card h1{font-size:27px;text-align:center}
-.login-card>p{text-align:center;color:var(--muted);font-size:13px;margin-bottom:23px}
-.login-card .primary{width:100%;margin-top:23px}
-.login-card .login-version{display:block;text-align:center;margin-top:22px;font-size:10px;letter-spacing:.14em;color:var(--muted)}
+.login-page{display:grid;place-items:center;padding:30px 18px;min-height:100dvh}
+.login-card{width:min(420px,100%);padding:40px 36px 30px;text-align:center;border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line-soft);box-shadow:var(--shadow-2)}
+.login-logo{display:grid;place-items:center;margin-bottom:22px}
+.login-logo span{width:62px;height:62px;border-radius:20px;background:#0c0a09;border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow-2)}
+.login-logo img{display:block}
+.login-card h1{font-size:24px;text-align:center;letter-spacing:-.02em}
+.login-card>p{text-align:center;color:var(--muted);font-size:13.5px;margin:8px 0 26px}
+.login-card .field,.login-card label{text-align:left}
+.login-card .primary{width:100%;margin-top:23px;justify-content:center;padding:13px;font-size:14px}
+.login-card .login-version{display:block;text-align:center;margin-top:24px;font-size:11px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;font-family:var(--font-mono)}
 
 
 /* Settings: panel card (address, login, password) */
@@ -2030,24 +2085,27 @@ dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease}
 .component-stack{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:640px){.component-stack{grid-template-columns:1fr}}
 /* ---------- Mobile: the rail becomes a floating bottom bar ---------- */
-@media(max-width:760px){
-.shell{border-radius:0;min-height:100dvh;margin:0;background:radial-gradient(ellipse 470px 420px at 45% 22%,rgba(45,212,191,.16),transparent 100%),var(--shell)}
-.sidebar{top:auto;bottom:20px;left:10px;right:10px;transform:none;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:30px;box-shadow:none}
+@media(max-width:900px){
+.shell{padding-left:0}
+.sidebar{top:auto;bottom:14px;left:12px;right:12px;transform:none;width:auto;height:auto;flex-direction:row;justify-content:center;padding:7px 8px;border-radius:22px;background:rgba(22,28,31,.85);border:1px solid var(--line-soft);box-shadow:var(--shadow-2)}
 .brand{display:none}
-.nav-primary{flex-direction:row;gap:2px;margin:0;flex:1;justify-content:space-around}
+.nav-primary{flex-direction:row;gap:2px;margin:0;flex:0;justify-content:center}
 .nav-bottom{flex-direction:row;gap:2px;margin:0;padding-top:0}
+.nav-button{width:40px;height:40px;border-radius:13px}
+.nav-button .ico{width:19px;height:19px}
+.nav-button.active::before{display:none}
 .nav-button[data-tip]:hover::after,.nav-button[data-tip]:focus-visible::after{display:none}
-main{padding:22px 16px 104px}
+main{padding:20px 16px 110px}
 .page-head{align-items:flex-start;margin-bottom:26px;flex-wrap:wrap;gap:10px}
-.page-head h1{font-size:24px}
+.page-head h1{font-size:27px}
 .sidebar .bell-menu{left:8px;right:auto;top:auto;bottom:calc(100% + 12px);width:min(380px,calc(100vw - 20px))}
 .bell-item{padding:14px}
 dialog{width:min(570px,calc(100vw - 16px))}
 }
 @media(max-width:480px){
-main{padding:20px 12px 100px}
-.page-head h1{font-size:21px;letter-spacing:0}
-.nav-button{width:32px;height:33px;border-radius:10px}
+main{padding:20px 12px 104px}
+.page-head h1{font-size:23px;letter-spacing:-.02em}
+.nav-button{width:36px;height:36px;border-radius:12px}
 .nav-button .ico{width:18px;height:18px}
 .nav-bottom [data-service-restart]{display:none}
 .sidebar{padding:6px 7px}
@@ -2480,53 +2538,112 @@ def nodes_glances(live, path):
     return ('<div class="dashboard-nodes">'+(empty or ''.join(rows))+'</div>'+footer+nodes_glances_script())
 
 
-def _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None, node_series=None, node_summary=None):
+_AVATAR_COLORS = ('#2f6f5e', '#39496b', '#8a5a2b', '#6b4a8c', '#585d63', '#7a3b4f', '#2b6a7a', '#5c6236')
+
+
+def _plural(n, one, few, many):
+    """Русская плюрализация: 1 ядро, 2–4 ядра, 5+ ядер."""
+    n = abs(int(n)) % 100
+    if 11 <= n <= 14:
+        return many
+    n %= 10
+    return one if n == 1 else (few if 2 <= n <= 4 else many)
+
+
+def _mini_avatar(name, seed=''):
+    """Аватар клиента: инициалы и пастельный цвет, стабильные для имени.
+
+    Две буквы — только для латинских имён; кириллические дают одну, чтобы
+    производный глиф не оставался непереведённым текстом в EN-режиме (i18n-гейт
+    считает видимые кириллические раны, а инициалы — производная user data)."""
+    words = [w for w in re.split(r'\s+', (name or '').strip()) if w]
+    letters = [w[0].upper() for w in words[:2]]
+    if any(ord(ch) > 127 for ch in ''.join(letters)):
+        letters = letters[:1]
+    initials = ''.join(letters) or '?'
+    color = _AVATAR_COLORS[hash(seed or name or initials) % len(_AVATAR_COLORS)]
+    return f'<span class="mini-avatar" style="background:{color}">{esc(initials)}</span>'
+
+
+def _gauge_card(percent, label, sub, color):
+    """Кольцевой гейдж концепта: SVG-дуга + подпись рядом."""
+    value = max(0.0, min(100.0, percent)) if percent is not None else None
+    dash = 226.2 * (1 - (value or 0) / 100)
+    text = f'{value:.0f}%' if value is not None else '—'
+    return (f'<section class="card card-pad gauge-card"><div class="gauge">'
+            f'<svg width="86" height="86" viewBox="0 0 86 86" aria-hidden="true">'
+            f'<circle cx="43" cy="43" r="36" fill="none" stroke="var(--line)" stroke-width="8"/>'
+            f'<circle cx="43" cy="43" r="36" fill="none" stroke="{color}" stroke-width="8" stroke-linecap="round" stroke-dasharray="226.2" stroke-dashoffset="{dash:.1f}" transform="rotate(-90 43 43)"/>'
+            f'<text x="43" y="47" text-anchor="middle" font-size="16" font-weight="600" font-family="JetBrains Mono,ui-monospace,monospace" fill="var(--text)">{text}</text></svg>'
+            f'<div class="gauge-meta"><div class="stat-label">{esc(label)}</div><div class="gauge-sub">{esc(sub)}</div></div>'
+            f'</div></section>')
+
+
+def dashboard_body(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None, node_series=None, node_summary=None):
+    """Bento-дашборд концепта: hero трафика, гейджи CPU/RAM, клиенты, службы, ноды."""
     subs = live_subscriptions(subs, profiles)
-    latest=data.get('latest',{}); age=max(0,int(time.time())-latest.get('time',0)); fresh=bool(latest) and age<=120
-    fault=data.get('collector_error',{})
-    if fault and fault.get('time',0)>=latest.get('time',0): fresh=False
-    traffic_fresh=fresh and latest.get('traffic_fresh',True)
-    health=''
+    latest = data.get('latest', {}); age = max(0, int(time.time()) - latest.get('time', 0)); fresh = bool(latest) and age <= 120
+    fault = data.get('collector_error', {})
+    if fault and fault.get('time', 0) >= latest.get('time', 0): fresh = False
+    traffic_fresh = fresh and latest.get('traffic_fresh', True)
+    health = ''
     if not fresh:
-        reason='Измерения VPS ещё не получены.' if not latest else 'Измерения VPS не обновляются.'
-        health='<div class="note warning" role="status">'+reason+' Проверьте сборщик через SSH: <code>systemctl status onyx-panel-metrics.service onyx-panel-metrics.timer</code>. Журнал: <code>journalctl -u onyx-panel-metrics.service -n 30 --no-pager</code>.</div>'
+        reason = 'Измерения VPS ещё не получены.' if not latest else 'Измерения VPS не обновляются.'
+        health = '<div class="note warning" role="status">' + reason + ' Проверьте сборщик через SSH: <code>systemctl status onyx-panel-metrics.service onyx-panel-metrics.timer</code>. Журнал: <code>journalctl -u onyx-panel-metrics.service -n 30 --no-pager</code>.</div>'
     elif not traffic_fresh:
-        health='<div class="note warning" role="status">Ресурсы VPS измеряются, но нет свежих счётчиков трафика. Проверьте через SSH: <code>systemctl status onyx-panel-traffic.service onyx-panel-traffic.timer</code>.</div>'
-    graph=chart(data.get('history',[]),hours,node_series)
+        health = '<div class="note warning" role="status">Ресурсы VPS измеряются, но нет свежих счётчиков трафика. Проверьте через SSH: <code>systemctl status onyx-panel-traffic.service onyx-panel-traffic.timer</code>.</div>'
+    graph = chart(data.get('history', []), hours, node_series)
     if not fresh or not traffic_fresh:
-        graph='<div class="chart-empty">'+icon('chart')+'<span>Нет свежих измерений<br>Диагностика сборщика указана выше</span></div>'
-    node_legend=''.join(f'<span class="legend-node" title="сплошная — приём · пунктир — отправка"><i style="background:{esc(s["color"])}"></i>{esc(s["name"])}</span>' for s in (node_series or []))
-    resources=[]
-    for key,label,used,total in [('cpu','Процессор',latest.get('cpu'),100),('ram','Память',latest.get('ram_used'),latest.get('ram_total')),('swap','Подкачка',latest.get('swap_used'),latest.get('swap_total')),('disk','Диск',latest.get('disk_used'),latest.get('disk_total'))]:
-        percent=used/total*100 if used is not None and total and fresh else None
-        text=f'{percent:.1f}%' if percent is not None else '—'
-        detail=f'Ядер: {latest.get("cores", "—")} · средняя загрузка' if key=='cpu' else ('Не используется' if key=='swap' and total==0 else size(used)+' / '+size(total))
-        resources.append(f'<div class="resource"><div class="resource-ring" style="--value:{max(0,min(100,percent or 0)):.2f}%"><b>{text}</b></div><div class="resource-copy"><strong>{label}</strong><small>{detail}</small></div></div>')
-    direct=[u for u in profiles if not u.get('subscription_id') and u.get('id')!='primary']
-    node_summary=node_summary or {}
+        graph = '<div class="chart-empty">' + icon('chart') + '<span>Нет свежих измерений<br>Диагностика сборщика указана выше</span></div>'
+    node_legend = ''.join(f'<span class="legend-node" title="сплошная — приём · пунктир — отправка"><i style="background:{esc(s["color"])}"></i>{esc(s["name"])}</span>' for s in (node_series or []))
+    direct = [u for u in profiles if not u.get('subscription_id') and u.get('id') != 'primary']
+    node_summary = node_summary or {}
     # Клиент считается передающим, если трафик идёт локально ИЛИ через ноду.
-    active=sum(1 for s in subs if aggregate(s['live_profile_ids'],traffic,s.get('enabled',True))['active']
-               or (s.get('enabled',True) and node_summary.get(s['id'],{}).get('active')))
-    active+=sum(aggregate([u['id']],traffic,u.get('enabled',True))['active'] for u in direct)
-    total_up=sum(max(0,int(v.get('up',0))) for v in traffic.values() if isinstance(v,dict)); total_down=sum(max(0,int(v.get('down',0))) for v in traffic.values() if isinstance(v,dict))
-    node_up=sum(rec['up'] for rec in node_summary.values()); node_down=sum(rec['down'] for rec in node_summary.values())
-    stats=''.join(f'<div class="overview-stat"><span>{label}</span><b>{value}</b></div>' for label,value in [('Клиенты',len(subs)+len(direct)),('Подписок',len(subs)),('Передают трафик',active),('Всего трафика',size(total_up+total_down+node_up+node_down))])
-    services=latest.get('services',{}); names={'xray':'Xray · VLESS / Hysteria2','relay':'Telegram WEB Proxy / MTProto','awg':'AmneziaWG 2.0 / 3.1','openflux':'OpenFlux · Yandex Docs','caddy':'Caddy · HTTPS','panel':'Панель управления'}
-    state_labels={'active':'Запущен','inactive':'Остановлен','failed':'Сбой','activating':'Запускается','deactivating':'Останавливается','reloading':'Перезагружается','unknown':'Нет данных'}
-    services_html=''.join('<div class="service-line"><span>'+label+'</span><span class="badge '+('on' if fresh and services.get(key,{}).get('state')=='active' else '')+'">'+esc(state_labels.get(services.get(key,{}).get('state'),services.get(key,{}).get('state','Нет данных')) if fresh else 'Нет свежих данных')+'</span></div>' for key,label in names.items())
-    xray=services.get('xray',{}); start=xray.get('start_us'); xu=max(0,latest.get('uptime',0)-start/1e6) if start and latest.get('uptime') else None
-    detail=[('Время работы VPS',duration(latest.get('uptime'))),('Время работы Xray',duration(xu)),('Память Xray',size(xray.get('memory'))),('Задачи Xray',str(xray.get('tasks') if xray.get('tasks') is not None else '—')),('Нагрузка · 1 / 5 / 15 мин.',' / '.join(f'{v:.2f}' for v in latest.get('load',[])) or '—')]
-    details=''.join(f'<div class="detail-line"><span>{k}</span><strong>{v}</strong></div>' for k,v in detail)
-    controls=''.join(f'<button data-range="{n}" class="{"selected" if n==hours else ""}">{label}</button>' for n,label in ((1,'1 ч'),(6,'6 ч'),(24,'24 ч'),(168,'7 дн'),(720,'30 дн')))
-    records=client_records(subs,profiles,traffic,domain,proxy_link,node_summary=node_summary)
-    records=[r for r in records if r['id']!='primary']
-    shown=sorted(records,key=lambda r:(bool(r['totals']['active']),r['totals']['up']+r['totals']['down']),reverse=True)[:8]
-    component_modal=COMPONENT_MODAL_JS.replace('@@PATH@@',json.dumps(path)).replace('@@CSRF@@',json.dumps(csrf))
-    return component_modal+f'''<div data-live-block="health" class="live-block">{health}</div><section class="card resource-deck live-block" data-live-block="resources"><div class="resource-grid">{''.join(resources)}</div></section><div class="overview-stats live-block" data-live-block="overview">{stats}</div><div class="dashboard-grid"><section class="card graph-card"><div class="card-title"><div><span class="eyebrow">TRAFFIC / LIVE HISTORY</span><h2>Трафик прокси</h2></div><div class="range">{controls}</div></div><div class="graph-speeds live-block" data-live-block="speeds"><div><span>↑ Отправка</span><b>{size(latest.get('up_rate')) if traffic_fresh else '—'}</b><small> / с</small></div><div><span>↓ Получение</span><b>{size(latest.get('down_rate')) if traffic_fresh else '—'}</b><small> / с</small></div></div><div class="chart-wrap live-block" data-live-block="chart">{graph}</div><div class="legend"><span><i></i>Отправка</span><span class="down"><i></i>Получение</span>{node_legend}<span>Замер ~10 с, для 7/30 дней — часовые средние · UTC</span></div></section><section class="card"><div class="card-title"><h2>Службы и версия</h2><span class="pill">{esc(current)}</span></div><div class="node-label"><i></i><div class="node-domain">{esc(domain)}</div></div><div class="service-list live-block" data-live-block="services">{services_html}</div><div class="update-box"><div class="actions"><button id="checkUpdate">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="panelRelease">Панель</label><select id="panelRelease" aria-label="Версия панели"><option>Сначала загрузите список</option></select><button class="primary" id="startUpdate" hidden>Установить</button></div><p id="updateStatus" role="status">Можно обновиться или вернуться на прежний стабильный релиз GitLab</p></div></section></div><section class="card version-manager"><div class="card-title"><div><h2>Версии компонентов</h2><p>Обновление и откат без выпуска новой версии панели</p></div><button id="checkComponents">{icon('refresh')}Загрузить версии</button></div><div class="version-row"><label for="xrayRelease">Xray</label><select id="xrayRelease"><option>Сначала загрузите список</option></select><button data-component-install="xray" class="primary" disabled>Установить</button><small class="version-state" id="xrayCurrent">Текущая версия определяется…</small></div><div class="version-row"><label for="openfluxRelease">OpenFlux</label><select id="openfluxRelease"><option>Сначала загрузите список</option></select><button data-component-install="openflux" class="primary" disabled>Установить</button><small class="version-state" id="openfluxCurrent">Текущая версия определяется…</small></div><p id="componentStatus" class="note" role="status">Перед заменой создаётся резервная копия. Если служба не запустится, прежний бинарник восстановится автоматически.</p></section><div class="two-col equal"><section class="card"><div class="card-title"><h2>Ресурсы сервера</h2><span class="pill">VPS</span></div><div class="detail-list live-block" data-live-block="server-details">{details}</div></section><section class="card"><div class="card-title"><h2>Накопленный трафик</h2></div><div class="detail-list live-block" data-live-block="traffic-details"><div class="detail-line"><span>Отправлено</span><strong>↑ {size(total_up)}</strong></div><div class="detail-line"><span>Получено</span><strong>↓ {size(total_down)}</strong></div><div class="detail-line"><span>Через ноды</span><strong>{size(node_up+node_down) if node_summary else '—'}</strong></div><div class="detail-line"><span>Последнее измерение</span><strong>{str(age)+' с назад' if latest else 'Нет измерений'}</strong></div></div><p class="note">Только трафик прокси. Активность — передача данных за последние 90 секунд, не число устройств онлайн.</p></section></div><section class="card"><div class="card-title"><h2>Пользователи и подписки</h2><a href="{esc(path)}/users" class="btn quiet">Управление →</a></div><div class="live-block" data-live-block="clients">{client_glances(shown,path)}<small>Показано {len(shown)} из {len(records)} · сначала передающие данные</small></div></section><section class="card nodes-live-card"><div class="card-title"><div><h2>Ноды · трафик и пользователи</h2><p>Живые данные с подключённых нод, опрос раз в 15 секунд</p></div><span class="pill">{len((nodes or {}).get('nodes') or [])} / 16</span></div><div class="live-block" data-live-block="nodes">{nodes_glances(nodes,path)}</div></section>'''
+    active = sum(1 for s in subs if aggregate(s['live_profile_ids'], traffic, s.get('enabled', True))['active']
+                 or (s.get('enabled', True) and node_summary.get(s['id'], {}).get('active')))
+    active += sum(aggregate([u['id']], traffic, u.get('enabled', True))['active'] for u in direct)
+    total_up = sum(max(0, int(v.get('up', 0))) for v in traffic.values() if isinstance(v, dict)); total_down = sum(max(0, int(v.get('down', 0))) for v in traffic.values() if isinstance(v, dict))
+    node_up = sum(rec['up'] for rec in node_summary.values()); node_down = sum(rec['down'] for rec in node_summary.values())
+    services = latest.get('services', {})
+    svc_defs = [('xray', 'Xray', 'VLESS · Hysteria2 · TUIC', 'modules'),
+                ('relay', 'MTProto', 'Telegram WEB Proxy', 'chart'),
+                ('awg', 'AmneziaWG', 'протоколы 2.0 / 3.1', 'route'),
+                ('openflux', 'OpenFlux', 'Yandex Docs', 'link'),
+                ('caddy', 'Caddy', 'HTTPS', 'nodes'),
+                ('panel', 'Панель', 'Onyx Panel', 'grid')]
+    state_labels = {'active': 'active', 'inactive': 'down', 'failed': 'сбой', 'activating': 'старт', 'deactivating': 'стоп', 'reloading': 'reload', 'unknown': '—'}
+    svc_rows = []
+    svc_up = 0
+    for key, label, sub_label, ico in svc_defs:
+        on = fresh and services.get(key, {}).get('state') == 'active'
+        svc_rows.append('<div class="svc-row"><span class="svc-ico">' + icon(ico) + '</span><div class="svc-name"><b>' + label + '</b><small>' + esc(sub_label) + '</small></div><span class="badge ' + ('on' if on else '') + '">' + esc(state_labels.get(services.get(key, {}).get('state'), services.get(key, {}).get('state', '—')) if fresh else '—') + '</span></div>')
+    svc_rows_html = ''.join(svc_rows)
+    svc_alive = sum(1 for key, *_ in svc_defs if fresh and services.get(key, {}).get('state') == 'active')
+    xray = services.get('xray', {}); start = xray.get('start_us'); xu = max(0, latest.get('uptime', 0) - start / 1e6) if start and latest.get('uptime') else None
+    swap_used, swap_total = latest.get('swap_used'), latest.get('swap_total')
+    disk_used, disk_total = latest.get('disk_used'), latest.get('disk_total')
+    disk_pct = disk_used / disk_total * 100 if disk_used is not None and disk_total and fresh else None
+    cpu_pct = latest.get('cpu') if fresh else None
+    ram_pct = latest.get('ram_used') / latest.get('ram_total') * 100 if latest.get('ram_used') is not None and latest.get('ram_total') and fresh else None
+    load = ' / '.join(f'{v:.2f}' for v in latest.get('load', [])) or '—'
+    cores = latest.get("cores", "—")
+    gauges = (_gauge_card(cpu_pct, f'CPU · {cores} ' + (_plural(cores, 'ядро', 'ядра', 'ядер') if isinstance(cores, int) else 'ядер'), f'нагрузка {load}', 'var(--green)')
+              + _gauge_card(ram_pct, 'RAM · ' + size(latest.get('ram_total')), (size(latest.get('ram_used')) + ' занято · диск ' + (f'{disk_pct:.0f}%' if disk_pct is not None else '—')) if fresh else 'Нет измерений', 'var(--accent)'))
+    detail = [('Время работы VPS', duration(latest.get('uptime'))), ('Время работы Xray', duration(xu)),
+              ('Память Xray', size(xray.get('memory'))), ('Подкачка', 'Не используется' if swap_total == 0 else size(swap_used) + ' / ' + size(swap_total)),
+              ('Диск', (size(disk_used) + ' / ' + size(disk_total)) if disk_total else '—'), ('Нагрузка · 1/5/15 мин', load)]
+    details = ''.join(f'<div class="detail-line"><span>{k}</span><strong>{v}</strong></div>' for k, v in detail)
+    controls = ''.join(f'<button data-range="{n}" class="{"selected" if n == hours else ""}">{label}</button>' for n, label in ((1, '1 ч'), (6, '6 ч'), (24, '24 ч'), (168, '7 дн'), (720, '30 дн')))
+    records = client_records(subs, profiles, traffic, domain, proxy_link, node_summary=node_summary)
+    records = [r for r in records if r['id'] != 'primary']
+    shown = sorted(records, key=lambda r: (bool(r['totals']['active']), r['totals']['up'] + r['totals']['down']), reverse=True)[:5]
+    nodes_count = len((nodes or {}).get('nodes') or [])
+    top = _top_consumers_card(path, profiles, traffic)
+    return f'''<div class="bento"><div data-live-block="health" class="live-block bento-wide">{health}</div><section class="card card-flush span8 traffic-hero"><div class="card-title"><div class="traffic-head"><div><h2>Трафик</h2><p>все протоколы · {esc(domain)}</p></div><div class="range" role="group" aria-label="Диапазон">{controls}</div></div></div><div class="card-pad traffic-pad"><div class="graph-speeds live-block" data-live-block="speeds"><div class="speed-cell"><span>↑ Отправка</span><b>{size(latest.get('up_rate')) if traffic_fresh else '—'}</b><small>/с</small></div><div class="speed-cell"><span>↓ Получение</span><b>{size(latest.get('down_rate')) if traffic_fresh else '—'}</b><small>/с</small></div><div class="speed-cell speed-total"><span>Всего передано</span><b>{size(total_up + total_down + node_up + node_down)}</b></div></div><div class="chart-wrap live-block" data-live-block="chart">{graph}</div><div class="legend"><span><i></i>Отправка</span><span class="down"><i></i>Получение</span>{node_legend}<span>Замер ~10 с, для 7/30 дней — часовые средние · UTC</span></div></div></section><div class="stack span4 live-block" data-live-block="resources">{gauges}</div><section class="card card-flush span6"><div class="card-title"><div><h2>Клиенты</h2><p>{active} передают · {len(records)} всего</p></div><a class="chip-link" href="{esc(path)}/users">Все клиенты ↗</a></div><div class="card-pad live-block card-pad-rows" data-live-block="clients">{client_glances(shown, path)}</div></section><section class="card card-flush span6"><div class="card-title"><div><h2>Службы</h2><p>{svc_alive} из {len(svc_defs)} активны</p></div><span class="badge {'on' if svc_alive == len(svc_defs) and fresh else ''}">{'стабильно' if svc_alive == len(svc_defs) and fresh else 'проверить'}</span></div><div class="card-pad live-block card-pad-rows" data-live-block="services">{svc_rows_html}</div><div class="card-pad svc-foot"><a class="btn quiet" href="{esc(path)}/updates">{icon('refresh')}Обновления и версии</a></div></section><section class="card card-flush span6"><div class="card-title"><div><h2>Ноды</h2><p>{'опрос раз в 15 секунд' if nodes_count else 'не подключены'}</p></div><a class="chip-link" href="{esc(path)}/nodes">Управлять</a></div><div class="card-pad live-block card-pad-rows" data-live-block="nodes">{nodes_glances(nodes, path)}</div></section>{top}<section class="card card-flush span6"><div class="card-title"><div><h2>Сервер</h2><p>{('v' + esc(current)) if current else 'VPS'}</p></div></div><div class="card-pad live-block" data-live-block="server-details"><div class="detail-list">{details}</div></div></section><section class="card card-flush span6"><div class="card-title"><div><h2>Накопленный трафик</h2></div></div><div class="card-pad"><div class="detail-list live-block" data-live-block="traffic-details"><div class="detail-line"><span>Отправлено</span><strong>↑ {size(total_up)}</strong></div><div class="detail-line"><span>Получено</span><strong>↓ {size(total_down)}</strong></div><div class="detail-line"><span>Через ноды</span><strong>{size(node_up + node_down) if node_summary else '—'}</strong></div><div class="detail-line"><span>Последнее измерение</span><strong>{str(age) + ' с назад' if latest else 'Нет измерений'}</strong></div></div><p class="note">Только трафик прокси. Активность — передача данных за последние 90 секунд, не число устройств онлайн.</p></div></section></div>'''
 
 
 def _top_consumers_card(path, profiles, traffic, limit=5):
-    """Card with the profiles that used the most traffic (lifetime counters)."""
+    """Карточка bento-сетки: профили с наибольшим трафиком за всё время наблюдения."""
     rows = []
     for user in (profiles or []):
         if str(user.get('id', '')) == 'primary':
@@ -2541,31 +2658,16 @@ def _top_consumers_card(path, profiles, traffic, limit=5):
     if not rows:
         return ''
     items = ''.join(
-        f'<a class="top-row" href="{esc(path)}/users"><span class="client-initial">{esc(r["name"][:1].upper() or "?")}</span>'
-        f'<span class="top-name">{esc(r["name"])}<small>↑ {size(r["up"])} · ↓ {size(r["down"])}</small></span>'
-        f'<b>{size(r["total"])}</b></a>' for r in rows)
-    return (f'<section class="card" data-live-block="top"><div class="card-title"><div><h2>Топ потребителей трафика</h2>'
-            f'<p>Профили с наибольшим объёмом за всё время наблюдения</p></div></div>'
-            f'<div class="top-list">{items}</div></section>')
-
-
-def dashboard_body(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours=1, nodes=None, node_series=None, node_summary=None):
-    """Dashboard overview without version management controls."""
-    body = _dashboard_body_legacy(data, subs, profiles, traffic, path, domain, csrf, proxy_link, current, hours, nodes=nodes, node_series=node_series, node_summary=node_summary)
-    replacement = (f'<div class="update-box"><div class="actions">'
-                   f'<a class="btn quiet" href="{esc(path)}/updates">{icon("refresh")}Управление обновлениями</a>'
-                   f'</div><p>Версии панели, Xray и OpenFlux находятся в отдельном разделе.</p></div>'
-                   f'</section></div><div class="two-col equal">')
-    body = re.sub(r'<div class="update-box">.*?</div></section></div><section class="card version-manager">.*?</section><div class="two-col equal">',
-                  replacement, body, count=1, flags=re.S)
-    top = _top_consumers_card(path, profiles, traffic)
-    if top:
-        body = body + top
-    return body
+        f'<a class="quick-client" href="{esc(path)}/users">{_mini_avatar(r["name"])}'
+        f'<span class="quick-client-main"><b>{esc(r["name"])}</b><small>↑ {size(r["up"])} · ↓ {size(r["down"])}</small></span>'
+        f'<span class="quick-value">{size(r["total"])}</span></a>' for r in rows)
+    return (f'<section class="card card-flush span6 live-block" data-live-block="top"><div class="card-title"><div><h2>Топ по трафику</h2>'
+            f'<p>за всё время наблюдения</p></div></div>'
+            f'<div class="card-pad card-pad-rows">{items}</div></section>')
 
 
 def dashboard_page(body, path, csrf):
-    return f'''<div class="page-head"><div><h1>Дашборд</h1><p>Сервер, подключения и использование трафика</p></div><div class="actions"><span id="liveIndicator" class="live-indicator"><i></i><b>Онлайн</b><small id="liveAge">сейчас</small></span><button id="refreshDashboard" class="head-search" aria-label="Обновить" title="Обновить">{icon('refresh')}</button></div></div><p id="dashboardNotice" class="note" role="status" hidden></p><div id="dashboardContent">{body}</div><dialog id="updateAvailableDialog" class="update-dialog" aria-labelledby="updateDialogTitle"><div class="dialog-head"><div><small class="eyebrow">НОВАЯ ВЕРСИЯ</small><h2 id="updateDialogTitle">Доступно обновление</h2></div><button type="button" data-close-dialog aria-label="Закрыть уведомление">×</button></div><div class="update-dialog-body"><div class="update-release"><span class="update-release-mark">{icon('refresh')}</span><div><span>Onyx Panel</span><strong><span id="updateCurrentVersion"></span> → <span id="updateLatestVersion"></span></strong></div></div><p>Подробности, выбор версии и безопасная установка находятся в разделе «Обновления».</p></div><div class="update-dialog-actions"><button type="button" id="updateNoticeLater">Позже</button><a class="btn primary" href="{esc(path)}/updates">Открыть обновления</a></div></dialog><script>
+    return f'''<div class="page-head"><div><span class="eyebrow"><span class="dot"></span>Живые данные · Onyx Panel</span><h1>Дашборд</h1><p>Сервер, подключения и использование трафика — обновляется в реальном времени.</p></div><div class="actions"><span id="liveIndicator" class="live-indicator"><i></i><b>Онлайн</b><small id="liveAge">сейчас</small></span><button id="refreshDashboard" class="head-search" aria-label="Обновить" title="Обновить">{icon('refresh')}</button><a class="btn primary" href="{esc(path)}/users">Клиент<span class="tail">{icon('plus')}</span></a></div></div><p id="dashboardNotice" class="note" role="status" hidden></p><div id="dashboardContent">{body}</div><dialog id="updateAvailableDialog" class="update-dialog" aria-labelledby="updateDialogTitle"><div class="dialog-head"><div><small class="eyebrow">НОВАЯ ВЕРСИЯ</small><h2 id="updateDialogTitle">Доступно обновление</h2></div><button type="button" data-close-dialog aria-label="Закрыть уведомление">×</button></div><div class="update-dialog-body"><div class="update-release"><span class="update-release-mark">{icon('refresh')}</span><div><span>Onyx Panel</span><strong><span id="updateCurrentVersion"></span> → <span id="updateLatestVersion"></span></strong></div></div><p>Подробности, выбор версии и безопасная установка находятся в разделе «Обновления».</p></div><div class="update-dialog-actions"><button type="button" id="updateNoticeLater">Позже</button><a class="btn primary" href="{esc(path)}/updates">Открыть обновления</a></div></dialog><script>
 const root=document.getElementById('dashboardContent'),notice=document.getElementById('dashboardNotice'),live=document.getElementById('liveIndicator'),liveAge=document.getElementById('liveAge'),updateDialog=document.getElementById('updateAvailableDialog');let range=1,busy=false,updating=false,lastSuccess=Date.now();
 function updateDismissed(version){{try{{return localStorage.getItem('onyx-update-dismissed:'+version)==='1'}}catch(e){{return false}}}}
 function dismissUpdate(version){{try{{localStorage.setItem('onyx-update-dismissed:'+version,'1')}}catch(e){{}}}}
@@ -2591,6 +2693,99 @@ document.getElementById('updateNoticeLater').addEventListener('click',()=>update
 </script>'''
 
 
+CSS += '''
+/* ============ BENTO DASHBOARD (концепт newdesign) ============ */
+.bento{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:18px}
+.bento>.card{margin:0}
+.span8{grid-column:span 8}.span6{grid-column:span 6}.span4{grid-column:span 4}
+.bento-wide{grid-column:1/-1}
+.live-block:empty{display:none}
+.stack{display:grid;gap:18px;grid-template-rows:1fr 1fr;min-width:0}
+.stack .card{display:flex;flex-direction:column;justify-content:center;margin:0}
+@media(max-width:1100px){.span8,.span6,.span4{grid-column:span 12}.stack{grid-template-rows:none;grid-auto-rows:1fr}}
+/* Hero трафика */
+.traffic-hero{overflow:hidden}
+.traffic-hero .card-title{padding:22px 24px 0}
+.traffic-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;width:100%;flex-wrap:wrap}
+.traffic-pad{padding-top:14px}
+.graph-speeds{display:flex;align-items:baseline;gap:26px;flex-wrap:wrap;margin-bottom:6px}
+.speed-cell{display:flex;align-items:baseline;gap:7px}
+.speed-cell span{font-size:12px;color:var(--muted);font-weight:600}
+.speed-cell b{font:600 26px/1.1 var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.speed-cell small{font-size:13px;color:var(--muted)}
+.speed-total{margin-left:auto}
+.speed-total b{font-size:20px;color:var(--ink-soft)}
+.chart-wrap svg{display:block;width:100%;height:220px}
+.chart-wrap text{font:10px var(--font-mono);fill:var(--faint)}
+.legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend span i{width:14px;height:3px;border-radius:2px;background:var(--accent)}
+.legend span.down i{background:var(--amber)}
+.legend span:last-child{margin-left:auto;color:var(--faint)}
+.legend-node i{width:9px!important;height:9px!important;border-radius:50%}
+.chart-empty{display:grid;place-items:center;gap:10px;min-height:180px;color:var(--faint);text-align:center;font-size:12.5px}
+.chart-empty .ico{width:30px;height:30px}
+/* Гейджи CPU/RAM */
+.gauge{display:flex;align-items:center;gap:16px}
+.gauge svg{flex:0 0 auto}
+.gauge-meta{min-width:0}
+.stat-label{font-size:12px;color:var(--muted);font-weight:600}
+.gauge-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+/* Строки служб / клиентов / топ */
+.svc-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.svc-row:last-child{border-bottom:none}
+.svc-ico{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:var(--raised);border:1px solid var(--line-soft);color:var(--muted);flex:0 0 auto}
+.svc-ico .ico{width:17px;height:17px}
+.svc-name{flex:1;min-width:0}
+.svc-name b{display:block;font-size:13.5px}
+.svc-name small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+.svc-foot{padding-top:0}
+.quick-client{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft);color:inherit;text-decoration:none;border-radius:10px}
+.quick-client:last-child{border-bottom:none}
+@media(hover:hover){a.quick-client:hover{background:var(--raised)}}
+.mini-avatar{width:34px;height:34px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff}
+.quick-client-main{flex:1;min-width:0}
+.quick-client-main b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quick-client-main small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+.quick-value{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--ink-soft)}
+.chip-link{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink);white-space:nowrap;text-decoration:none}
+.chip-link:hover{filter:brightness(1.12)}
+.card-pad-rows{padding-top:10px;padding-bottom:16px}
+.detail-list{display:grid;gap:0}
+.detail-line{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+.detail-line:last-child{border-bottom:none}
+.detail-line span{color:var(--muted)}
+.detail-line strong{font-family:var(--font-mono);font-weight:600;font-size:12.5px;text-align:right}
+.empty{color:var(--muted);font-size:12.5px}
+.empty a{color:var(--accent)}
+/* ---------- Клиенты: тулбар и таблица концепта ---------- */
+.clients-toolbar{display:flex;align-items:center;gap:12px;padding:0;border:0;margin-bottom:20px;flex-wrap:wrap}
+.clients-toolbar .search-field{flex:1;min-width:220px;display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:10px 16px;color:var(--faint)}
+.clients-toolbar .search-field input{border:0;background:transparent;padding:0;font-size:13.5px;color:var(--text);outline:none}
+.clients-toolbar .search-field:focus-within{border-color:var(--accent);box-shadow:0 0 0 3.5px var(--accent-soft)}
+.clients-toolbar .selx-trigger{border-radius:999px;background:var(--surface)}
+.client-initial.mini-avatar,.mini-avatar{width:32px;height:32px;border-radius:11px;font-size:12px;font-weight:700;color:#fff}
+.icon-btn{width:33px;height:33px;border-radius:11px;display:grid;place-items:center;border:1px solid var(--line-soft);background:var(--surface);color:var(--muted);padding:0;transition:all .22s var(--ease-spring)}
+.icon-btn .ico{width:15px;height:15px}
+.icon-btn:hover{color:var(--text);border-color:var(--line);transform:translateY(-1px);box-shadow:var(--shadow-1)}
+.icon-btn.danger:hover{color:var(--red);border-color:var(--red);box-shadow:none}
+.clients-panel{border-radius:var(--r-lg);border-color:var(--line-soft);box-shadow:var(--shadow-1);overflow:hidden}
+.clients-panel .table-scroll{padding:0 8px}
+.row-actions{display:flex;gap:6px;justify-content:flex-end}
+.row-actions form{margin:0;display:contents}
+.row-actions .icon-btn{width:33px;height:33px;border:1px solid var(--line-soft);border-radius:11px;background:var(--surface)}
+@media(max-width:700px){.row-actions .icon-btn{width:38px;height:38px}}
+/* Переключатели доступа — метрики концепта */
+.access-switch{padding:0;width:46px;height:27px;background:#3a3633;border:0;border-radius:999px;display:block;position:relative;transition:background .3s var(--ease-spring)}
+.access-switch:after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;background:#fff;border-radius:50%;box-shadow:0 2px 5px rgba(0,0,0,.4);transition:left .3s var(--ease-spring)}
+.access-switch[aria-checked=true]{background:var(--accent)}
+.access-switch[aria-checked=true]:after{left:22px}
+.access-switch:disabled{opacity:.6}
+.bulk-bar{background:var(--ink);color:#fff;border-radius:999px;box-shadow:var(--shadow-2);font-size:13px;padding:10px 12px 10px 18px;gap:14px}
+.bulk-bar .btn{padding:7px 14px;font-size:12.5px}
+.list-footer{display:flex;justify-content:space-between;gap:12px;padding:12px 20px;font-size:11px;color:var(--faint);border-top:1px solid var(--line-soft)}
+@media(max-width:900px){.clients-toolbar .selx{flex:1 1 calc(50% - 8px);max-width:none}.clients-toolbar .search-field{flex-basis:100%}}
+'''
 CSS += '''
 .cascade-card{padding:20px}.cascade-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}.cascade-head h2{font-size:16px;overflow-wrap:anywhere}.cascade-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px}.cascade-endpoint{font:11px ui-monospace,monospace;color:var(--muted);overflow-wrap:anywhere}.cascade-check{margin-top:12px;font-size:12px;color:var(--muted)}.cascade-latency.ok{color:var(--green)}.cascade-latency.err{color:var(--red)}.cascade-status{min-height:18px;font-size:11px;color:var(--muted);margin:10px 0 0}.cascade-status.err{color:var(--red)}.badge.warn{color:var(--amber)}.badge.warn:before{background:var(--amber)}
 .cascade-section{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.cascade-section details{margin:0}.cascade-section summary{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:12px;font-weight:550;color:var(--muted);list-style:none;user-select:none}.cascade-section summary::-webkit-details-marker{display:none}.cascade-section summary:hover{color:var(--text)}.cascade-section summary:before{content:"";flex:0 0 auto;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s}.cascade-section[open] summary:before{transform:rotate(45deg)}.cascade-section form{margin-top:13px}
@@ -3052,7 +3247,7 @@ def updates_ui(path, csrf, current):
 <section class="card updates-hero"><div class="updates-hero-copy"><span class="updates-hero-icon">{icon('refresh')}</span><div><h2>Центр обновлений</h2><p>Можно установить новую версию или вернуться на предыдущую. Перед заменой автоматически создаётся резервная копия.</p></div></div><div class="actions"><span class="pill">RC · ручная установка</span></div></section>
 <div class="updates-grid">
 <section class="card updates-card"><div class="card-title"><div><h2>Onyx Panel</h2><p>Интерфейс, менеджер подключений и служебные модули</p></div><span class="pill">Панель</span></div><div class="update-installed"><span>Установленная версия</span><strong id="panelCurrent">{esc(current)}</strong></div><div class="update-control panel-update-control"><label for="panelRelease">Доступная версия</label><select id="panelRelease" aria-label="Версия панели"><option>Загрузите список версий</option></select><button id="refreshAll">{icon('refresh')}Проверить обновление</button><button class="primary" id="startUpdate" disabled>Установить</button></div><p id="updateStatus" class="note update-status" role="status">Проверяем опубликованные релизы…</p></section>
-<section class="card updates-card"><div class="card-title"><div><h2>Компоненты</h2><p>Обновление Xray, OpenFlux, AmneziaWG и MTProto с их репозиториев</p></div><span class="pill">Ядро</span></div><div class="component-stack" id="componentGrid" data-csrf="{esc(csrf)}" data-check="{esc(path)}/component-check" data-install="{esc(path)}/component-install" data-status="{esc(path)}/component-status" data-verify="{esc(path)}/component-verify"><div class="component-item" data-component="xray" data-label="Xray"><div class="component-item-head"><strong>Xray</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия Xray"></select><button class="primary comp-icon" title="Обновить Xray" aria-label="Обновить Xray">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="openflux" data-label="OpenFlux"><div class="component-item-head"><strong>OpenFlux</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия OpenFlux"></select><button class="primary comp-icon" title="Обновить OpenFlux" aria-label="Обновить OpenFlux">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="awg" data-label="AmneziaWG"><div class="component-item-head"><strong>AmneziaWG</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия AmneziaWG"></select><button class="primary comp-icon" title="Обновить AmneziaWG" aria-label="Обновить AmneziaWG">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="mtproto" data-label="MTProto"><div class="component-item-head"><strong>MTProto</strong><small data-ver>…</small></div><div class="update-control"><button class="primary comp-icon" title="Пересобрать из исходников" aria-label="Пересобрать MTProto из исходников">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div></div><p class="muted" style="font-size:11px;margin:10px 0 0">Перед заменой бинарника создаётся его копия; если новая версия не запустится, предыдущая вернётся автоматически. MTProto собирается из исходников, закреплённых за версией панели. Пререлизы OpenFlux помечены отдельно.</p></section>
+<section class="card updates-card"><div class="card-title"><div><h2>Компоненты</h2><p>Обновление Xray, OpenFlux, AmneziaWG и MTProto с их репозиториев</p></div><span class="pill">Ядро</span></div><div class="component-stack" id="componentGrid" data-csrf="{esc(csrf)}" data-check="{esc(path)}/component-check" data-install="{esc(path)}/component-install" data-status="{esc(path)}/component-status" data-verify="{esc(path)}/component-verify"><div class="component-item" data-component="xray" data-label="Xray"><div class="component-item-head"><strong>Xray</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия Xray"></select><button class="accent comp-icon" title="Обновить Xray" aria-label="Обновить Xray">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="openflux" data-label="OpenFlux"><div class="component-item-head"><strong>OpenFlux</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия OpenFlux"></select><button class="accent comp-icon" title="Обновить OpenFlux" aria-label="Обновить OpenFlux">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="awg" data-label="AmneziaWG"><div class="component-item-head"><strong>AmneziaWG</strong><small data-ver>…</small></div><div class="update-control"><select data-sel aria-label="Версия AmneziaWG"></select><button class="accent comp-icon" title="Обновить AmneziaWG" aria-label="Обновить AmneziaWG">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div><div class="component-item" data-component="mtproto" data-label="MTProto"><div class="component-item-head"><strong>MTProto</strong><small data-ver>…</small></div><div class="update-control"><button class="accent comp-icon" title="Пересобрать из исходников" aria-label="Пересобрать MTProto из исходников">{icon('refresh')}</button></div><p class="component-item-status" role="status"></p></div></div><p class="muted" style="font-size:11px;margin:10px 0 0">Перед заменой бинарника создаётся его копия; если новая версия не запустится, предыдущая вернётся автоматически. MTProto собирается из исходников, закреплённых за версией панели. Пререлизы OpenFlux помечены отдельно.</p></section>
 </div><div class="update-safety"><div><b>Резервная копия</b><small>Создаётся до замены файлов и бинарников.</small></div><div><b>Проверка запуска</b><small>После установки служба проходит автоматическую проверку.</small></div><div><b>Автоматический откат</b><small>Если новая версия не запустится, прежняя будет восстановлена.</small></div></div>
 <div class="move-overlay" id="updOverlay" hidden><div class="move-card" id="updCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" id="updRing" cx="28" cy="28" r="24"/></svg><b id="updSecs">↑</b></div><h3 id="updTitle">Обновить панель?</h3><p id="updText"></p><div class="actions upd-actions" id="updActions" hidden><button type="button" id="updCancel">Отмена</button><button type="button" class="primary" id="updGo">Обновить</button></div></div></div>
 <script>
@@ -3097,7 +3292,7 @@ def card_expand(label='Развернуть или свернуть карточ
     """Стрелка в правом верхнем углу карточки: разворачивает и сворачивает её содержимое."""
     return ('<button type="button" class="card-expand" aria-expanded="false" aria-label="'+label+'" title="'+label+'">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-            '<path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></button>')
+            '<path d="m6 9 6 6 6-6"/></svg></button>')
 
 
 def spark_svg(values, limit=None, width=96, height=26):
@@ -3129,29 +3324,55 @@ def limit_bar(used, limit_gb):
 
 
 PUBLIC_CSS = '''
-*{box-sizing:border-box;margin:0}body{min-height:100vh;background:#071116;color:#e9f4f6;font:15px/1.6 "Segoe UI",system-ui,sans-serif;display:flex;justify-content:center;padding:34px 16px 60px}
-body:before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at 18% 12%,#56decb14,transparent 55%),radial-gradient(ellipse at 85% 90%,#f5c9890e,transparent 50%);pointer-events:none}
-.wrap{width:min(660px,100%);position:relative}
-.brand{display:flex;align-items:center;gap:11px;margin-bottom:26px}.brand img{width:38px;height:38px;border-radius:12px}.brand b{font-size:13px;letter-spacing:.04em}.brand small{display:block;font:9px/1.6 ui-monospace,monospace;color:#91aeb8;letter-spacing:.14em}
-h1{font-size:27px;line-height:1.2;letter-spacing:-.04em;margin-bottom:6px}
-.sub{color:#91aeb8;font-size:13px;margin-bottom:26px}
-.card{background:#0f2028;border:1px solid #24404b;border-radius:18px;padding:22px;margin-bottom:16px}
-.card h2{font-size:15px;margin-bottom:4px}.card>p{color:#91aeb8;font-size:12px}
-.metrics{display:flex;gap:26px;flex-wrap:wrap;margin:16px 0 4px}.metrics div span{display:block;font-size:10px;color:#91aeb8;margin-bottom:3px}.metrics div b{font:500 18px ui-monospace,monospace}
-.bar{height:5px;background:#24404b;border-radius:6px;overflow:hidden;margin:14px 0 6px}.bar i{display:block;height:100%;background:#56decb;border-radius:6px}.bar.warn i{background:#f5c989}.bar.over i{background:#ff9993}
-.access{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid #1c323d}
+:root{--bg:#0e1214;--surface:#161c1f;--surface-soft:#1c2427;--ink:#edf2f1;--ink-soft:#c8d2d0;--muted:#8b9796;--faint:#5c6866;--line:#252e2d;--line-soft:#1f2827;--accent:#2dd4bf;--accent-soft:rgba(45,212,191,.13);--accent-ink:#5eead4;--ok:#34d399;--ok-soft:rgba(52,211,153,.13);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.13);--err:#f87171;--r-lg:26px;--r-md:18px;--r-sm:12px;--shadow-1:0 1px 2px rgba(0,0,0,.35),0 10px 30px -12px rgba(0,0,0,.5);--shadow-2:0 2px 6px rgba(0,0,0,.4),0 24px 60px -20px rgba(0,0,0,.65);--shadow-accent:0 8px 28px -8px rgba(45,212,191,.5);--ease-spring:cubic-bezier(.32,.72,0,1);--font-mono:ui-monospace,"JetBrains Mono",Consolas,monospace}
+*{box-sizing:border-box;margin:0}
+body{min-height:100dvh;background:var(--bg);color:var(--ink);font:15px/1.55 "Manrope","Segoe UI",system-ui,sans-serif;display:flex;justify-content:center;padding:34px 18px 60px;-webkit-font-smoothing:antialiased}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;background-image:radial-gradient(rgba(255,255,255,.028) 1px,transparent 1px);background-size:22px 22px;mask-image:linear-gradient(to bottom,black,transparent 60%);-webkit-mask-image:linear-gradient(to bottom,black,transparent 60%)}
+body:after{content:"";position:fixed;inset:-20% -10%;pointer-events:none;background:radial-gradient(38rem 38rem at 18% 22%,rgba(45,212,191,.075),transparent 65%),radial-gradient(34rem 34rem at 84% 78%,rgba(45,212,191,.055),transparent 65%),radial-gradient(26rem 26rem at 62% 12%,rgba(148,130,220,.05),transparent 65%);animation:onyx-drift 46s var(--ease-spring) infinite alternate}
+@keyframes onyx-drift{from{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(2.5%,-1.5%,0) scale(1.04)}to{transform:translate3d(-2%,2%,0) scale(1.02)}}
+.wrap{width:min(660px,100%);position:relative;z-index:1}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:26px}.brand img{width:38px;height:38px;border-radius:12px;background:#0c0a09;padding:5px}.brand b{font-size:13px;letter-spacing:.04em}.brand small{display:block;font:10px/1.6 var(--font-mono);color:var(--muted);letter-spacing:.14em}
+h1{font-size:30px;line-height:1.05;letter-spacing:-.03em;margin-bottom:8px;font-weight:600}
+.sub{color:var(--muted);font-size:14px;margin-bottom:26px}
+.card{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-lg);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-1)}
+.card h2{font-size:17px;margin-bottom:4px;letter-spacing:-.015em}.card>p{color:var(--muted);font-size:12.5px}
+.metrics{display:flex;gap:26px;flex-wrap:wrap;margin:16px 0 4px}.metrics div span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px;font-weight:600}.metrics div b{font:600 20px/1.1 var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.bar{height:8px;background:var(--line-soft);border-radius:5px;overflow:hidden;margin:12px 0 6px}.bar i{display:block;height:100%;background:var(--accent);border-radius:5px}.bar.warn i{background:var(--warn)}.bar.over i{background:var(--err)}
+.access{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid var(--line-soft)}
 .access:first-of-type{border-top:0;padding-top:0}
-.access .qr{width:96px;height:96px;flex:0 0 auto;background:#fff;border-radius:10px;padding:5px}
+.access .qr{width:96px;height:96px;flex:0 0 auto;background:#fff;border-radius:14px;padding:5px;box-shadow:inset 0 0 0 1px var(--line-soft)}
 .access .qr img{display:block;width:100%;height:100%;image-rendering:pixelated}
-.access div{min-width:0}.access b{display:block;font-size:13px;margin-bottom:2px}.access small{display:block;color:#91aeb8;font-size:11px;margin-bottom:8px}
-.link-row{display:flex;gap:8px;margin-top:14px}.link-row input{flex:1;min-width:0;background:#0a1920;border:1px solid #24404b;color:#e9f4f6;border-radius:9px;padding:10px 12px;font:11px ui-monospace,monospace}
-button{display:inline-flex;align-items:center;padding:10px 15px;background:#152b35;color:#e9f4f6;border:1px solid #24404b;border-radius:9px;font-size:12px;font-weight:550;cursor:pointer}button.primary{background:#56decb;border-color:#56decb;color:#052820}
-ol{margin:14px 0 0;padding-left:20px;color:#91aeb8;font-size:13px}ol li{margin-bottom:9px}ol b{color:#e9f4f6;font-weight:550}
-.apps{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.apps span{padding:5px 10px;border:1px solid #24404b;border-radius:8px;font-size:11px;color:#91aeb8}
-.until{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid #24404b;border-radius:9px;background:#0a1920;font-size:12px;color:#91aeb8;margin-top:6px}
-footer{color:#5c7883;font-size:10px;text-align:center;margin-top:26px;letter-spacing:.06em}
-.dead{text-align:center;padding:46px 20px}.dead b{display:block;font-size:19px;margin-bottom:8px}.dead p{color:#91aeb8;font-size:13px}
-@media(max-width:520px){h1{font-size:23px}.card{padding:18px}.access .qr{width:82px;height:82px}}
+.access div{min-width:0}.access b{display:block;font-size:13.5px;margin-bottom:2px}.access small{display:block;color:var(--muted);font-size:11.5px;margin-bottom:8px}
+.link-row{display:flex;gap:8px;margin-top:14px}.link-row input{flex:1;min-width:0;background:var(--surface-soft);border:1px solid var(--line);color:var(--ink);border-radius:var(--r-sm);padding:11px 14px;font:11px var(--font-mono)}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;transition:transform .25s var(--ease-spring),box-shadow .25s var(--ease-spring),border-color .25s var(--ease-spring)}
+button:hover,.btn:hover{transform:translateY(-1px);border-color:var(--faint);box-shadow:var(--shadow-1)}
+button.primary,.btn.primary{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+button.ghost,.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}button.ghost:hover,.btn.ghost:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+ol{margin:14px 0 0;padding-left:20px;color:var(--muted);font-size:13.5px}ol li{margin-bottom:9px}ol b{color:var(--ink);font-weight:600}
+.apps{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}.apps span{padding:5px 12px;border:1px solid var(--line);border-radius:999px;font-size:11.5px;color:var(--muted);font-weight:600}
+.until{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid var(--line-soft);border-radius:999px;background:var(--surface-soft);font-size:12px;color:var(--muted);margin-top:6px}
+footer{color:var(--faint);font-size:10.5px;text-align:center;margin-top:26px;letter-spacing:.1em;font-family:var(--font-mono);text-transform:uppercase}
+.dead{text-align:center;padding:46px 20px}.dead b{display:block;font-size:19px;margin-bottom:8px}.dead p{color:var(--muted);font-size:13px}
+/* Подписка в духе концепта: hero + usage + QR-карточки */
+.sub-card{width:100%;max-width:860px}
+.sub-hero{text-align:center;padding:34px 24px 10px}
+.sub-hero .eyebrow{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:10.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.sub-hero .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft),0 0 10px rgba(52,211,153,.55)}
+.sub-hero h1{font-size:30px}
+.sub-hero .sub{margin-left:auto;margin-right:auto;max-width:56ch}
+.usage{padding:16px 24px 4px}
+.usage .usage-head{display:flex;justify-content:space-between;align-items:baseline}
+.usage .stat-label{font-size:12px;color:var(--muted);font-weight:600}
+.usage .num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;padding:20px 24px 26px}
+.qr-card{background:var(--surface-soft);border:1px solid var(--line-soft);border-radius:var(--r-md);padding:18px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px;transition:transform .3s var(--ease-spring),box-shadow .3s var(--ease-spring)}
+.qr-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-2)}
+.qr-box{width:148px;height:148px;border-radius:16px;background:#fff;display:grid;place-items:center;box-shadow:inset 0 0 0 1px var(--line-soft);padding:8px}
+.qr-box img{display:block;width:100%;height:100%;image-rendering:pixelated}
+.qr-card h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.015em}
+.qr-card p{margin:-6px 0 0;font-size:12px;color:var(--muted)}
+.links-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;padding:4px 24px 26px}
+@media(max-width:520px){h1{font-size:26px}.card{padding:18px}.access .qr{width:82px;height:82px}.qr-grid{grid-template-columns:1fr 1fr;padding:16px 14px 20px}.qr-box{width:100%;height:auto;aspect-ratio:1}}
 '''
 
 
@@ -3171,38 +3392,43 @@ def subscription_page_html(sub, profiles, used, limit_gb, expiry, domain, qrs):
     """Личная страница клиента по ссылке подписки: QR, инструкция, лимит.
 
     qrs — список {label, hint, link, png} с base64-PNG каждого протокола."""
-    head = ('<div class="wrap"><header class="brand"><img src="data:image/svg+xml,'
+    eyebrow = 'Личный доступ'
+    if expiry:
+        eyebrow = 'активна до ' + time.strftime('%d.%m.%Y', time.localtime(int(expiry)))
+    head = ('<div class="wrap sub-card"><header class="brand"><img src="data:image/svg+xml,'
             + quote(ONYX_MARK_SVG, safe='') + '" alt="">'
             '<div><b>Onyx Panel</b><small>ЛИЧНЫЙ ДОСТУП</small></div></header>'
+            '<div class="card" style="padding:0"><div class="sub-hero">'
+            '<div class="eyebrow"><span class="dot"></span>'+esc(eyebrow)+'</div>'
             '<h1>'+esc(sub.get('name', 'Ваш доступ'))+'</h1>'
-            '<p class="sub">Один профиль — все протоколы. Подключите устройства по инструкции ниже.</p>')
-    metrics = '<div class="metrics"><div><span>Трафик за месяц</span><b>'+size(used)+'</b></div></div>'
+            '<p class="sub">Все протоколы в одном месте. Наведите камеру — клиент подхватит ключ сам.</p></div>')
+    usage = '<div class="usage"><div class="usage-head"><span class="stat-label">Трафик за месяц</span><span class="num"><b>'+size(used)+'</b>'+((' <span class="muted">из '+str(limit_gb)+' ГБ</span>') if limit_gb else '')+'</span></div>'
     if limit_gb:
         share = min(100.0, 100.0 * used / (limit_gb * 2**30)) if limit_gb else 0
         cls = 'bar over' if share >= 100 else ('bar warn' if share >= 80 else 'bar')
-        metrics += '<div class="'+cls+'"><i style="width:%.1f%%"></i></div>' % share
-        metrics += '<p class="sub" style="margin-top:8px">Месячный лимит: '+size(used)+' из '+str(limit_gb)+' ГБ.</p>'
-    if expiry:
-        metrics += ('<span class="until">⏳ Доступ активен до '
-                    + time.strftime('%d.%m.%Y', time.localtime(int(expiry)))+'</span>')
+        usage += '<div class="'+cls+'"><i style="width:%.1f%%"></i></div>' % share
+    else:
+        usage += '<div class="bar"><i style="width:100%%;opacity:.18"></i></div>'
+    usage += '</div>'
     rows = []
     for item in qrs:
-        rows.append('<div class="access"><span class="qr"><img alt="QR: '+esc(item['label'])+'" src="data:image/png;base64,'+item['png']+'"></span>'
-                    '<div><b>'+esc(item['label'])+'</b><small>'+esc(item.get('hint', ''))+'</small>'
-                    '<div class="link-row"><input readonly value="'+esc(item.get('link', ''))+'" aria-label="Ссылка '+esc(item['label'])+'">'
-                    '<button type="button" data-copy="'+esc(item.get('link', ''))+'">Копировать</button></div></div></div>')
+        rows.append('<div class="qr-card"><span class="qr-box"><img alt="QR: '+esc(item['label'])+'" src="data:image/png;base64,'+item['png']+'"></span>'
+                    '<h3>'+esc(item['label'])+'</h3><p>'+esc(item.get('hint', ''))+'</p>'
+                    '<button type="button" class="btn" style="padding:8px 15px;font-size:12.5px" data-copy="'+esc(item.get('link', ''))+'">Скопировать ключ</button></div>')
     page = (_public_document(sub.get('name', 'Ваш доступ'),
-             head+'<section class="card"><h2>Подключение</h2><p>Наведите камеру приложения на QR или вставьте ссылку.</p>'
-             + metrics+''.join(rows)+'</section>'
-             + '<section class="card"><h2>Как подключить</h2><ol>'
+             head+usage
+             + '<div class="qr-grid">'+''.join(rows)+'</div>'
+             + '<div class="links-row"><button type="button" class="btn ghost" id="toggleHelp">Инструкции по приложениям</button></div>'
+             + '<div id="helpBlock" hidden style="padding:0 24px 24px"><h2 style="font-size:15px;margin-bottom:4px">Как подключить</h2><ol>'
                '<li>Установите приложение: <b>Happ</b>, <b>Hiddify</b> или <b>v2rayNG</b> (Android), <b>Happ</b>, <b>Streisand</b> или <b>Hiddify</b> (iOS).</li>'
                '<li>Нажмите <b>«+»</b> → <b>«Сканировать QR»</b> или <b>«Импорт из буфера»</b> — и подставьте ссылку выше.</li>'
                '<li>Выберите сервер и включите подключение. Готово — трафик уже идёт через VPN.</li></ol>'
-               '<div class="apps"><span>Happ</span><span>Hiddify</span><span>v2rayNG</span><span>Streisand</span><span>V2Box</span></div></section>'
-               '<footer>ONYX PANEL · ССЫЛКА ЛИЧНАЯ — НЕ ПЕРЕДАВАЙТЕ ЕЁ ТРЕТЬИМ ЛИЦАМ</footer>'))
+               '<div class="apps"><span>Happ</span><span>Hiddify</span><span>v2rayNG</span><span>Streisand</span><span>V2Box</span></div></div>'
+             + '</div><footer>ONYX PANEL · ССЫЛКА ЛИЧНАЯ — НЕ ПЕРЕДАВАЙТЕ ЕЁ ТРЕТЬИМ ЛИЦАМ</footer></div>'))
     page += ('<script>document.addEventListener("click",async e=>{const b=e.target.closest("[data-copy]");if(!b)return;'
              'try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent="Скопировано"}catch(err){}'
-             'setTimeout(()=>b.textContent="Копировать",1600)});</script>')
+             'setTimeout(()=>b.textContent="Скопировать ключ",1600)});'
+             'document.getElementById("toggleHelp").addEventListener("click",()=>{const h=document.getElementById("helpBlock");h.hidden=!h.hidden});</script>')
     return page
 
 
@@ -3279,9 +3505,9 @@ SETTINGS_EXTRA_CSS = '''
 .choice-card input[type=checkbox]:checked,.checks input[type=checkbox]:checked{border-color:var(--accent);background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6.5 9.5 17 4.5 11.5'/%3E%3C/svg%3E") center/12px 12px no-repeat}
 .choice-card input[type=checkbox]:disabled,.checks input[type=checkbox]:disabled{opacity:.4;cursor:default}
 .choice-card:has(input[type=checkbox]:checked){border-color:var(--accent)}
-.card-expand{width:34px;height:34px;padding:0;flex:0 0 auto;background:transparent;color:var(--muted)}
-.card-expand svg{width:17px;height:17px;transition:transform .35s cubic-bezier(.4,0,.2,1)}
-.card-expand:hover{color:var(--accent)}
+.card-expand{width:34px;height:34px;padding:0;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--line-soft);border-radius:12px;background:var(--raised);color:var(--muted);transition:all .3s var(--ease-spring)}
+.card-expand svg{width:15px;height:15px;transition:transform .35s var(--ease-spring)}
+.card-expand:hover{color:var(--text);border-color:var(--line)}
 .card.open .card-expand{color:var(--accent)}
 .card.open .card-expand svg{transform:rotate(180deg)}
 .head-lock .card-title .actions{flex-wrap:nowrap;flex:0 0 auto}
