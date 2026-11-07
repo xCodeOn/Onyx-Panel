@@ -1500,6 +1500,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers()
             return
 
+        # Бабка-страница логина: зеркальная гифка из пакета панели.
+        if path==PANEL_PATH+"/__granny":
+            try:
+                with open("/opt/onyx-panel/granny.gif","rb") as f: data=f.read()
+                self.send_response(200)
+                self.send_header("Content-Type","image/gif")
+                self.send_header("Content-Length",str(len(data)))
+                self.send_header("Cache-Control","public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+            except OSError:
+                self.send_response(404); self.end_headers()
+            return
+
         # Versioned, cacheable UI assets: keeps ~140 KB of CSS/JS out of every
         # HTML response and lets the browser reuse them across navigations.
         if path==PANEL_PATH+"/__static/app.css":

@@ -595,6 +595,10 @@ for font in dashboard-sans-normal.woff2 dashboard-sans-semibold.woff2 manrope-cy
     [[ -s "$BASE/fonts/$font" ]] || die "Bundled font is missing: fonts/$font."
     install -o root -g root -m 0644 "$BASE/fonts/$font" "$APP_DIR/fonts/$font"
 done
+# Бабка-страж на странице входа. Опционально: старые пакеты могут её не нести.
+if [[ -s "$BASE/assets/granny.gif" ]]; then
+    install -o root -g root -m 0644 "$BASE/assets/granny.gif" "$APP_DIR/granny.gif"
+fi
 command -v tar >/dev/null 2>&1 || die "tar is required to install panel assets."
 FLAG_ENTRIES="$(tar -tzf "$FLAG_ARCHIVE")" || die "Panel flag bundle cannot be read."
 if grep -Eq '(^|/)\.\.(/|$)|^/' <<<"$FLAG_ENTRIES"; then
@@ -966,7 +970,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 2.12.8
+Description=Onyx Panel 3.0.0
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1073,7 +1077,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '2.12.8')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '3.0.0')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"

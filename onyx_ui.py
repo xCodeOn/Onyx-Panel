@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 
-VERSION = '2.12.8'
+VERSION = '3.0.0'
 
 
 _VERSION_CACHE = ""
@@ -827,7 +827,7 @@ def page_layout(title, body, path, active, domain, csrf='', role='admin'):
 
 
 def login_ui(path, totp=False):
-    mark = '<path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z" transform="translate(24 25) scale(1.1)"/>'
+    mark = '<path fill="#2dd4bf" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z" transform="translate(24 25) scale(1.1)"/>'
     letters = '<path d="M420 752C200 752 30 585 30 369C30 155 202 -13 419 -13C634 -13 800 154 800 369C800 582 631 752 420 752ZM418 620C555 620 662 510 662 368C662 225 558 119 418 119C278 119 168 229 168 369C168 512 276 620 418 620Z" transform="translate(163.000 90) scale(0.067 -0.067)"/><path d="M54 0H187V261C187 335 192 367 209 394C230 427 264 445 307 445C342 445 369 433 387 410C405 386 413 345 413 271V0H546V297C546 396 536 444 506 487C470 539 410 567 333 567C269 567 226 549 177 501V554H54Z" transform="translate(217.980 90) scale(0.067 -0.067)"/><path d="M105 -185H248L568 554H414L281 195L158 554H6L209 52Z" transform="translate(256.880 90) scale(0.067 -0.067)"/><path d="M1 0H161L277 190L393 0H553L356 286L525 554H375L277 387L177 554H27L197 286Z" transform="translate(294.440 90) scale(0.067 -0.067)"/>'
     subtitle = '<path d="M68 0H205V281H249C354 281 402 289 443 314C503 352 540 426 540 511C540 596 504 666 440 705C398 730 348 739 251 739H68ZM205 412V608H251C296 608 317 606 338 601C378 590 402 555 402 509C402 473 386 445 357 429C336 418 299 412 245 412Z" transform="translate(168.000 121) scale(0.016 -0.016)"/><path d="M7 0H158L240 191H503L582 0H733L423 739H315ZM290 322 369 546 448 322Z" transform="translate(182.060 121) scale(0.016 -0.016)"/><path d="M68 0H205V537L514 0H667V739H530V201L224 739H68Z" transform="translate(199.000 121) scale(0.016 -0.016)"/><path d="M68 0H465V131H205V303H454V434H205V608H465V739H68Z" transform="translate(215.940 121) scale(0.016 -0.016)"/><path d="M68 0H431V131H205V739H68Z" transform="translate(229.360 121) scale(0.016 -0.016)"/>'
     wordmark = ('<svg class="login-brand-mark" viewBox="0 0 440 160" role="img" aria-label="Onyx Panel">'
@@ -888,7 +888,16 @@ backBtn.addEventListener('click',()=>showStep(1));''' if totp else ''
 .login-modal.show .login-modal-card{{transform:scale(1)}}
 .login-modal-title{{font-size:17px;font-weight:600;margin:0}}
 .login-modal-text{{font-size:13px;color:var(--muted);margin:0;text-align:center;max-width:260px}}
-</style></head><body class="login-page"><main class="login-card">{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
+.login-card{{position:relative}}
+.granny{{position:absolute;bottom:calc(100% - 26px);right:14px;width:132px;height:132px;object-fit:contain;pointer-events:none;user-select:none;filter:drop-shadow(0 10px 20px rgba(0,0,0,.55));transform-origin:50% 100%;animation:granny-sway 7s cubic-bezier(.32,.72,0,1) infinite}}
+@keyframes granny-sway{{0%,100%{{transform:rotate(-2.5deg)}}50%{{transform:rotate(2.5deg)}}}}
+.granny-words{{position:absolute;inset:0;pointer-events:none;z-index:7;overflow:visible}}
+.granny-word{{position:absolute;max-width:none;white-space:nowrap;background:var(--raised);color:var(--text);border:1px solid var(--line);border-radius:16px 16px 4px 16px;padding:10px 13px;font-size:13px;font-weight:600;line-height:1.45;box-shadow:var(--shadow);opacity:0;transform:translateY(8px) scale(.94);transition:opacity .25s,transform .25s}}
+.granny-word.show{{opacity:1;transform:translateY(0) scale(1)}}
+.granny-word.fly{{transition:transform 2.1s cubic-bezier(.45,0,.9,.35),opacity 2.1s ease;transform:translateY(-130vh) scale(.92) rotate(-3deg);opacity:0}}
+.granny-word .caret{{display:inline-block;width:2px;height:13px;background:var(--accent);margin-left:2px;vertical-align:-2px;animation:caret-blink .7s steps(1) infinite}}
+@keyframes caret-blink{{50%{{opacity:0}}}}
+</style></head><body class="login-page"><main class="login-card"><img class="granny" src="{esc(path)}/__granny" alt="" aria-hidden="true"><div class="granny-words" id="grannyWords" aria-hidden="true"></div>{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
 <div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card" id="loginModalCard"><div class="move-ring spin" id="loginModalRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="loginModalMark">…</b></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
 <script src="{esc(path)}/__static/app.js?v={esc(login_version())}"></script>
 <script>(()=>{{
@@ -896,6 +905,28 @@ const TOTP={totp_flag};
 const form=document.getElementById('loginForm'),step1=document.getElementById('loginStep1'),step2=document.getElementById('loginStep2');
 {js_fields}
 const submitBtn=document.getElementById('loginSubmit'),verifyBtn=document.getElementById('loginVerify'),backBtn=document.getElementById('loginBack');
+// Бабка-страж пароля: болтает сама и чаще при вводе; слова печатаются изо рта и улетают вверх.
+const GRANNY_MEMES=["Нахер не нужон ваш интернет","РКН всё равно тебя заблокирует","Внучек, ты чо творишь","Я в эти компутеры не шарю","Пароль-то хоть восемь знаков?","Пошли гулять, пока не заблокировали","Опять сидишь в своём инторнете","А в моё время модемы пищали","Тебя мама звала чай пить"];
+const grannyBox=document.getElementById('grannyWords');
+let grannyI=0,grannyBusy=false;
+function grannySpeak(text){{
+  if(grannyBusy)return; grannyBusy=true;
+  const w=document.createElement('div'); w.className='granny-word';
+  w.style.right='132px'; w.style.bottom='calc(100% + 46px)';
+  const caret=document.createElement('span'); caret.className='caret';
+  w.appendChild(caret); grannyBox.appendChild(w);
+  requestAnimationFrame(()=>w.classList.add('show'));
+  let c=0;
+  const iv=setInterval(()=>{{
+    w.insertBefore(document.createTextNode(text[c]), caret);
+    if(++c>=text.length){{clearInterval(iv);caret.remove();
+      setTimeout(()=>{{w.classList.add('fly');setTimeout(()=>{{w.remove();grannyBusy=false}},2150)}},1500);}}
+  }},52);
+}}
+function grannyNext(){{grannySpeak(GRANNY_MEMES[grannyI++ % GRANNY_MEMES.length]);}}
+setTimeout(grannyNext,900);
+setInterval(()=>{{ if(!grannyBusy) grannyNext(); }},3800);
+if(typeof passField!=='undefined'&&passField)passField.addEventListener('input',()=>{{ if(!grannyBusy) grannyNext(); }});
 const cells=document.querySelectorAll('#loginOtpCells input');
 let inOtp=false;
 function showStep(n){{if(n===2){{step1.hidden=true;step2.hidden=false;inOtp=true;cells[0].focus()}}else{{step2.hidden=true;step1.hidden=false;inOtp=false;cells.forEach(c=>{{c.value='';c.classList.remove('filled','error-shake')}});codeField.value='';passField.focus()}}}}
@@ -1740,14 +1771,14 @@ CSS += """
 :root{
   --font-ui:"Dashboard","Century Gothic",Arial,sans-serif;
   --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --bg:#252526;--shell:#353635;--sidebar:#141514;
-  --surface:rgba(255,255,255,.115);--raised:#2e2f2c;--input:rgba(29,32,30,.55);
-  --line:rgba(255,255,255,.27);--line-soft:rgba(255,255,255,.13);
-  --text:#faf9fb;--muted:#cfcbc9;
-  --accent:#ff760b;--accent-strong:#ff8b33;--on-accent:#ffffff;--tint:rgba(255,118,11,.14);
-  --green:#41d8a0;--red:#ff7a70;--amber:#e5c94d;--cream:#d8deb5;--mint:#a4f1cd;--yellow:#dfcf30;
-  --shadow:0 24px 70px -24px rgba(0,0,0,.6);
-  --focus:#dfcf30
+  --bg:#0e1214;--shell:#151b1d;--sidebar:rgba(22,28,31,.62);
+  --surface:rgba(255,255,255,.065);--raised:#1e2527;--input:rgba(12,17,19,.55);
+  --line:rgba(255,255,255,.14);--line-soft:rgba(255,255,255,.08);
+  --text:#edf2f1;--muted:#8b9796;
+  --accent:#2dd4bf;--accent-strong:#5eead4;--on-accent:#0b1514;--tint:rgba(45,212,191,.13);
+  --green:#34d399;--red:#f87171;--amber:#fbbf24;--cream:#cde5e0;--mint:#5eead4;--yellow:#fbbf24;
+  --shadow:0 24px 70px -24px rgba(0,0,0,.65);
+  --focus:#2dd4bf
 }
 html{scroll-behavior:smooth;scrollbar-width:none}
 html::-webkit-scrollbar{width:0;height:0}
@@ -1770,9 +1801,16 @@ h3{font-weight:600}
 .overview-stat b,.client-stat b{font-weight:600;letter-spacing:-.02em}
 /* ---------- Shell: floating rounded workspace with a slim icon rail ---------- */
 .shell{position:relative;min-height:calc(100dvh - 30px);max-width:1680px;margin:14px auto 16px;border-radius:27px;isolation:isolate;overflow:clip;
-  background:radial-gradient(ellipse 490px 390px at 45% 32%,rgba(177,104,77,.55),transparent 100%),
-             radial-gradient(ellipse 490px 560px at 22% 35%,rgba(108,100,137,.45),transparent 100%),var(--shell)}
-.sidebar{overflow:visible;position:fixed;top:28px;bottom:32px;left:max(12px,calc((100vw - 1680px)/2 + 12px));width:62px;border-radius:20px;background:var(--sidebar);border:1px solid color-mix(in srgb,var(--text) 7%,transparent);z-index:60;display:flex;align-items:center;flex-direction:column;padding:16px 0 14px;box-shadow:0 18px 44px -18px rgba(0,0,0,.5);opacity:.95}
+  background:radial-gradient(ellipse 520px 420px at 42% 28%,rgba(45,212,191,.14),transparent 100%),
+             radial-gradient(ellipse 560px 520px at 78% 68%,rgba(45,212,191,.07),transparent 100%),var(--shell)}
+/* Дрейфующие световые орбиты по всему фону — тихое движение, GPU-дружественно. */
+body::after{content:"";position:fixed;inset:-20% -10%;z-index:0;pointer-events:none;
+  background:radial-gradient(38rem 38rem at 16% 20%,rgba(45,212,191,.08),transparent 65%),
+             radial-gradient(34rem 34rem at 86% 76%,rgba(94,234,212,.06),transparent 65%),
+             radial-gradient(26rem 26rem at 60% 10%,rgba(148,163,184,.05),transparent 65%);
+  animation:onyx-drift 48s cubic-bezier(.32,.72,0,1) infinite alternate}
+@keyframes onyx-drift{from{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(2.5%,-1.5%,0) scale(1.04)}to{transform:translate3d(-2%,2%,0) scale(1.02)}}
+.sidebar{overflow:visible;position:fixed;top:50%;bottom:auto;transform:translateY(-50%);left:max(12px,calc((100vw - 1680px)/2 + 12px));width:64px;border-radius:24px;background:var(--sidebar);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid color-mix(in srgb,var(--text) 9%,transparent);z-index:60;display:flex;align-items:center;flex-direction:column;padding:14px 0 12px;box-shadow:0 18px 44px -18px rgba(0,0,0,.55);opacity:.97}
 .brand{width:36px;height:36px;flex-shrink:0;display:grid;place-items:center;padding:0;margin:0}
 .brand img{width:30px;height:30px;border-radius:0}
 .nav-primary{display:flex;flex-direction:column;gap:7px;align-items:center;margin-top:34px}
@@ -1836,7 +1874,7 @@ dialog::backdrop{background:#15171999;backdrop-filter:blur(7px);-webkit-backdrop
 /* Release banner: glass strip under the page head */
 .release-banner{border-radius:18px;border-color:color-mix(in srgb,var(--accent) 45%,var(--line-soft));background:linear-gradient(100deg,var(--tint),var(--surface) 58%)}
 /* Login */
-.login-page{display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse 620px 480px at 28% 18%,rgba(177,104,77,.5),transparent 100%),radial-gradient(ellipse 540px 540px at 76% 82%,rgba(108,100,137,.45),transparent 100%),var(--shell)}
+.login-page{display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse 620px 480px at 28% 18%,rgba(45,212,191,.15),transparent 100%),radial-gradient(ellipse 540px 540px at 76% 82%,rgba(148,163,184,.08),transparent 100%),var(--shell)}
 .login-card{width:min(420px,100%);padding:38px 34px;border-radius:28px;background:var(--surface);border:1px solid var(--line-soft);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 .login-brand-mark{display:block;width:216px;max-width:100%;height:auto;margin:0 auto 26px}
 .login-card h1{font-size:27px;text-align:center}
@@ -1993,8 +2031,8 @@ dialog[open]::backdrop{animation:onyx-backdrop-in .24s ease}
 @media(max-width:640px){.component-stack{grid-template-columns:1fr}}
 /* ---------- Mobile: the rail becomes a floating bottom bar ---------- */
 @media(max-width:760px){
-.shell{border-radius:0;min-height:100dvh;margin:0;background:radial-gradient(ellipse 470px 420px at 45% 22%,rgba(120,88,77,.8),transparent 100%),var(--shell)}
-.sidebar{top:auto;bottom:20px;left:10px;right:10px;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:30px;box-shadow:none}
+.shell{border-radius:0;min-height:100dvh;margin:0;background:radial-gradient(ellipse 470px 420px at 45% 22%,rgba(45,212,191,.16),transparent 100%),var(--shell)}
+.sidebar{top:auto;bottom:20px;left:10px;right:10px;transform:none;width:auto;height:62px;flex-direction:row;justify-content:space-between;padding:8px 10px;border-radius:30px;box-shadow:none}
 .brand{display:none}
 .nav-primary{flex-direction:row;gap:2px;margin:0;flex:1;justify-content:space-around}
 .nav-bottom{flex-direction:row;gap:2px;margin:0;padding-top:0}
@@ -3125,8 +3163,8 @@ def _public_document(title, body):
 
 
 ONYX_MARK_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
-                 '<path fill="#FF792D" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z"/>'
-                 '<path fill="#FF792D" d="M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></svg>')
+                 '<path fill="#2dd4bf" d="M50 5C25 5 5 25 5 50C5 63 10 74 19 82C10 57 24 31 50 28C66 26 77 31 87 40C82 20 67 5 50 5Z"/>'
+                 '<path fill="#2dd4bf" d="M50 95C75 95 95 75 95 50C95 37 90 26 81 18C90 43 76 69 50 72C34 74 23 69 13 60C18 80 33 95 50 95Z"/></svg>')
 
 
 def subscription_page_html(sub, profiles, used, limit_gb, expiry, domain, qrs):

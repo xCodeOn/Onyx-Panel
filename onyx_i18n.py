@@ -877,6 +877,19 @@ PAIRS = {
     'Обновляем список': 'Refreshing the list', 'список': 'list',
 }
 
+# Мемы бабки-стража на странице входа (JS-строки в исходнике страницы).
+PAIRS.update({
+    'Нахер не нужон ваш интернет': 'Who even needs your internet',
+    'РКН всё равно тебя заблокирует': 'The censors will block you anyway',
+    'Внучек, ты чо творишь': 'What are you doing, grandson',
+    'Я в эти компутеры не шарю': 'I do not get these computers',
+    'Пароль-то хоть восемь знаков?': 'Is that password even eight characters?',
+    'Пошли гулять, пока не заблокировали': 'Let us go for a walk before they block us',
+    'Опять сидишь в своём инторнете': 'On your interwebs again',
+    'А в моё время модемы пищали': 'Back in my day modems sang',
+    'Тебя мама звала чай пить': 'Your mom is calling you for tea',
+})
+
 # --- static audit pass 1 (A–И) -------------------------------------------
 PAIRS.update({
     'Автобэкап': 'Auto-backup', 'Автобэкап ещё ни разу не выполнялся.': 'The auto-backup has never run yet.',
