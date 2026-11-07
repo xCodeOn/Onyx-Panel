@@ -24,20 +24,10 @@ VLESS XHTTP + Reality · Hysteria2 · TUIC 5 · AmneziaWG 2.0/3.1 · MTProto · 
   <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Поддержать проект" src="https://img.shields.io/badge/%F0%9F%92%9C_%D0%9F%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B0%D1%82%D1%8C_%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82-CloudTips-8b5cf6?style=for-the-badge"></a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/backup-cloud.gif" width="640" alt="Облачный бэкап в один клик с живым пошаговым статусом">
-</p>
-<p align="center"><i>Бэкап на Яндекс Диск в один клик — живой статус каждого шага, локально и в облаке.</i></p>
-
 ## Скриншоты
 
 <p align="center">
-  <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="49%" alt="Дашборд — ресурсы VPS, живой график трафика, статусы служб"></a>
-  <a href="docs/screenshots/clients.png"><img src="docs/screenshots/clients.png" width="49%" alt="Клиенты — трафик, квоты, протоколы, групповые действия"></a>
-  <a href="docs/screenshots/create-client.png"><img src="docs/screenshots/create-client.png" width="49%" alt="Создание клиента в два шага"></a>
-  <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="49%" alt="Настройки — Telegram-уведомления, облачные бэкапы, антиреклама"></a>
-  <a href="docs/screenshots/subscription.png"><img src="docs/screenshots/subscription.png" width="66%" alt="Персональная страница подписки клиента с QR-кодами"></a>
-  <a href="docs/screenshots/mobile-pwa.png"><img src="docs/screenshots/mobile-pwa.png" width="31%" alt="Установка PWA на телефон"></a>
+  <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="100%" alt="Дашборд — живой трафик, ресурсы VPS, службы и клиенты"></a>
 </p>
 
 ## Что внутри

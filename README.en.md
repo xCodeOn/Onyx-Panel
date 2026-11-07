@@ -24,20 +24,10 @@ VLESS XHTTP + Reality · Hysteria2 · TUIC 5 · AmneziaWG 2.0/3.1 · MTProto · 
   <a href="https://pay.cloudtips.ru/p/22326183"><img alt="Support the project" src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F_Support_the_project-CloudTips-8b5cf6?style=for-the-badge"></a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/backup-cloud.gif" width="640" alt="One-click cloud backup with live step-by-step status">
-</p>
-<p align="center"><i>One-click backup to Yandex Disk — live status for every step, local and in the cloud.</i></p>
-
 ## Screenshots
 
 <p align="center">
-  <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="49%" alt="Dashboard — VPS resources, live traffic graph, service status"></a>
-  <a href="docs/screenshots/clients.png"><img src="docs/screenshots/clients.png" width="49%" alt="Clients — traffic, quotas, protocols, bulk actions"></a>
-  <a href="docs/screenshots/create-client.png"><img src="docs/screenshots/create-client.png" width="49%" alt="Create a client in two steps"></a>
-  <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="49%" alt="Settings — Telegram notifications, cloud backups, adblock"></a>
-  <a href="docs/screenshots/subscription.png"><img src="docs/screenshots/subscription.png" width="66%" alt="Personal client subscription page with QR codes"></a>
-  <a href="docs/screenshots/mobile-pwa.png"><img src="docs/screenshots/mobile-pwa.png" width="31%" alt="PWA install on a phone"></a>
+  <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="100%" alt="Dashboard — live traffic, VPS resources, services and clients"></a>
 </p>
 
 ## What you get
