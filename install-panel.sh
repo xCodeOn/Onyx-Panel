@@ -129,11 +129,11 @@ OPENFLUX_BUNDLED="${BASE}/assets/OpenFlux-linux-amd64"
 if [[ ! -s "$OPENFLUX_BUNDLED" && -s "${BASE}/OpenFlux-linux-amd64" ]]; then
     OPENFLUX_BUNDLED="${BASE}/OpenFlux-linux-amd64"
 fi
-AWG_GO_VERSION="v3.1.20260828"
+AWG_GO_VERSION="v3.1.30260828"
 AWG_GO_COMMIT="b5928efb6ca19f0153958460c3d141f04abc5c2e"
 AWG_GO_BUNDLED="${BASE}/assets/amneziawg-go-linux-amd64"
 AWG_GO_SHA256="9b8912d203ba7142c1957913047bb9efd6e02c173c1f3bf852c652b16aada60f"
-AWG_TOOLS_VERSION="v3.1.20260812"
+AWG_TOOLS_VERSION="v3.1.30260812"
 AWG_BIN_BUNDLED="${BASE}/assets/awg-linux-amd64"
 AWG_BIN_SHA256="23d29323258166183eeeb288c1f9f08b879f3707e54591b1bfb2402413f6d8d8"
 AWG_QUICK_BUNDLED="${BASE}/assets/awg-quick-linux-amd64"
@@ -970,7 +970,7 @@ fi
 ui_stage "Сервис systemd"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Onyx Panel 3.1.2
+Description=Onyx Panel 3.1.3
 After=network-online.target caddy.service tproxy-server.service mtproxy.service onyx-panel-firewall.service
 Wants=network-online.target
 Requires=onyx-panel-firewall.service
@@ -1077,7 +1077,7 @@ unlock_changes(){ flock -u 9 2>/dev/null || true; exec 9>&-; }
 
 show_info(){
     local d p version
-    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '3.1.2')"
+    d="$(domain)"; p="$(panel_path)"; version="$(cat /etc/onyx-panel/version 2>/dev/null || echo '3.1.3')"
     echo
     echo "============================================================"
     echo "                 Onyx Panel"
