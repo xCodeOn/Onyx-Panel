@@ -234,6 +234,12 @@ onyx_update.clear_notes()
 print('UPDATE NOTIFICATIONS OK')
 # ---- node registry sync: version refresh + heal of stale enabled=false
 import onyx_nodes
+# The controller uses this lock around deletion; sync_registry() also takes it,
+# so it must be shared and reentrant rather than a new lock per call.
+with onyx_nodes.registry_lock():
+    with onyx_nodes.registry_lock():
+        assert onyx_nodes.registry_lock() is onyx_nodes.registry_lock()
+print('NODE REGISTRY LOCK OK')
 nodes_tmp = Path(tempfile.mkdtemp())
 registry = str(nodes_tmp / 'nodes.json')
 registry_state = [

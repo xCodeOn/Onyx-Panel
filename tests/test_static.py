@@ -121,6 +121,12 @@ if problems:
     sys.exit(1)
 print("1) static scan: no loaded-but-undefined names in app or modules OK")
 
+# Every node card must get the async deletion handler, not only the first one.
+_ui_source = dict(SOURCES)["onyx_ui.py"]
+assert "querySelectorAll('[data-node-delete-form]')" in _ui_source
+assert "const dform=document.querySelector('[data-node-delete-form]')" not in _ui_source
+print("1b) every node deletion form is bound OK")
+
 # --- runtime exercise of the branches that bit users -----------------------
 for _m in ('grp', 'pwd'):
     sys.modules.setdefault(_m, types.ModuleType(_m))

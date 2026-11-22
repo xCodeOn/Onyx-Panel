@@ -760,6 +760,18 @@ def purge_remote_profiles_async(subscription,device_id=None):
     threading.Thread(target=purge_remote_profiles,args=(subscription,device_id),
                      name="onyx-node-cleanup",daemon=True).start()
 
+def purge_deleted_node_profiles_async(node):
+    # Local deletion must not wait for DNS/network timeouts on a dead node.
+    # The removed registry row stays removed even when this best-effort cleanup fails.
+    def worker():
+        try: node_api.purge_profiles(node)
+        except Exception as exc:
+            print("deleted node profile cleanup failed:",node.get("url"),str(exc),file=sys.stderr,flush=True)
+    try:
+        threading.Thread(target=worker,name="onyx-deleted-node-cleanup",daemon=True).start()
+    except Exception as exc:
+        print("deleted node profile cleanup could not start:",str(exc),file=sys.stderr,flush=True)
+
 def delete_job_step(job_id,key,**kw):
     with DELETE_JOBS_LOCK:
         job=DELETE_JOBS.get(job_id)
@@ -2519,26 +2531,18 @@ catch(err){s.className="panel-setting-status err";s.textContent=err.message;if(w
                         self.send_json({"ok":True,"node":added}); return
                     self.redirect("/nodes")
                 elif operation=="delete":
-                    nodes=node_api.load_nodes(NODES_FILE); uid=form.get("id","")
-                    selected=next((n for n in nodes if n.get("id")==uid),None)
-                    if selected is None: raise node_api.NodeError("Нода не найдена.")
+                    uid=form.get("id","")
                     force=form.get("force","")=="1"
                     async_delete=self.headers.get("X-Onyx-Async","")=="1"
-                    if not force:
-                        # Revoke remotely before forgetting the only credential
-                        # that can remove controller-created profiles from this
-                        # node. Force delete skips this for dead nodes.
-                        try:
-                            node_api.purge_profiles(selected)
-                        except node_api.NodeError as exc:
-                            if async_delete:
-                                self.send_json({"ok":False,"message":str(exc),"can_force":True}); return
-                            raise
                     with node_api.registry_lock():
-                        # Перечитываем под замком: purge_profiles ходил по сети,
-                        # за это время реестр мог измениться (гонка с add/sync).
                         fresh_nodes=node_api.load_nodes(NODES_FILE)
+                        selected=next((n for n in fresh_nodes if n.get("id")==uid),None)
+                        if selected is None: raise node_api.NodeError("Нода не найдена.")
                         node_api.save_nodes(NODES_FILE,[n for n in fresh_nodes if n.get("id")!=uid])
+                    # Forget the node first: a dead remote must never block local
+                    # deletion. The retained in-memory credential can still purge
+                    # reachable profiles in the background; force skips that work.
+                    if not force: purge_deleted_node_profiles_async(selected)
                     audit('node-delete',uid,(selected.get("name","") or selected.get("url",""))+(" (принудительно)" if force else ""))
                     if async_delete:
                         self.send_json({"ok":True}); return

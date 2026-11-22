@@ -227,7 +227,8 @@ assert "loginCode" in h16.output()
 store["totp"]={}
 h16b=FakeHandler("GET", srv.PANEL_PATH+"/login"); h16b.do_GET()
 assert "loginCode" not in h16b.output()
-print("16) login 2FA field conditional OK")
+assert re.search(r'/__granny\?v=[^"&]+',h16b.output()), "granny URL must be versioned"
+print("16) login 2FA field conditional + versioned granny OK")
 
 # 17) settings page carries live preview pane and preset thumbs
 out=h17=None
@@ -235,4 +236,49 @@ h17=FakeHandler("GET", srv.PANEL_PATH+"/settings", dict([cka])); h17.do_GET()
 out=h17.output()
 assert "customPresetLive" in out and "data-preset-card" in out
 print("17) editor live preview pane OK")
+
+# 18) node deletion never depends on the remote node's availability
+def _delete_node(uid, force=False):
+    hh=FakeHandler("POST", srv.PANEL_PATH+"/node-action", dict([cka]))
+    hh.headers["X-Onyx-Async"]="1"
+    fields={"csrf":hh.csrf(),"operation":"delete","id":uid,"force":"1" if force else "0"}
+    body=urllib.parse.urlencode(fields).encode()
+    hh.headers["Content-Type"]="application/x-www-form-urlencoded"; hh.headers["Content-Length"]=str(len(body))
+    hh.rfile=io.BytesIO(body); hh.do_POST(); return hh
+
+class _InlineThread:
+    def __init__(self, target=None, args=(), kwargs=None, name=None, daemon=None):
+        self.target=target; self.args=args; self.kwargs=kwargs or {}
+    def start(self): self.target(*self.args,**self.kwargs)
+
+node_rows=[{"id":char*16,"url":"https://"+char+".example.com","token":char*43,"name":char.upper()}
+           for char in ("a","b","c")]
+srv.node_api.save_nodes(srv.NODES_FILE,node_rows)
+_real_thread=srv.threading.Thread; _real_purge=srv.node_api.purge_profiles
+srv.threading.Thread=_InlineThread
+try:
+    purge_calls=[]
+    def purge_ok(node): purge_calls.append(node["id"]); return {"ok":True}
+    srv.node_api.purge_profiles=purge_ok
+    hn=_delete_node("a"*16)
+    assert "200" in hn.status() and hn.resp_json()["ok"] is True, hn.output()
+    assert purge_calls==["a"*16]
+    assert [n["id"] for n in srv.node_api.load_nodes(srv.NODES_FILE)]==["b"*16,"c"*16]
+
+    def purge_dead(node): purge_calls.append(node["id"]); raise srv.node_api.NodeError("offline")
+    srv.node_api.purge_profiles=purge_dead
+    hn=_delete_node("b"*16)
+    assert "200" in hn.status() and hn.resp_json()["ok"] is True, hn.output()
+    assert purge_calls[-1]=="b"*16
+    assert [n["id"] for n in srv.node_api.load_nodes(srv.NODES_FILE)]==["c"*16]
+
+    force_calls=[]
+    def purge_force(node): force_calls.append(node["id"]); raise AssertionError("force must skip purge")
+    srv.node_api.purge_profiles=purge_force
+    hn=_delete_node("c"*16,force=True)
+    assert "200" in hn.status() and hn.resp_json()["ok"] is True, hn.output()
+    assert force_calls==[] and srv.node_api.load_nodes(srv.NODES_FILE)==[]
+finally:
+    srv.threading.Thread=_real_thread; srv.node_api.purge_profiles=_real_purge
+print("18) reachable/offline/force node deletion OK")
 print("ALL SERVER SMOKE TESTS PASSED")

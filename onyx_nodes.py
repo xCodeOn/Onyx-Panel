@@ -8,6 +8,7 @@ import re
 import secrets
 import socket
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -17,6 +18,7 @@ API_PREFIX = '/onyx-api/v1'
 CONNECTION_TOKEN_PREFIX = 'onyxnode1_'
 MAX_NODES = 16
 MAX_RESPONSE = 1024 * 1024
+_REGISTRY_LOCK = threading.RLock()
 
 COUNTRY_NAMES = {
     'FI': 'Финляндия', 'DE': 'Германия', 'NL': 'Нидерланды', 'FR': 'Франция',
@@ -204,6 +206,11 @@ def save_nodes(path, nodes):
     atomic_json(path, nodes)
 
 
+def registry_lock():
+    """Serialize read-modify-write cycles of the shared node registry."""
+    return _REGISTRY_LOCK
+
+
 def sync_registry(path, nodes, snapshots):
     """Fold live probe results back into the registry: refresh each version and
     re-enable nodes that answer. Nothing in the panel can switch a node off, so
@@ -221,23 +228,24 @@ def sync_registry(path, nodes, snapshots):
         updates[str(node.get('id', ''))] = {'version': version[:32], 'heal': heal}
     if not updates:
         return False
-    fresh = load_nodes(path)
-    changed = False
-    for node in fresh:
-        if not isinstance(node, dict):
-            continue
-        update = updates.get(str(node.get('id', '')))
-        if not update:
-            continue
-        if update['version'] and update['version'] != str(node.get('version', '') or ''):
-            node['version'] = update['version']
-            changed = True
-        if update['heal']:
-            node['enabled'] = True
-            changed = True
-    if changed:
-        save_nodes(path, fresh)
-    return changed
+    with _REGISTRY_LOCK:
+        fresh = load_nodes(path)
+        changed = False
+        for node in fresh:
+            if not isinstance(node, dict):
+                continue
+            update = updates.get(str(node.get('id', '')))
+            if not update:
+                continue
+            if update['version'] and update['version'] != str(node.get('version', '') or ''):
+                node['version'] = update['version']
+                changed = True
+            if update['heal']:
+                node['enabled'] = True
+                changed = True
+        if changed:
+            save_nodes(path, fresh)
+        return changed
 
 
 def public_node(node):
@@ -334,8 +342,16 @@ def add_node(path, request_data):
     loc = location(status.get('location'))
     node = {'id': secrets.token_hex(8), 'url': url, 'token': token, **loc, 'enabled': True}
     node['version'] = str(status.get('version', ''))[:32]
-    nodes.append(node)
-    save_nodes(path, nodes)
+    with _REGISTRY_LOCK:
+        # The network probe above can outlive a concurrent add/delete/sync.
+        # Re-read before appending so this stale list cannot restore old rows.
+        nodes = load_nodes(path)
+        if len(nodes) >= MAX_NODES:
+            raise NodeError('Достигнут лимит из %d нод.' % MAX_NODES)
+        if any(existing.get('url') == url for existing in nodes):
+            raise NodeError('Эта нода уже добавлена.')
+        nodes.append(node)
+        save_nodes(path, nodes)
     return public_node(node)
 
 

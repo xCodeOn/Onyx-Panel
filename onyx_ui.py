@@ -894,7 +894,7 @@ backBtn.addEventListener('click',()=>showStep(1));''' if totp else ''
 .granny-word.fly{{transition:transform 2.1s cubic-bezier(.45,0,.9,.35),opacity 2.1s ease;transform:translateY(-130vh) scale(.92) rotate(-3deg);opacity:0}}
 .granny-word .caret{{display:inline-block;width:2px;height:13px;background:var(--accent);margin-left:2px;vertical-align:-2px;animation:caret-blink .7s steps(1) infinite}}
 @keyframes caret-blink{{50%{{opacity:0}}}}
-</style></head><body class="login-page"><main class="login-card"><img class="granny" src="{esc(path)}/__granny" alt="" aria-hidden="true"><div class="granny-words" id="grannyWords" aria-hidden="true"></div>{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
+</style></head><body class="login-page"><main class="login-card"><img class="granny" src="{esc(path)}/__granny?v={esc(login_version())}" alt="" aria-hidden="true"><div class="granny-words" id="grannyWords" aria-hidden="true"></div>{wordmark}<h1>Вход в панель</h1><p>Управление подключениями и нодами</p><form id="loginForm" method="post" action="{esc(path)}/login"><div class="login-step" id="loginStep1"><label for="loginName">Логин</label><input id="loginName" name="user" autocomplete="username" required autofocus><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" name="password" autocomplete="current-password" required><button type="submit" class="primary" id="loginSubmit">Продолжить</button></div>{otp_step}</form><small class="login-version">ONYX PANEL · {login_version()}</small></main>
 <div id="loginModal" class="login-modal" aria-hidden="true"><div class="login-modal-card" id="loginModalCard"><div class="move-ring spin" id="loginModalRing"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="loginModalMark">…</b></div><h3 id="loginModalTitle" class="login-modal-title">Входим…</h3><p id="loginModalText" class="login-modal-text">Проверяем данные</p></div></div>
 <script src="{esc(path)}/__static/app.js?v={esc(login_version())}"></script>
 <script>(()=>{{
@@ -1459,8 +1459,7 @@ async function tick(){{
 }}
 tick();timer=setInterval(tick,5000);
 document.addEventListener('visibilitychange',()=>{{if(!document.hidden)tick()}});
-const dform=document.querySelector('[data-node-delete-form]');
-if(dform)dform.addEventListener('submit',async e=>{{
+document.querySelectorAll('[data-node-delete-form]').forEach(dform=>dform.addEventListener('submit',async e=>{{
   e.preventDefault();
   if(dform.dataset.busy)return;dform.dataset.busy='1';
   const del=async force=>{{
@@ -1483,7 +1482,7 @@ if(dform)dform.addEventListener('submit',async e=>{{
     }}
   }}catch(err){{if(window.onyxToast)onyxToast(err.message||'Не удалось удалить ноду.','err')}}
   finally{{delete dform.dataset.busy}}
-}});
+}}));
 const uOverlay=document.createElement('div');uOverlay.className='move-overlay';uOverlay.hidden=true;
 uOverlay.innerHTML='<div class="move-card" id="nodeUpdCard"><div class="move-ring"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="24"/><circle class="fg" cx="28" cy="28" r="24"/></svg><b id="nodeUpdMark">…</b></div><h3 id="nodeUpdTitle">Обновление ноды</h3><p id="nodeUpdText">Связываемся с нодой…</p><div class="node-add-steps" id="nodeUpdSteps"><span>Связь с нодой</span><span>Запуск обновления</span><span>Ожидание версии</span></div><div class="actions upd-actions" id="nodeUpdActions" hidden><button type="button" class="primary" id="nodeUpdClose">Закрыть</button></div></div>';
 document.body.append(uOverlay);
