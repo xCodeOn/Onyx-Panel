@@ -184,4 +184,13 @@ _missing = sorted(m for m in _installer_mods if m not in _updater_files)
 assert not _missing, "update.sh local-archive check misses modules: %s" % _missing
 print("5) installer/updater module lists in sync OK")
 
+# 5. fast updates must recognize already-pinned AmneziaWG binaries by hash:
+# their upstream tag and --version output can disagree, and sparse fast
+# packages intentionally omit the AWG assets.
+assert "echo \"${AWG_GO_SHA256} /usr/local/bin/amneziawg-go\"" in _installer
+assert "/usr/local/bin/amneziawg-go --version" not in _installer
+assert "AWG_GO_SHA256 AWG_BIN_SHA256 AWG_QUICK_SHA256" in _updater
+assert "differs from its pinned hash" in _updater
+print("6) AmneziaWG fast-update hash checks OK")
+
 print("ALL STATIC/NAME TESTS PASSED")

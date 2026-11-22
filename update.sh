@@ -395,7 +395,9 @@ if [[ "$MIGRATING_LEGACY" != 1 && -s /opt/onyx-panel-package/install-panel.sh ]]
     OLD_IP="/opt/onyx-panel-package/install-panel.sh"
     NEW_IP="$TEMP_DIR/source/install-panel.sh"
     SAME_PINS=1
-    for pin_name in XRAY_VERSION OPENFLUX_VERSION AWG_GO_VERSION AWG_TOOLS_VERSION; do
+    # AmneziaWG release tags and the version printed by its binary can differ;
+    # the pinned SHA256 values are what the fast path can actually verify.
+    for pin_name in XRAY_VERSION OPENFLUX_VERSION AWG_GO_SHA256 AWG_BIN_SHA256 AWG_QUICK_SHA256; do
         old_pin="$(pin_of "$OLD_IP" "$pin_name")"
         new_pin="$(pin_of "$NEW_IP" "$pin_name")"
         if [[ -z "$new_pin" || "$old_pin" != "$new_pin" ]]; then
@@ -428,6 +430,20 @@ if [[ "$MIGRATING_LEGACY" != 1 && -s /opt/onyx-panel-package/install-panel.sh ]]
             echo "Fast path declined: installed component state is incomplete."
             SAME_PINS=0
         fi
+    fi
+    if [[ "$SAME_PINS" == 1 ]]; then
+        # Sparse fast packages intentionally omit AWG assets. Only skip them
+        # when all three installed binaries match the hashes pinned by the new
+        # release; otherwise take the full path and fetch those assets first.
+        for awg_pin_binary in AWG_GO_SHA256:/usr/local/bin/amneziawg-go AWG_BIN_SHA256:/usr/local/bin/awg AWG_QUICK_SHA256:/usr/local/bin/awg-quick; do
+            IFS=: read -r awg_pin awg_binary <<< "$awg_pin_binary"
+            awg_hash="$(pin_of "$NEW_IP" "$awg_pin")"
+            if [[ -z "$awg_hash" ]] || ! echo "$awg_hash $awg_binary" | sha256sum -c - >/dev/null 2>&1; then
+                echo "Fast path declined: $awg_binary differs from its pinned hash."
+                SAME_PINS=0
+                break
+            fi
+        done
     fi
     if [[ "$SAME_PINS" == 1 ]]; then
         # The relay is not rebuilt on the fast path — it must already answer.

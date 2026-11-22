@@ -225,13 +225,27 @@ if ! command -v ip >/dev/null 2>&1; then
     onyx_apt_update_once
     ui_run_with_progress "Установка системных пакетов" apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends iproute2
 fi
-if [[ ! -x /usr/local/bin/amneziawg-go ]] || ! /usr/local/bin/amneziawg-go --version 2>&1 | grep -Fq "$AWG_GO_VERSION"; then
+# Upstream's release tag and the version string printed by the binary can differ.
+# The pinned asset hash is authoritative: a matching installed binary needs no
+# replacement, and a fast panel-only update does not need the sparse AWG assets.
+AWG_GO_CURRENT=0
+if [[ -x /usr/local/bin/amneziawg-go ]] &&
+   echo "${AWG_GO_SHA256} /usr/local/bin/amneziawg-go" | sha256sum -c - >/dev/null 2>&1; then
+    AWG_GO_CURRENT=1
+fi
+if [[ "$AWG_GO_CURRENT" != 1 ]]; then
     [[ -s "$AWG_GO_BUNDLED" ]] && echo "${AWG_GO_SHA256}  ${AWG_GO_BUNDLED}" | sha256sum -c - >/dev/null ||
         die "Prebuilt AmneziaWG core binary is missing or damaged in assets/ (release bundle was not fetched). The installer no longer builds amneziawg-go on the server."
     install -o root -g root -m 0755 "$AWG_GO_BUNDLED" /usr/local/bin/amneziawg-go
     AWG_INSTALLED_NOW=1
 fi
-if [[ ! -x /usr/local/bin/awg ]] || ! /usr/local/bin/awg --version 2>&1 | grep -Fq "${AWG_TOOLS_VERSION#v}"; then
+AWG_TOOLS_CURRENT=0
+if [[ -x /usr/local/bin/awg && -x /usr/local/bin/awg-quick ]] &&
+   echo "${AWG_BIN_SHA256} /usr/local/bin/awg" | sha256sum -c - >/dev/null 2>&1 &&
+   echo "${AWG_QUICK_SHA256} /usr/local/bin/awg-quick" | sha256sum -c - >/dev/null 2>&1; then
+    AWG_TOOLS_CURRENT=1
+fi
+if [[ "$AWG_TOOLS_CURRENT" != 1 ]]; then
     [[ -s "$AWG_BIN_BUNDLED" && -s "$AWG_QUICK_BUNDLED" ]] &&
         echo "${AWG_BIN_SHA256}  ${AWG_BIN_BUNDLED}" | sha256sum -c - >/dev/null &&
         echo "${AWG_QUICK_SHA256}  ${AWG_QUICK_BUNDLED}" | sha256sum -c - >/dev/null ||
